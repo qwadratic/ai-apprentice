@@ -225,6 +225,11 @@ async function finishSession(s) {
   s.timer = null;
   s.recording = false;
   if (!s.gaveUp) await flush(s);
+  if (!s.conversationId) {
+    // The voice session never connected: there is no ElevenLabs conversation to store.
+    sys(`Session log on the server: ${s.id} (no conversation to store).`);
+    return;
+  }
   let line;
   try {
     const res = await fetch(sessionUrl(s, 'finish'), {
