@@ -18,6 +18,7 @@ Backlog.md is the task tracker: `backlog/`, one Markdown file per task. Install 
 - Directory ownership (from the plans in `backlog/docs/plans/`):
   - A: `packages/screen`, `apps/web/features/screen`, `apps/web/features/demo-workspace`, `apps/api/screen`, the repo skeleton and the root lockfile.
   - B: `packages/agent`, `apps/web/features/agent` (and the app shell), `apps/api/agent`, `fixtures/agent`.
+  - TASK-4 owner (@qwadratic, delegated to the agent on the exe.dev VM): `infra/` (Claude runner, placeholder API, systemd units, deploy scripts). The real API server entry stays in A's skeleton under `apps/api`; both streams call the runner at `RUNNER_URL`.
   - Changing the other stream's files needs its owner's OK. Contract changes are agreed first, then made in one small PR.
 - New shared dependencies: tell A, who owns the lockfile.
 
