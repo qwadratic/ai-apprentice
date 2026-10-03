@@ -1,0 +1,273 @@
+{
+  "schemaVersion": 1,
+  "scenario": "learn-customer07",
+  "description": "Synthetic Learn session. The expert opens order ORD-2041 for customer_07, attaches the template screenshot to the email, removes it and types the essential delivery data as text, then opens Preview. All data is invented. Timestamps (atMs) are offsets from sessionEpochMs.",
+  "sessionId": "sess-mock-learn-01",
+  "durationMs": 26000,
+  "evidence": [
+    {
+      "id": "ev-f-0001",
+      "kind": "frame",
+      "assetRef": "mock://frames/f-0001.png",
+      "startOffsetMs": 0,
+      "endOffsetMs": 1000
+    },
+    {
+      "id": "ev-f-0003",
+      "kind": "frame",
+      "assetRef": "mock://frames/f-0003.png",
+      "startOffsetMs": 5000,
+      "endOffsetMs": 6000
+    },
+    {
+      "id": "ev-f-0004",
+      "kind": "frame",
+      "assetRef": "mock://frames/f-0004.png",
+      "startOffsetMs": 8000,
+      "endOffsetMs": 9000
+    },
+    {
+      "id": "ev-f-0014",
+      "kind": "frame",
+      "assetRef": "mock://frames/f-0014.png",
+      "startOffsetMs": 25000,
+      "endOffsetMs": 26000
+    },
+    {
+      "id": "ev-clip-template-replaced",
+      "kind": "clip",
+      "assetRef": "mock://clips/template-replaced.webm",
+      "startOffsetMs": 8000,
+      "endOffsetMs": 20000
+    }
+  ],
+  "observations": [
+    {
+      "id": "obs-001",
+      "atMs": 0,
+      "kind": "order_view",
+      "frameId": "f-0001",
+      "entityRef": "customer_07",
+      "evidenceIds": [
+        "ev-f-0001"
+      ],
+      "facts": {
+        "customerRef": "customer_07",
+        "orderId": "ORD-2041",
+        "deliveryAddress": "14 Sample Lane, 1010 Exampletown",
+        "deliveryWindow": "2026-10-12 14:00-16:00"
+      }
+    },
+    {
+      "id": "obs-002",
+      "atMs": 2000,
+      "kind": "input_activity",
+      "frameId": "f-0002",
+      "entityRef": null,
+      "evidenceIds": [],
+      "facts": {
+        "surface": "order",
+        "typing": false,
+        "idleMs": 2000
+      }
+    },
+    {
+      "id": "obs-003",
+      "atMs": 5000,
+      "kind": "email_draft",
+      "frameId": "f-0003",
+      "entityRef": "customer_07",
+      "evidenceIds": [
+        "ev-f-0003"
+      ],
+      "facts": {
+        "recipientRef": "contact_customer_07",
+        "subject": "Delivery details for order ORD-2041",
+        "bodyText": "",
+        "attachments": [],
+        "previewState": "editing"
+      }
+    },
+    {
+      "id": "obs-004",
+      "atMs": 8000,
+      "kind": "email_draft",
+      "frameId": "f-0004",
+      "entityRef": "customer_07",
+      "evidenceIds": [
+        "ev-f-0004"
+      ],
+      "facts": {
+        "recipientRef": "contact_customer_07",
+        "subject": "Delivery details for order ORD-2041",
+        "bodyText": "",
+        "attachments": [
+          {
+            "kind": "image",
+            "ocrText": "Order ORD-2041 | Deliver to: 14 Sample Lane, 1010 Exampletown | Window: 2026-10-12 14:00-16:00"
+          }
+        ],
+        "previewState": "editing"
+      }
+    },
+    {
+      "id": "obs-005",
+      "atMs": 11000,
+      "kind": "email_draft",
+      "frameId": "f-0005",
+      "entityRef": "customer_07",
+      "evidenceIds": [
+        "ev-clip-template-replaced"
+      ],
+      "facts": {
+        "recipientRef": "contact_customer_07",
+        "subject": "Delivery details for order ORD-2041",
+        "bodyText": "",
+        "attachments": [],
+        "previewState": "editing"
+      }
+    },
+    {
+      "id": "obs-006",
+      "atMs": 13000,
+      "kind": "input_activity",
+      "frameId": "f-0006",
+      "entityRef": null,
+      "evidenceIds": [],
+      "facts": {
+        "surface": "email",
+        "typing": true,
+        "idleMs": 0
+      }
+    },
+    {
+      "id": "obs-007",
+      "atMs": 14000,
+      "kind": "email_draft",
+      "frameId": "f-0007",
+      "entityRef": "customer_07",
+      "evidenceIds": [
+        "ev-clip-template-replaced"
+      ],
+      "facts": {
+        "recipientRef": "contact_customer_07",
+        "subject": "Delivery details for order ORD-2041",
+        "bodyText": "Hello, here are the delivery details for order ORD-2041.\nAddress: 14 Sample Lane, 1010 Exampletown",
+        "attachments": [],
+        "previewState": "editing"
+      }
+    },
+    {
+      "id": "obs-008",
+      "atMs": 15000,
+      "kind": "input_activity",
+      "frameId": "f-0008",
+      "entityRef": null,
+      "evidenceIds": [],
+      "facts": {
+        "surface": "email",
+        "typing": true,
+        "idleMs": 0
+      }
+    },
+    {
+      "id": "obs-009",
+      "atMs": 17000,
+      "kind": "input_activity",
+      "frameId": "f-0009",
+      "entityRef": null,
+      "evidenceIds": [],
+      "facts": {
+        "surface": "email",
+        "typing": true,
+        "idleMs": 0
+      }
+    },
+    {
+      "id": "obs-010",
+      "atMs": 19000,
+      "kind": "input_activity",
+      "frameId": "f-0010",
+      "entityRef": null,
+      "evidenceIds": [],
+      "facts": {
+        "surface": "email",
+        "typing": true,
+        "idleMs": 0
+      }
+    },
+    {
+      "id": "obs-010b",
+      "atMs": 19500,
+      "kind": "input_activity",
+      "frameId": "f-0010b",
+      "entityRef": null,
+      "evidenceIds": [],
+      "facts": {
+        "surface": "email",
+        "typing": false,
+        "idleMs": 0
+      }
+    },
+    {
+      "id": "obs-011",
+      "atMs": 20000,
+      "kind": "email_draft",
+      "frameId": "f-0011",
+      "entityRef": "customer_07",
+      "evidenceIds": [
+        "ev-clip-template-replaced"
+      ],
+      "facts": {
+        "recipientRef": "contact_customer_07",
+        "subject": "Delivery details for order ORD-2041",
+        "bodyText": "Hello, here are the delivery details for order ORD-2041.\nAddress: 14 Sample Lane, 1010 Exampletown\nDelivery window: 2026-10-12 14:00-16:00",
+        "attachments": [],
+        "previewState": "editing"
+      }
+    },
+    {
+      "id": "obs-012",
+      "atMs": 22000,
+      "kind": "input_activity",
+      "frameId": "f-0012",
+      "entityRef": null,
+      "evidenceIds": [],
+      "facts": {
+        "surface": "email",
+        "typing": false,
+        "idleMs": 2000
+      }
+    },
+    {
+      "id": "obs-013",
+      "atMs": 24000,
+      "kind": "input_activity",
+      "frameId": "f-0013",
+      "entityRef": null,
+      "evidenceIds": [],
+      "facts": {
+        "surface": "email",
+        "typing": false,
+        "idleMs": 4000
+      }
+    },
+    {
+      "id": "obs-014",
+      "atMs": 25000,
+      "kind": "email_draft",
+      "frameId": "f-0014",
+      "entityRef": "customer_07",
+      "evidenceIds": [
+        "ev-f-0014"
+      ],
+      "facts": {
+        "recipientRef": "contact_customer_07",
+        "subject": "Delivery details for order ORD-2041",
+        "bodyText": "Hello, here are the delivery details for order ORD-2041.\nAddress: 14 Sample Lane, 1010 Exampletown\nDelivery window: 2026-10-12 14:00-16:00",
+        "attachments": [],
+        "previewState": "preview"
+      }
+    }
+  ]
+}

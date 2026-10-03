@@ -1,0 +1,32 @@
+name: stream-b-checks
+
+on:
+  push:
+    paths:
+      - "packages/agent/**"
+      - "fixtures/agent/**"
+      - "apps/api/agent/**"
+      - ".github/workflows/stream-b-checks.yml"
+  pull_request:
+    paths:
+      - "packages/agent/**"
+      - "fixtures/agent/**"
+      - "apps/api/agent/**"
+      - ".github/workflows/stream-b-checks.yml"
+
+jobs:
+  agent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Agent package tests
+        run: cd packages/agent && npm test
+      - name: Syntax-check ElevenLabs scripts
+        run: |
+          for f in apps/api/agent/elevenlabs/*.mjs; do
+            [ -e "$f" ] && node --check "$f"
+          done
+          true
