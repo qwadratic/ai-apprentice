@@ -1,0 +1,154 @@
+[
+  {
+    "id": "flaky-e2e",
+    "title": "Red e2e check, merge anyway",
+    "kind": "why",
+    "cues": [
+      "e2e-checkout"
+    ],
+    "requires": [
+      "Failing"
+    ],
+    "action_words": [
+      "Merge"
+    ],
+    "question": "The e2e check is red, yet you are about to merge. What tells you this failure does not matter?",
+    "warning": "A check is red. Before merging, find out why: a known flaky test, or something this diff actually caused?",
+    "why": "Known flaky test: e2e-checkout times out at random and fails on main too, and this diff only touches pagination. Red is also fine when main is already red, an external service is down, a fork PR has no secrets, or the check is not required.",
+    "source": "seed"
+  },
+  {
+    "id": "postinstall-dependency",
+    "title": "Green PR adds a postinstall script",
+    "kind": "guardrail",
+    "cues": [
+      "postinstall"
+    ],
+    "requires": [
+      "package.json"
+    ],
+    "action_words": [
+      "Merge"
+    ],
+    "question": "Everything is green but you are not merging. What in this diff worries you?",
+    "warning": "Stop. This adds a dependency with a postinstall script that runs code on every install. Green checks do not test that. Ask why first.",
+    "why": "A postinstall script runs arbitrary code on every contributor's and user's machine at install time, and CI being green says nothing about it. A new dependency with an install script needs a reason, a licence check and a second maintainer.",
+    "source": "seed"
+  },
+  {
+    "id": "green-read-the-diff",
+    "title": "Green and clean: what you still check",
+    "kind": "why",
+    "cues": [
+      "regression test"
+    ],
+    "action_words": [
+      "Merge"
+    ],
+    "question": "Everything is green and you merged fast. What did you check besides the green ticks?",
+    "warning": "Green is not enough. Read the test diff: does the new test fail without the fix, and is the source change small?",
+    "why": "I read the test diff first: a regression test that fails without the fix, a small source change, no new dependency, no workflow edit. Green alone only proves that the tests that exist still pass.",
+    "source": "seed"
+  },
+  {
+    "id": "weakened-test",
+    "title": "Green PR loosens or skips tests",
+    "kind": "guardrail",
+    "cues": [
+      "toBeTruthy()",
+      "test.skip("
+    ],
+    "action_words": [
+      "Merge"
+    ],
+    "question": "A test changed in this PR next to the code. How do you review edited tests?",
+    "warning": "Stop before Merge. The tests were loosened: toBeTruthy() accepts any value and a test is skipped. Green means nothing here. Ask for the originals back.",
+    "why": "A PR that makes code faster and tests weaker is how regressions merge on green. toBeTruthy accepts any value and a skipped test checks nothing. Edited assertions need a stated reason, otherwise I ask for the originals back.",
+    "source": "seed"
+  },
+  {
+    "id": "fork-no-secrets",
+    "title": "Red integration tests on a fork PR",
+    "kind": "why",
+    "cues": [
+      "DEPLOY_TOKEN is not set"
+    ],
+    "action_words": [
+      "Merge"
+    ],
+    "question": "Integration tests fail on this fork PR. Why is that not blocking you?",
+    "warning": "Red on a fork PR can be expected: forks get no secrets. Check which checks failed, and why, before treating it as a blocker.",
+    "why": "Fork PRs run without repository secrets, so integration tests that need a token fail by design. I read the diff, look at the checks that can run, and merge or re-run on a trusted branch.",
+    "source": "seed"
+  },
+  {
+    "id": "workflow-edit",
+    "title": "PR edits CI workflows or uses pull_request_target",
+    "kind": "guardrail",
+    "cues": [
+      ".github/workflows",
+      "pull_request_target"
+    ],
+    "action_words": [
+      "Merge"
+    ],
+    "question": "This PR touches the CI workflow. How do you review CI changes differently from code?",
+    "warning": "Stop. This edits a CI workflow and uses pull_request_target, which runs with secrets. Green does not make it safe. Get a second maintainer to review.",
+    "why": "pull_request_target runs with write access and secrets while handling code from the PR. A workflow edit can leak tokens or run untrusted code, and CI cannot test itself. I read these line by line and a second maintainer approves.",
+    "source": "seed"
+  },
+  {
+    "id": "security-hotfix",
+    "title": "Urgent security fix with a red check",
+    "kind": "why",
+    "cues": [
+      "path traversal"
+    ],
+    "requires": [
+      "Failing"
+    ],
+    "action_words": [
+      "Merge"
+    ],
+    "question": "A security fix with a red check, and you merge anyway. What is the reasoning?",
+    "warning": "Red check on a security fix: confirm the failure is unrelated, merge only with a maintainer's explicit say-so, then follow up on the failing job.",
+    "why": "Urgent security hotfix: the failing job is a lost runner on Windows, not the fix. Shipping the fix beats waiting for CI. I merge, then re-run the job and open an issue to chase the red one.",
+    "source": "seed"
+  },
+  {
+    "id": "cla-typo-fix",
+    "title": "CLA pending on a typo fix",
+    "kind": "why",
+    "cues": [
+      "license/cla"
+    ],
+    "requires": [
+      "Pending"
+    ],
+    "action_words": [
+      "Merge"
+    ],
+    "question": "The CLA bot is pending on this one-character fix. Why is that fine here?",
+    "warning": "The CLA check is pending. Only a trivial typo fix may skip it. For real code changes, wait until the contributor has signed.",
+    "why": "Our CLA bot exempts trivial changes such as a typo fix. For anything bigger I wait for the signature before merging.",
+    "source": "seed"
+  },
+  {
+    "id": "snapshot-intentional",
+    "title": "Snapshot tests red because the change is intended",
+    "kind": "why",
+    "cues": [
+      "__snapshots__"
+    ],
+    "requires": [
+      "Failing"
+    ],
+    "action_words": [
+      "Merge"
+    ],
+    "question": "Snapshot tests are red. How do you know this change is intended?",
+    "warning": "Snapshot check is red: merge only if the snapshot diff matches the intended change and nothing else moved.",
+    "why": "The PR changes the focus ring on purpose and regenerates the snapshots. I check that the snapshot diff covers only the focus ring. If so, the red is the old snapshots, not a bug.",
+    "source": "seed"
+  }
+]

@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sandbox: accounts payable</title>
+<style>
+:root{--fg:#1f2328;--muted:#4b5563;--line:#c9d1d9;--bg:#ffffff;--soft:#f6f8fa;--green:#116329;--red:#b3261e;--amber:#8a5a00;--blue:#0550ae}
+*{box-sizing:border-box}
+html{font-size:20px}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;line-height:1.4}
+[hidden]{display:none!important}
+#bar{background:#24292f;color:#d0d7de;padding:6px 20px;font-size:15px;display:flex;gap:12px;align-items:center}
+#bar select{font-size:15px;padding:2px 6px}
+#bar .hint{margin-left:auto;opacity:.7}
+.wrap{max-width:1180px;margin:0 auto;padding:12px 24px 80px}
+h1{font-size:30px;margin:10px 0 6px}
+h2{font-size:22px;margin:0 0 8px}
+code,pre{font-family:ui-monospace,Menlo,Consolas,monospace}
+code{background:var(--soft);padding:1px 6px;border-radius:4px}
+.box{border:2px solid var(--line);border-radius:8px;padding:12px 16px;margin:12px 0;background:#fff}
+.row{display:flex;justify-content:space-between;gap:16px;padding:6px 0;border-top:1px solid #e5e7eb}
+.row:first-of-type{border-top:0}
+.pass{color:var(--green);font-weight:700}
+.fail{color:var(--red);font-weight:700}
+.pend{color:var(--amber);font-weight:700}
+.tag{font-size:15px;border:1px solid var(--line);border-radius:12px;padding:0 8px;color:var(--muted);margin-left:8px}
+button{font-size:22px;padding:8px 22px;border-radius:8px;border:2px solid var(--line);background:var(--soft);color:var(--fg);cursor:pointer;font-weight:600}
+button.primary{background:#1a7f37;border-color:#1a7f37;color:#fff}
+button.danger{background:#fff;border-color:var(--red);color:var(--red)}
+button.warn{background:#fff;border-color:var(--amber);color:var(--amber)}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#24292f;color:#fff;padding:12px 24px;border-radius:10px;font-size:20px;display:none}
+a{color:var(--blue)}
+.muted{color:var(--muted)}
+
+.erp-head{background:#0b3d66;color:#fff;padding:12px 24px;font-size:23px;display:flex;gap:30px;align-items:baseline}
+.erp-head .sub{font-size:17px;opacity:.85}
+table{border-collapse:collapse;width:100%;font-size:21px}
+th,td{border-bottom:1px solid #d6dbe1;padding:10px 12px;text-align:left}
+th{background:var(--soft)}
+.grid{display:grid;grid-template-columns:230px 1fr;gap:0;font-size:22px}
+.grid>div{padding:9px 12px;border-bottom:1px solid #e5e7eb}
+.grid .k{color:var(--muted)}
+select,input[type=text]{font-size:22px;padding:5px 10px;border:2px solid #7a8794;border-radius:6px;background:#fff}
+.alert{background:#fff4ce;border:2px solid #d4a72c;padding:8px 14px;border-radius:8px;font-weight:700;margin:10px 0}
+.actions{display:flex;gap:16px;margin-top:16px;flex-wrap:wrap}
+</style></head><body>
+<div id="bar"><span>SANDBOX demo case:</span><select id="caseSel"><option value="list">Invoice list</option><option value="e1">Expert 1</option><option value="e2">Expert 2</option><option value="e3">Expert 3</option><option value="nv">Novice</option><option value="x1">Extra 1</option></select><span class="hint">keys 1-6 or URL #id</span></div>
+<div class="erp-head"><b>Northfield ERP</b><span>Accounts payable</span><span class="sub">Period 12 &middot; Month-end close in 2 days</span></div>
+<div class="wrap">
+<section class="case" id="case-list" hidden>
+<h1>Open invoices</h1>
+<div class="muted">Period 12 &middot; 60 open &middot; showing the 3 you were assigned today</div>
+<div class="box"><table><tr><th>Invoice</th><th>Supplier</th><th>Amount</th><th>Status</th></tr>
+<tr><td><a href="#e1">4471</a></td><td>Kessler Anlagentechnik GmbH</td><td>6,480.00 EUR</td><td>Open</td></tr>
+<tr><td><a href="#e2">4468</a></td><td>Vogel Industrieservice GmbH</td><td>1,240.00 EUR</td><td>Open</td></tr>
+<tr><td><a href="#e3">4473</a></td><td>Brno Components s.r.o.</td><td>3,950.00 EUR</td><td>Open</td></tr>
+</table></div>
+<p class="muted">Click an invoice number to open it.</p>
+</section>
+<section class="case" id="case-e1" hidden>
+<h1>Invoice detail</h1>
+<div class="muted">Accounts payable &rsaquo; Open invoices &rsaquo; <a href="#list">back to list</a></div>
+<h1 style="margin-top:6px">Invoice 4471 <span class="tag">Open, needs coding</span></h1>
+
+<div class="box"><div class="grid">
+<div class="k">Supplier</div><div><b>Kessler Anlagentechnik GmbH</b></div>
+<div class="k">Company code</div><div>DE01 Stuttgart plant</div>
+<div class="k">Invoice date</div><div>2 Dec</div>
+<div class="k">Description</div><div>Hydraulic press tool set</div>
+<div class="k">Category</div><div>Equipment</div>
+<div class="k">Amount</div><div><b>6,480.00 EUR</b></div>
+<div class="k">Cost center</div><div><select id="cc-e1"><option value="4711" selected>4711 Opex</option><option value="0400">0400 Capex</option></select></div>
+<div class="k">Asset no.</div><div><input type="text" size="18" value=""></div>
+</div>
+<div class="actions">
+<button class="warn" data-toast="Sandbox: Hold clicked. Invoice 4471 is on hold.">Hold</button>
+<button data-toast="Sandbox: Send for approval clicked. Invoice 4471 sent.">Send for approval</button>
+<button class="primary" data-toast="Sandbox: Post clicked. Invoice 4471 is posted.">Post</button>
+</div></div>
+</section>
+<section class="case" id="case-e2" hidden>
+<h1>Invoice detail</h1>
+<div class="muted">Accounts payable &rsaquo; Open invoices &rsaquo; <a href="#list">back to list</a></div>
+<h1 style="margin-top:6px">Invoice 4468 <span class="tag">Open, needs coding</span></h1>
+
+<div class="box"><div class="grid">
+<div class="k">Supplier</div><div><b>Vogel Industrieservice GmbH</b></div>
+<div class="k">Company code</div><div>DE01 Stuttgart plant</div>
+<div class="k">Invoice date</div><div>12 December</div>
+<div class="k">Description</div><div>Annual maintenance, assembly line 2</div>
+<div class="k">Category</div><div>Maintenance service</div>
+<div class="k">Amount</div><div><b>1,240.00 EUR</b></div>
+<div class="k">Cost center</div><div><select id="cc-e2"><option value="4711" selected>4711 Opex</option><option value="0400">0400 Capex</option></select></div>
+<div class="k">Asset no.</div><div><input type="text" size="18" value=""></div>
+</div>
+<div class="actions">
+<button class="warn" data-toast="Sandbox: Hold clicked. Invoice 4468 is on hold.">Hold</button>
+<button data-toast="Sandbox: Send for approval clicked. Invoice 4468 sent.">Send for approval</button>
+<button class="primary" data-toast="Sandbox: Post clicked. Invoice 4468 is posted.">Post</button>
+</div></div>
+</section>
+<section class="case" id="case-e3" hidden>
+<h1>Invoice detail</h1>
+<div class="muted">Accounts payable &rsaquo; Open invoices &rsaquo; <a href="#list">back to list</a></div>
+<h1 style="margin-top:6px">Invoice 4473 <span class="tag">Open, needs coding</span></h1>
+
+<div class="box"><div class="grid">
+<div class="k">Supplier</div><div><b>Brno Components s.r.o.</b></div>
+<div class="k">Company code</div><div>CZ01 Czech subsidiary</div>
+<div class="k">Invoice date</div><div>3 Dec</div>
+<div class="k">Description</div><div>Gearbox housings, batch 14</div>
+<div class="k">Category</div><div>Components</div>
+<div class="k">Amount</div><div><b>3,950.00 EUR</b></div>
+<div class="k">Cost center</div><div><select id="cc-e3"><option value="4711" selected>4711 Opex</option><option value="0400">0400 Capex</option></select></div>
+<div class="k">Asset no.</div><div><input type="text" size="18" value=""></div>
+</div>
+<div class="actions">
+<button class="warn" data-toast="Sandbox: Hold clicked. Invoice 4473 is on hold.">Hold</button>
+<button data-toast="Sandbox: Send for approval clicked. Invoice 4473 sent.">Send for approval</button>
+<button class="primary" data-toast="Sandbox: Post clicked. Invoice 4473 is posted.">Post</button>
+</div></div>
+</section>
+<section class="case" id="case-nv" hidden>
+<h1>Invoice detail</h1>
+<div class="muted">Accounts payable &rsaquo; Open invoices &rsaquo; <a href="#list">back to list</a></div>
+<h1 style="margin-top:6px">Invoice 4479 <span class="tag">Open, needs coding</span></h1>
+
+<div class="box"><div class="grid">
+<div class="k">Supplier</div><div><b>Hartmann Anlagenbau GmbH</b></div>
+<div class="k">Company code</div><div>DE01 Stuttgart plant</div>
+<div class="k">Invoice date</div><div>4 Dec</div>
+<div class="k">Description</div><div>Hydraulic feed unit for press 3</div>
+<div class="k">Category</div><div>Equipment</div>
+<div class="k">Amount</div><div><b>7,200.00 EUR</b></div>
+<div class="k">Cost center</div><div><select id="cc-nv"><option value="4711" selected>4711 Opex</option><option value="0400">0400 Capex</option></select></div>
+<div class="k">Asset no.</div><div><input type="text" size="18" value=""></div>
+</div>
+<div class="actions">
+<button class="warn" data-toast="Sandbox: Hold clicked. Invoice 4479 is on hold.">Hold</button>
+<button data-toast="Sandbox: Send for approval clicked. Invoice 4479 sent.">Send for approval</button>
+<button class="primary" data-toast="Sandbox: Post clicked. Invoice 4479 is posted.">Post</button>
+</div></div>
+</section>
+<section class="case" id="case-x1" hidden>
+<h1>Invoice detail</h1>
+<div class="muted">Accounts payable &rsaquo; Open invoices &rsaquo; <a href="#list">back to list</a></div>
+<h1 style="margin-top:6px">Invoice 4480 <span class="tag">Open, needs coding</span></h1>
+<div class="alert">Supplier status: NOT IN VENDOR MASTER</div>
+<div class="box"><div class="grid">
+<div class="k">Supplier</div><div><b>Alder Maschinenteile GmbH</b></div>
+<div class="k">Company code</div><div>DE01 Stuttgart plant</div>
+<div class="k">Invoice date</div><div>4 Dec</div>
+<div class="k">Description</div><div>Spare parts, mixed</div>
+<div class="k">Category</div><div>Spare parts</div>
+<div class="k">Amount</div><div><b>2,350.00 EUR</b></div>
+<div class="k">Cost center</div><div><select id="cc-x1"><option value="4711" selected>4711 Opex</option><option value="0400">0400 Capex</option></select></div>
+<div class="k">Asset no.</div><div><input type="text" size="18" value=""></div>
+</div>
+<div class="actions">
+<button class="warn" data-toast="Sandbox: Hold clicked. Invoice 4480 is on hold.">Hold</button>
+<button data-toast="Sandbox: Send for approval clicked. Invoice 4480 sent.">Send for approval</button>
+<button class="primary" data-toast="Sandbox: Post clicked. Invoice 4480 is posted.">Post</button>
+</div></div>
+</section>
+</div>
+<div id="toast"></div>
+<script>
+(function(){
+  var DEFAULT="list", OPTS=["list", "e1", "e2", "e3", "nv", "x1"];
+  var sel=document.getElementById('caseSel');
+  function show(id){
+    var ok=false;
+    document.querySelectorAll('.case').forEach(function(e){var m=(e.id==='case-'+id);e.hidden=!m;if(m)ok=true;});
+    if(!ok){id=DEFAULT;document.getElementById('case-'+id).hidden=false;}
+    sel.value=id;window.scrollTo(0,0);
+  }
+  sel.addEventListener('change',function(){location.hash=sel.value;});
+  window.addEventListener('hashchange',function(){show(location.hash.slice(1));});
+  document.addEventListener('keydown',function(e){
+    if(e.target.tagName==='SELECT'||e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA')return;
+    var i=parseInt(e.key,10);if(i>=1&&i<=OPTS.length){location.hash=OPTS[i-1];}
+  });
+  var t=document.getElementById('toast'),tm;
+  function toast(m){t.textContent=m;t.style.display='block';clearTimeout(tm);tm=setTimeout(function(){t.style.display='none';},2600);}
+  document.querySelectorAll('[data-toast]').forEach(function(b){b.addEventListener('click',function(){toast(b.getAttribute('data-toast'));});});
+  show(location.hash.slice(1)||DEFAULT);
+})();
+</script>
+</body></html>

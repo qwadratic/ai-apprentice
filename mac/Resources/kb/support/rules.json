@@ -1,0 +1,97 @@
+[
+  {
+    "id": "window-closed-incident",
+    "title": "Outside the 30-day window, but an incident is open",
+    "kind": "why",
+    "cues": [
+      "Refund window: closed"
+    ],
+    "action_words": [
+      "Refund"
+    ],
+    "question": "The window has closed, yet you refund. What changes the answer for this customer?",
+    "warning": "The 30-day window has closed. Refund only if an open incident hit this customer, otherwise ask your lead.",
+    "why": "An open incident affects this customer's region. When our outage hit them, the 30-day window does not apply and the refund is on us. (Example policy: window 30 days.)",
+    "source": "seed"
+  },
+  {
+    "id": "chargeback-no-refund",
+    "title": "Chargeback already filed: do not refund",
+    "kind": "guardrail",
+    "cues": [
+      "Chargeback filed"
+    ],
+    "action_words": [
+      "Refund"
+    ],
+    "question": "A chargeback is already filed and you are not refunding. What goes wrong if you do?",
+    "warning": "Stop. A chargeback is already filed. Refunding now pays the customer twice. Leave a note and let the dispute run.",
+    "why": "A chargeback is already filed. If I refund as well, the customer is paid twice and we lose the money twice. I leave a note and let the dispute run.",
+    "source": "seed"
+  },
+  {
+    "id": "enterprise-account-manager",
+    "title": "Enterprise account: loop in the account manager",
+    "kind": "why",
+    "cues": [
+      "Enterprise"
+    ],
+    "action_words": [
+      "Refund",
+      "Escalate"
+    ],
+    "question": "You escalate instead of refunding. Why does this customer go to someone else?",
+    "warning": "Enterprise account. Loop in the account manager before any refund or exception. Use Escalate, not Refund.",
+    "why": "Enterprise accounts have an account manager who owns the relationship and the contract terms. I loop them in before any refund or exception.",
+    "source": "seed"
+  },
+  {
+    "id": "review-threat-not-reason",
+    "title": "A threatened public review is not a reason",
+    "kind": "guardrail",
+    "cues": [
+      "public review"
+    ],
+    "action_words": [
+      "Refund"
+    ],
+    "question": "The customer threatens a public review. Does that change your decision?",
+    "warning": "A threatened public review is not a reason to refund by itself. Decide by policy and facts, not by pressure.",
+    "why": "A threatened review is not a reason by itself. We decide on policy and facts. Pressure alone never earns a refund or an exception.",
+    "source": "seed"
+  },
+  {
+    "id": "different-card-never",
+    "title": "Never refund to a different card or account",
+    "kind": "guardrail",
+    "cues": [
+      "different card"
+    ],
+    "action_words": [
+      "Refund"
+    ],
+    "question": "The customer wants the money on a different card. What is the rule here?",
+    "warning": "Never refund to a different card or account than the original payment. It goes back to the original method, even if the card expired.",
+    "why": "Refunds go back to the original payment method only. A refund to a different card or account is a common fraud pattern.",
+    "source": "seed"
+  },
+  {
+    "id": "over-limit-second-approver",
+    "title": "Over the agent limit: second approver",
+    "kind": "guardrail",
+    "cues": [
+      "agent refund limit"
+    ],
+    "requires": [
+      "Refund amount"
+    ],
+    "action_words": [
+      "Refund",
+      "Escalate"
+    ],
+    "question": "This refund is over your limit. Who has to approve it, and why?",
+    "warning": "Over the example agent refund limit of 250 EUR. Do not press Refund. Escalate for a second approver.",
+    "why": "Example policy: an agent refunds up to 250 EUR alone. Above that a second approver signs off, so one person never moves a large sum alone.",
+    "source": "seed"
+  }
+]

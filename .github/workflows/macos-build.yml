@@ -1,0 +1,38 @@
+name: macos-build
+
+on:
+  push:
+    paths:
+      - "mac/**"
+      - ".github/workflows/macos-build.yml"
+  pull_request:
+    paths:
+      - "mac/**"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    defaults:
+      run:
+        working-directory: mac
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain versions
+        run: |
+          swift --version
+          xcodebuild -version
+
+      - name: Build Apprentice.app (release, ad-hoc signed)
+        run: ./scripts/build-app.sh
+
+      - name: Zip the app
+        run: ditto -c -k --keepParent build/Apprentice.app build/Apprentice-macos.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Apprentice-macos
+          path: mac/build/Apprentice-macos.zip
+          if-no-files-found: error

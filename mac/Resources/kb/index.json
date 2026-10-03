@@ -1,0 +1,17 @@
+[
+  {
+    "id": "programmer",
+    "name": "Maintainer",
+    "title": "Open-source maintainer reviewing pull requests"
+  },
+  {
+    "id": "accountant",
+    "name": "Accounts payable clerk",
+    "title": "Accounts payable clerk coding and posting supplier invoices"
+  },
+  {
+    "id": "support",
+    "name": "Support agent",
+    "title": "Customer support agent deciding refunds and exceptions"
+  }
+]

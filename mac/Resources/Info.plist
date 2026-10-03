@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>Apprentice</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.hacknation.apprentice</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Apprentice</string>
+	<key>CFBundleDisplayName</key>
+	<string>Apprentice</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>14.0</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>NSScreenCaptureUsageDescription</key>
+	<string>Apprentice looks at your screen to notice what changes while you work, so it can ask you why at a natural pause. Text is read on this Mac.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Apprentice listens only while you hold Control+Option, so you can answer its question out loud.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Apprentice turns your spoken answer into text on this Mac and saves it to its knowledge base.</string>
+</dict>
+</plist>

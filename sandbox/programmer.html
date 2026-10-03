@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sandbox: pull requests</title>
+<style>
+:root{--fg:#1f2328;--muted:#4b5563;--line:#c9d1d9;--bg:#ffffff;--soft:#f6f8fa;--green:#116329;--red:#b3261e;--amber:#8a5a00;--blue:#0550ae}
+*{box-sizing:border-box}
+html{font-size:20px}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;line-height:1.4}
+[hidden]{display:none!important}
+#bar{background:#24292f;color:#d0d7de;padding:6px 20px;font-size:15px;display:flex;gap:12px;align-items:center}
+#bar select{font-size:15px;padding:2px 6px}
+#bar .hint{margin-left:auto;opacity:.7}
+.wrap{max-width:1180px;margin:0 auto;padding:12px 24px 80px}
+h1{font-size:30px;margin:10px 0 6px}
+h2{font-size:22px;margin:0 0 8px}
+code,pre{font-family:ui-monospace,Menlo,Consolas,monospace}
+code{background:var(--soft);padding:1px 6px;border-radius:4px}
+.box{border:2px solid var(--line);border-radius:8px;padding:12px 16px;margin:12px 0;background:#fff}
+.row{display:flex;justify-content:space-between;gap:16px;padding:6px 0;border-top:1px solid #e5e7eb}
+.row:first-of-type{border-top:0}
+.pass{color:var(--green);font-weight:700}
+.fail{color:var(--red);font-weight:700}
+.pend{color:var(--amber);font-weight:700}
+.tag{font-size:15px;border:1px solid var(--line);border-radius:12px;padding:0 8px;color:var(--muted);margin-left:8px}
+button{font-size:22px;padding:8px 22px;border-radius:8px;border:2px solid var(--line);background:var(--soft);color:var(--fg);cursor:pointer;font-weight:600}
+button.primary{background:#1a7f37;border-color:#1a7f37;color:#fff}
+button.danger{background:#fff;border-color:var(--red);color:var(--red)}
+button.warn{background:#fff;border-color:var(--amber);color:var(--amber)}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#24292f;color:#fff;padding:12px 24px;border-radius:10px;font-size:20px;display:none}
+a{color:var(--blue)}
+.muted{color:var(--muted)}
+
+.gh-head{background:#f6f8fa;border-bottom:2px solid var(--line);padding:14px 24px;font-size:24px}
+.gh-head b{font-weight:700}
+.gh-tabs{display:flex;gap:22px;margin-top:8px;font-size:18px;color:var(--muted)}
+.gh-tabs .on{color:var(--fg);font-weight:700;border-bottom:3px solid #fd8c73}
+.badge{display:inline-block;padding:2px 12px;border-radius:14px;color:#fff;font-size:17px;font-weight:700;background:#1a7f37}
+.meta{color:var(--muted);margin-bottom:8px}
+.desc{font-size:21px;margin:8px 0}
+.num{color:var(--muted);font-weight:400}
+.status{display:flex;justify-content:space-between;gap:16px;padding:7px 0;border-top:1px solid #e5e7eb}
+.status:first-of-type{border-top:0}
+.sumline{font-weight:700;margin-bottom:6px}
+.merge-line{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+pre.diff{background:#0d1117;color:#e6edf3;padding:10px 14px;border-radius:6px;font-size:17px;line-height:1.35;overflow:auto;margin:8px 0 0}
+pre.diff .a{color:#7ee787}
+pre.diff .d{color:#ff9492}
+pre.diff .h{color:#79c0ff}
+.pr-row{display:flex;justify-content:space-between;align-items:center;border-top:1px solid #e5e7eb;padding:10px 4px;font-size:21px}
+.pr-row:first-of-type{border-top:0}
+.pr-row a{font-weight:700;text-decoration:none;color:var(--fg)}
+.fileline{display:flex;justify-content:space-between;padding:4px 0;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:18px}
+</style></head><body>
+<div id="bar"><span>SANDBOX demo case:</span><select id="caseSel"><option value="list">PR list</option><option value="e1">Expert 1</option><option value="e2">Expert 2</option><option value="e3">Expert 3</option><option value="nv">Novice</option><option value="x1">Extra 1</option><option value="x2">Extra 2</option><option value="x3">Extra 3</option><option value="x4">Extra 4</option><option value="x5">Extra 5</option></select><span class="hint">keys 1-10 or URL #id</span></div>
+<div class="gh-head"><b>openlane/pagekit</b> <span class="tag">Public</span>
+<div class="gh-tabs"><span>Code</span><span>Issues 14</span><span class="on">Pull requests 4</span><span>Actions</span><span>Security</span></div></div>
+<div class="wrap">
+<section class="case" id="case-list" hidden>
+<h1>Pull requests</h1>
+<div class="box">
+<div class="pr-row"><span><a href="#e1">Fix off-by-one in pagination helper</a> <span class="num">#2417 by mira-k</span></span><span class="fail">Checks: 1 failing</span></div>
+<div class="pr-row"><span><a href="#e2">Add fast cache-key hashing</a> <span class="num">#2421 by dev-sprint</span></span><span class="pass">Checks: all passing</span></div>
+<div class="pr-row"><span><a href="#e3">Fix ISO week parsing for late December dates</a> <span class="num">#2425 by tomasz-b</span></span><span class="pass">Checks: all passing</span></div>
+<div class="pr-row"><span><a href="#nv">Speed up price formatter</a> <span class="num">#2433 by chris-ok</span></span><span class="pass">Checks: all passing</span></div>
+</div>
+<p class="muted">4 open pull requests. Click a title to open it.</p>
+</section>
+<section class="case" id="case-e1" hidden>
+<h1>Fix off-by-one in pagination helper <span class="num">#2417</span></h1>
+<div class="meta"><span class="badge">Open</span> <b>mira-k</b> wants to merge 1 commit into <code>main</code> from <code>mira-k:fix-pagination</code></div>
+<p class="desc">The last page returned one item too few when the total was an exact multiple of the page size. Adds a unit test for the exact-multiple case.</p>
+<div class="box"><h2>Checks</h2><div class="sumline">1 failing and 3 successful checks</div><div class="status"><span><b>unit (node 18, 20, 22)</b><span class="tag">Required</span> <span class="muted">2m 03s</span></span><span class="pass">Passing</span></div><div class="status"><span><b>lint</b><span class="tag">Required</span> <span class="muted">41s</span></span><span class="pass">Passing</span></div><div class="status"><span><b>docs-build</b> <span class="muted">1m 10s</span></span><span class="pass">Passing</span></div><div class="status"><span><b>e2e-checkout</b> <span class="muted">4m 12s  Error: Timeout 30000ms exceeded waiting for selector &quot;#pay-now&quot;</span></span><span class="fail">Failing</span></div></div>
+<div class="box"><div class="merge-line"><span>Merging is allowed: all required checks have passed.</span>
+<button class="primary" data-toast="Sandbox: Merge pull request clicked. Nothing is merged.">Merge pull request</button>
+<button class="danger" data-toast="Sandbox: Request changes clicked.">Request changes</button></div></div>
+<div class="box"><h2>Files changed: 2 <span class="muted">(+17 -2)</span></h2><div class="fileline"><span>src/paginate.js</span><span><span class="pass">+3</span> <span class="fail">-2</span></span></div><div class="fileline"><span>test/paginate.test.js</span><span><span class="pass">+14</span> <span class="fail">-0</span></span></div><pre class="diff"><span class="h">@@ src/paginate.js</span>
+<span class="d">-  const pages = Math.floor(total / size);</span>
+<span class="a">+  const pages = Math.ceil(total / size);</span></pre></div>
+</section>
+<section class="case" id="case-e2" hidden>
+<h1>Add fast cache-key hashing <span class="num">#2421</span></h1>
+<div class="meta"><span class="badge">Open</span> <b>dev-sprint</b> wants to merge 1 commit into <code>main</code> from <code>dev-sprint:fast-hash</code></div>
+<p class="desc">Switches cache keys to fasthash-native for roughly 3x faster hashing. Everything is green.</p>
+<div class="box"><h2>Checks</h2><div class="sumline">All checks have passed: 4 successful checks</div><div class="status"><span><b>unit (node 18, 20, 22)</b><span class="tag">Required</span> <span class="muted">2m 03s</span></span><span class="pass">Passing</span></div><div class="status"><span><b>lint</b><span class="tag">Required</span> <span class="muted">41s</span></span><span class="pass">Passing</span></div><div class="status"><span><b>docs-build</b> <span class="muted">1m 10s</span></span><span class="pass">Passing</span></div><div class="status"><span><b>e2e-checkout</b> <span class="muted">4m 02s</span></span><span class="pass">Passing</span></div></div>
+<div class="box"><div class="merge-line"><span>This branch has no conflicts with the base branch. Merging can be performed automatically.</span>
+<button class="primary" data-toast="Sandbox: Merge pull request clicked. Nothing is merged.">Merge pull request</button>
+<button class="danger" data-toast="Sandbox: Request changes clicked.">Request changes</button></div></div>
+<div class="box"><h2>Files changed: 4 <span class="muted">(+111 -7)</span></h2><div class="fileline"><span>package.json</span><span><span class="pass">+3</span> <span class="fail">-1</span></span></div><div class="fileline"><span>pnpm-lock.yaml</span><span><span class="pass">+41</span> <span class="fail">-0</span></span></div><div class="fileline"><span>scripts/fetch-binary.js</span><span><span class="pass">+58</span> <span class="fail">-0</span></span></div><div class="fileline"><span>src/cache.js</span><span><span class="pass">+9</span> <span class="fail">-6</span></span></div><pre class="diff"><span class="h">@@ package.json</span>
+<span class="">   &quot;dependencies&quot;: {</span>
+<span class="a">+    &quot;fasthash-native&quot;: &quot;^1.0.3&quot;,</span>
+<span class="">   },</span>
+<span class="a">+  &quot;scripts&quot;: { &quot;postinstall&quot;: &quot;node scripts/fetch-binary.js&quot; },</span>
+<span class="h">@@ pnpm-lock.yaml</span>
+<span class="a">+  fasthash-native@1.0.3: hasInstallScript: true</span></pre></div>
+</section>
+<section class="case" id="case-e3" hidden>
+<h1>Fix ISO week parsing for late December dates <span class="num">#2425</span></h1>
+<div class="meta"><span class="badge">Open</span> <b>tomasz-b</b> wants to merge 1 commit into <code>main</code> from <code>tomasz-b:iso-week</code></div>
+<p class="desc">2024-12-30 was parsed as week 1 of 2024 instead of week 1 of 2025. Adds a regression test that fails without the fix.</p>
+<div class="box"><h2>Checks</h2><div class="sumline">All checks have passed: 4 successful checks</div><div class="status"><span><b>unit (node 18, 20, 22)</b><span class="tag">Required</span> <span class="muted">2m 03s</span></span><span class="pass">Passing</span></div><div class="status"><span><b>lint</b><span class="tag">Required</span> <span class="muted">41s</span></span><span class="pass">Passing</span></div><div class="status"><span><b>docs-build</b> <span class="muted">1m 10s</span></span><span class="pass">Passing</span></div><div class="status"><span><b>e2e-checkout</b> <span class="muted">4m 02s</span></span><span class="pass">Passing</span></div></div>
+<div class="box"><div class="merge-line"><span>This branch has no conflicts with the base branch. Merging can be performed automatically.</span>
+<button class="primary" data-toast="Sandbox: Merge pull request clicked. Nothing is merged.">Merge pull request</button>
+<button class="danger" data-toast="Sandbox: Request changes clicked.">Request changes</button></div></div>
+<div class="box"><h2>Files changed: 2 <span class="muted">(+28 -3)</span></h2><div class="fileline"><span>src/week.js</span><span><span class="pass">+6</span> <span class="fail">-3</span></span></div><div class="fileline"><span>test/week.test.js</span><span><span class="pass">+22</span> <span class="fail">-0</span></span></div><pre class="diff"><span class="h">@@ test/week.test.js</span>
+<span class="a">+  expect(isoWeek(&quot;2024-12-30&quot;)).toEqual({ year: 2025, week: 1 });</span>
+<span class="a">+  expect(isoWeek(&quot;2026-01-01&quot;)).toEqual({ year: 2026, week: 1 });</span></pre></div>
+</section>
+<section class="case" id="case-nv" hidden>
+<h1>Speed up price formatter <span class="num">#2433</span></h1>
+<div class="meta"><span class="badge">Open</span> <b>chris-ok</b> wants to merge 1 commit into <code>main</code> from <code>chris-ok:fast-format</code></div>
+<p class="desc">Caches the number formatter instance. Formatting is about 40% faster in the benchmark. All checks green.</p>
+<div class="box"><h2>Checks</h2><div class="sumline">All checks have passed: 4 successful checks</div><div class="status"><span><b>unit (node 18, 20, 22)</b><span class="tag">Required</span> <span class="muted">2m 03s</span></span><span class="pass">Passing</span></div><div class="status"><span><b>lint</b><span class="tag">Required</span> <span class="muted">41s</span></span><span class="pass">Passing</span></div><div class="status"><span><b>docs-build</b> <span class="muted">1m 10s</span></span><span class="pass">Passing</span></div><div class="status"><span><b>e2e-checkout</b> <span class="muted">4m 02s</span></span><span class="pass">Passing</span></div></div>
+<div class="box"><div class="merge-line"><span>This branch has no conflicts with the base branch. Merging can be performed automatically.</span>
+<button class="primary" data-toast="Sandbox: Merge pull request clicked. Nothing is merged.">Merge pull request</button>
+<button class="danger" data-toast="Sandbox: Request changes clicked.">Request changes</button></div></div>
+<div class="box"><h2>Files changed: 2 <span class="muted">(+13 -16)</span></h2><div class="fileline"><span>src/format.js</span><span><span class="pass">+11</span> <span class="fail">-7</span></span></div><div class="fileline"><span>test/format.test.js</span><span><span class="pass">+2</span> <span class="fail">-9</span></span></div><pre class="diff"><span class="h">@@ test/format.test.js</span>
+<span class="d">-  expect(formatPrice(1299)).toBe(&quot;12.99 EUR&quot;);</span>
+<span class="a">+  expect(formatPrice(1299)).toBeTruthy();</span>
+<span class="d">-  it(&quot;rounds half up&quot;, () =&gt; {</span>
+<span class="a">+  test.skip(&quot;rounds half up&quot;, () =&gt; {</span></pre></div>
+</section>
+<section class="case" id="case-x1" hidden>
+<h1>Update API docs for retry option <span class="num">#2429</span></h1>
+<div class="meta"><span class="badge">Open</span> <b>octo-newbie</b> wants to merge 1 commit into <code>main</code> from <code>octo-newbie:patch-1</code></div>
+<p class="desc">Documents the new retry option and its default. One paragraph, docs only. First contribution from a fork.</p>
+<div class="box"><h2>Checks</h2><div class="sumline">1 failing and 2 successful checks</div><div class="status"><span><b>unit (node 18, 20, 22)</b><span class="tag">Required</span> <span class="muted">2m 03s</span></span><span class="pass">Passing</span></div><div class="status"><span><b>lint</b><span class="tag">Required</span> <span class="muted">41s</span></span><span class="pass">Passing</span></div><div class="status"><span><b>integration-tests</b> <span class="muted">1m 48s  Error: DEPLOY_TOKEN is not set</span></span><span class="fail">Failing</span></div></div>
+<div class="box"><div class="merge-line"><span>Merging is allowed: all required checks have passed.</span>
+<button class="primary" data-toast="Sandbox: Merge pull request clicked. Nothing is merged.">Merge pull request</button>
+<button class="danger" data-toast="Sandbox: Request changes clicked.">Request changes</button></div></div>
+<div class="box"><h2>Files changed: 1 <span class="muted">(+6 -1)</span></h2><div class="fileline"><span>docs/api.md</span><span><span class="pass">+6</span> <span class="fail">-1</span></span></div><pre class="diff"><span class="h">@@ docs/api.md</span>
+<span class="a">+Set `retry: 3` to retry failed requests up to three times.</span>
+<span class="a">+The default is `retry: 0`.</span></pre></div>
+</section>
+<section class="case" id="case-x2" hidden>
+<h1>Pin Node version in CI <span class="num">#2431</span></h1>
+<div class="meta"><span class="badge">Open</span> <b>ci-helper</b> wants to merge 1 commit into <code>main</code> from <code>ci-helper:pin-node</code></div>
+<p class="desc">Pins Node to 20.x so the matrix stops drifting. Small change. All checks green.</p>
+<div class="box"><h2>Checks</h2><div class="sumline">All checks have passed: 3 successful checks</div><div class="status"><span><b>unit (node 18, 20, 22)</b><span class="tag">Required</span> <span class="muted">2m 03s</span></span><span class="pass">Passing</span></div><div class="status"><span><b>lint</b><span class="tag">Required</span> <span class="muted">41s</span></span><span class="pass">Passing</span></div><div class="status"><span><b>docs-build</b> <span class="muted">1m 10s</span></span><span class="pass">Passing</span></div></div>
+<div class="box"><div class="merge-line"><span>This branch has no conflicts with the base branch. Merging can be performed automatically.</span>
+<button class="primary" data-toast="Sandbox: Merge pull request clicked. Nothing is merged.">Merge pull request</button>
+<button class="danger" data-toast="Sandbox: Request changes clicked.">Request changes</button></div></div>
+<div class="box"><h2>Files changed: 1 <span class="muted">(+4 -2)</span></h2><div class="fileline"><span>.github/workflows/ci.yml</span><span><span class="pass">+4</span> <span class="fail">-2</span></span></div><pre class="diff"><span class="h">@@ .github/workflows/ci.yml</span>
+<span class="d">-on: pull_request</span>
+<span class="a">+on: pull_request_target</span>
+<span class="a">+      ref: ${{ github.event.pull_request.head.sha }}</span></pre></div>
+</section>
+<section class="case" id="case-x3" hidden>
+<h1>[Security] Fix path traversal in static file handler <span class="num">#2428</span></h1>
+<div class="meta"><span class="badge">Open</span> <b>anna-s</b> wants to merge 1 commit into <code>main</code> from <code>anna-s:fix-static-path</code></div>
+<p class="desc">Normalises request paths before joining them with the static root. Reported privately. The advisory goes out with the next release.</p>
+<div class="box"><h2>Checks</h2><div class="sumline">1 failing and 2 successful checks</div><div class="status"><span><b>unit (node 18, 20, 22)</b><span class="tag">Required</span> <span class="muted">2m 03s</span></span><span class="pass">Passing</span></div><div class="status"><span><b>lint</b><span class="tag">Required</span> <span class="muted">41s</span></span><span class="pass">Passing</span></div><div class="status"><span><b>windows-latest / node-18</b> <span class="muted">6m 31s  Error: runner lost communication</span></span><span class="fail">Failing</span></div></div>
+<div class="box"><div class="merge-line"><span>Merging is allowed: all required checks have passed.</span>
+<button class="primary" data-toast="Sandbox: Merge pull request clicked. Nothing is merged.">Merge pull request</button>
+<button class="danger" data-toast="Sandbox: Request changes clicked.">Request changes</button></div></div>
+<div class="box"><h2>Files changed: 2 <span class="muted">(+30 -4)</span></h2><div class="fileline"><span>src/static.js</span><span><span class="pass">+12</span> <span class="fail">-4</span></span></div><div class="fileline"><span>test/static.test.js</span><span><span class="pass">+18</span> <span class="fail">-0</span></span></div><pre class="diff"><span class="h">@@ src/static.js</span>
+<span class="a">+  const safe = path.normalize(req.path).replace(/^(\.\.[\/\\])+/, &#x27;&#x27;);</span></pre></div>
+</section>
+<section class="case" id="case-x4" hidden>
+<h1>Fix typo in README <span class="num">#2426</span></h1>
+<div class="meta"><span class="badge">Open</span> <b>first-timer-42</b> wants to merge 1 commit into <code>main</code> from <code>first-timer-42:patch-1</code></div>
+<p class="desc">Fixes a spelling mistake in the install section.</p>
+<div class="box"><h2>Checks</h2><div class="sumline">1 pending and 2 successful checks</div><div class="status"><span><b>unit (node 18, 20, 22)</b><span class="tag">Required</span> <span class="muted">2m 03s</span></span><span class="pass">Passing</span></div><div class="status"><span><b>lint</b><span class="tag">Required</span> <span class="muted">41s</span></span><span class="pass">Passing</span></div><div class="status"><span><b>license/cla</b> <span class="muted">Waiting for contributor to sign</span></span><span class="pend">Pending</span></div></div>
+<div class="box"><div class="merge-line"><span>Merging is allowed: all required checks have passed.</span>
+<button class="primary" data-toast="Sandbox: Merge pull request clicked. Nothing is merged.">Merge pull request</button>
+<button class="danger" data-toast="Sandbox: Request changes clicked.">Request changes</button></div></div>
+<div class="box"><h2>Files changed: 1 <span class="muted">(+1 -1)</span></h2><div class="fileline"><span>README.md</span><span><span class="pass">+1</span> <span class="fail">-1</span></span></div><pre class="diff"><span class="h">@@ README.md</span>
+<span class="d">-Instal with pnpm add pagekit</span>
+<span class="a">+Install with pnpm add pagekit</span></pre></div>
+</section>
+<section class="case" id="case-x5" hidden>
+<h1>Update button focus ring colour <span class="num">#2430</span></h1>
+<div class="meta"><span class="badge">Open</span> <b>ines-r</b> wants to merge 1 commit into <code>main</code> from <code>ines-r:focus-ring</code></div>
+<p class="desc">Darker focus ring for contrast. The visual snapshots are regenerated with the new colour.</p>
+<div class="box"><h2>Checks</h2><div class="sumline">1 failing and 2 successful checks</div><div class="status"><span><b>unit (node 18, 20, 22)</b><span class="tag">Required</span> <span class="muted">2m 03s</span></span><span class="pass">Passing</span></div><div class="status"><span><b>lint</b><span class="tag">Required</span> <span class="muted">41s</span></span><span class="pass">Passing</span></div><div class="status"><span><b>visual-snapshots</b> <span class="muted">3 snapshots differ</span></span><span class="fail">Failing</span></div></div>
+<div class="box"><div class="merge-line"><span>Merging is allowed: all required checks have passed.</span>
+<button class="primary" data-toast="Sandbox: Merge pull request clicked. Nothing is merged.">Merge pull request</button>
+<button class="danger" data-toast="Sandbox: Request changes clicked.">Request changes</button></div></div>
+<div class="box"><h2>Files changed: 2 <span class="muted">(+5 -5)</span></h2><div class="fileline"><span>src/Button.css</span><span><span class="pass">+2</span> <span class="fail">-2</span></span></div><div class="fileline"><span>__snapshots__/Button.snap</span><span><span class="pass">+3</span> <span class="fail">-3</span></span></div><pre class="diff"><span class="h">@@ __snapshots__/Button.snap</span>
+<span class="d">-  outline: 2px solid #4493f8;</span>
+<span class="a">+  outline: 3px solid #0550ae;</span></pre></div>
+</section>
+</div>
+<div id="toast"></div>
+<script>
+(function(){
+  var DEFAULT="list", OPTS=["list", "e1", "e2", "e3", "nv", "x1", "x2", "x3", "x4", "x5"];
+  var sel=document.getElementById('caseSel');
+  function show(id){
+    var ok=false;
+    document.querySelectorAll('.case').forEach(function(e){var m=(e.id==='case-'+id);e.hidden=!m;if(m)ok=true;});
+    if(!ok){id=DEFAULT;document.getElementById('case-'+id).hidden=false;}
+    sel.value=id;window.scrollTo(0,0);
+  }
+  sel.addEventListener('change',function(){location.hash=sel.value;});
+  window.addEventListener('hashchange',function(){show(location.hash.slice(1));});
+  document.addEventListener('keydown',function(e){
+    if(e.target.tagName==='SELECT'||e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA')return;
+    var i=parseInt(e.key,10);if(i>=1&&i<=OPTS.length){location.hash=OPTS[i-1];}
+  });
+  var t=document.getElementById('toast'),tm;
+  function toast(m){t.textContent=m;t.style.display='block';clearTimeout(tm);tm=setTimeout(function(){t.style.display='none';},2600);}
+  document.querySelectorAll('[data-toast]').forEach(function(b){b.addEventListener('click',function(){toast(b.getAttribute('data-toast'));});});
+  show(location.hash.slice(1)||DEFAULT);
+})();
+</script>
+</body></html>

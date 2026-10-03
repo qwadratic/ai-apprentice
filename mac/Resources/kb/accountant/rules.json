@@ -1,0 +1,111 @@
+[
+  {
+    "id": "capex-over-5000",
+    "title": "Equipment over 5,000 EUR is capex",
+    "kind": "why",
+    "cues": [
+      "0400"
+    ],
+    "requires": [
+      "Invoice detail",
+      "Equipment"
+    ],
+    "action_words": [
+      "Post"
+    ],
+    "question": "You moved that one to capex. What made you do that?",
+    "warning": "Equipment over €5,000 is capex, cost center 0400, not opex 4711. Change the cost center before you post.",
+    "why": "Equipment over €5,000 is always capex.",
+    "source": "seed"
+  },
+  {
+    "id": "december-duplicate-hold",
+    "title": "Hold the supplier that double-bills in December",
+    "kind": "why",
+    "cues": [
+      "Vogel Industrieservice"
+    ],
+    "requires": [
+      "Invoice detail"
+    ],
+    "action_words": [
+      "Hold"
+    ],
+    "question": "You are holding this one. What do you know about this supplier that the screen does not show?",
+    "warning": "This supplier double-bills every December. Hold the invoice and check for a duplicate before you post.",
+    "why": "That supplier double-bills every December.",
+    "source": "seed"
+  },
+  {
+    "id": "czech-second-approval",
+    "title": "Czech subsidiary invoices need a second approval",
+    "kind": "why",
+    "cues": [
+      "Czech subsidiary"
+    ],
+    "requires": [
+      "Invoice detail"
+    ],
+    "action_words": [
+      "Send for approval"
+    ],
+    "question": "You sent this one for approval instead of posting it. Why does this invoice need a second pair of eyes?",
+    "warning": "Invoices from the Czech subsidiary need a second approval. Use Send for approval, do not post it alone.",
+    "why": "It comes from the Czech subsidiary, so it goes for a second approval.",
+    "source": "seed"
+  },
+  {
+    "id": "equipment-not-opex",
+    "title": "Equipment coded to opex",
+    "kind": "guardrail",
+    "cues": [
+      "Equipment"
+    ],
+    "requires": [
+      "4711",
+      "Invoice detail"
+    ],
+    "action_words": [
+      "Post"
+    ],
+    "question": "This is equipment on cost center 4711. What decides opex versus capex for you?",
+    "warning": "Equipment over €5,000 is always capex. If this is over the line, re-code from opex 4711 to capex 0400 before posting.",
+    "why": "Equipment over €5,000 is always capex.",
+    "source": "seed"
+  },
+  {
+    "id": "no-asset-no-capex",
+    "title": "No asset number, no capex booking",
+    "kind": "guardrail",
+    "cues": [
+      "Asset no."
+    ],
+    "requires": [
+      "0400",
+      "Invoice detail"
+    ],
+    "action_words": [
+      "Post"
+    ],
+    "question": "You booked this to capex. What has to be in place before a capex booking goes through?",
+    "warning": "No asset number, no capex booking. Fill in the asset number before you post to 0400.",
+    "why": "No asset number, no capex booking.",
+    "source": "seed"
+  },
+  {
+    "id": "unknown-supplier-stop",
+    "title": "Unknown supplier: stop and ask the controller",
+    "kind": "guardrail",
+    "cues": [
+      "not in vendor master"
+    ],
+    "action_words": [
+      "Post",
+      "Hold"
+    ],
+    "question": "This supplier is not in the vendor master. What do you do when you meet one?",
+    "warning": "Unknown supplier. Stop, do not post, and ask the controller.",
+    "why": "Unknown supplier: stop and ask the controller.",
+    "source": "seed"
+  }
+]

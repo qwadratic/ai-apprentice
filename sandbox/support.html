@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sandbox: support ticket</title>
+<style>
+:root{--fg:#1f2328;--muted:#4b5563;--line:#c9d1d9;--bg:#ffffff;--soft:#f6f8fa;--green:#116329;--red:#b3261e;--amber:#8a5a00;--blue:#0550ae}
+*{box-sizing:border-box}
+html{font-size:20px}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif;line-height:1.4}
+[hidden]{display:none!important}
+#bar{background:#24292f;color:#d0d7de;padding:6px 20px;font-size:15px;display:flex;gap:12px;align-items:center}
+#bar select{font-size:15px;padding:2px 6px}
+#bar .hint{margin-left:auto;opacity:.7}
+.wrap{max-width:1180px;margin:0 auto;padding:12px 24px 80px}
+h1{font-size:30px;margin:10px 0 6px}
+h2{font-size:22px;margin:0 0 8px}
+code,pre{font-family:ui-monospace,Menlo,Consolas,monospace}
+code{background:var(--soft);padding:1px 6px;border-radius:4px}
+.box{border:2px solid var(--line);border-radius:8px;padding:12px 16px;margin:12px 0;background:#fff}
+.row{display:flex;justify-content:space-between;gap:16px;padding:6px 0;border-top:1px solid #e5e7eb}
+.row:first-of-type{border-top:0}
+.pass{color:var(--green);font-weight:700}
+.fail{color:var(--red);font-weight:700}
+.pend{color:var(--amber);font-weight:700}
+.tag{font-size:15px;border:1px solid var(--line);border-radius:12px;padding:0 8px;color:var(--muted);margin-left:8px}
+button{font-size:22px;padding:8px 22px;border-radius:8px;border:2px solid var(--line);background:var(--soft);color:var(--fg);cursor:pointer;font-weight:600}
+button.primary{background:#1a7f37;border-color:#1a7f37;color:#fff}
+button.danger{background:#fff;border-color:var(--red);color:var(--red)}
+button.warn{background:#fff;border-color:var(--amber);color:var(--amber)}
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:#24292f;color:#fff;padding:12px 24px;border-radius:10px;font-size:20px;display:none}
+a{color:var(--blue)}
+.muted{color:var(--muted)}
+
+.hd{background:#1f3a2d;color:#fff;padding:12px 24px;font-size:23px;display:flex;gap:30px;align-items:baseline}
+.hd .sub{font-size:17px;opacity:.85}
+.banner{background:#fde7e9;border:2px solid var(--red);color:#7a1511;padding:10px 16px;border-radius:8px;font-weight:700;font-size:21px;margin:10px 0}
+.cols{display:grid;grid-template-columns:1.3fr 1fr;gap:16px}
+.msg{background:var(--soft);border-left:6px solid #7a8794;padding:10px 14px;font-size:21px;border-radius:4px}
+table{border-collapse:collapse;width:100%;font-size:19px}
+th,td{border-bottom:1px solid #d6dbe1;padding:7px 8px;text-align:left}
+th{background:var(--soft)}
+.kv{display:grid;grid-template-columns:190px 1fr;font-size:20px}
+.kv>div{padding:5px 8px;border-bottom:1px solid #e5e7eb}
+.kv .k{color:var(--muted)}
+.actions{display:flex;gap:16px;margin-top:14px}
+@media(max-width:900px){.cols{grid-template-columns:1fr}}
+</style></head><body>
+<div id="bar"><span>SANDBOX demo case:</span><select id="caseSel"><option value="s1">Expert 1</option><option value="s2">Expert 2</option><option value="s3">Expert 3</option><option value="nv">Novice</option><option value="x1">Extra 1</option><option value="x2">Extra 2</option></select><span class="hint">keys 1-6 or URL #id</span></div>
+<div class="hd"><b>Helpdesk</b><span>Billing queue</span><span class="sub">Agent view &middot; sandbox data</span></div>
+<div class="wrap">
+<section class="case" id="case-s1" hidden>
+<h1>Ticket #58231 <span class="num muted">Refund request, last renewal</span></h1>
+<div class="banner">Open incident INC-2043: Service outage, EU region</div>
+<div class="cols"><div>
+<div class="box"><h2>Customer message</h2><div class="msg">The service was down on and off for days and I could not use what I paid for. I want my money back for my last renewal.</div></div>
+<div class="box"><h2>Order history</h2><table><tr><th>Order</th><th>Item</th><th>Amount</th><th>Placed</th></tr>
+<tr><td>10482</td><td>Pro plan renewal</td><td>89.00 EUR</td><td>41 days ago</td></tr></table></div>
+</div><div>
+<div class="box"><h2>Customer</h2><div class="kv"><div class="k">Name</div><div>Maria Weber</div>
+<div class="k">Account tier</div><div>Standard</div><div class="k">Region</div><div>EU</div></div></div>
+<div class="box"><h2>Payment and refund</h2><div class="kv">
+<div class="k">Original payment</div><div>Visa ending 4242</div>
+<div class="k">Payment status</div><div><b>Paid</b></div>
+<div class="k">Policy</div><div>Refund window: closed (41 days, limit 30)</div>
+<div class="k">Refund amount</div><div><b>89.00 EUR</b></div></div>
+
+<div class="actions"><button class="primary" data-toast="Sandbox: Refund clicked. No money moves.">Refund</button>
+<button class="warn" data-toast="Sandbox: Escalate clicked. Ticket handed over.">Escalate</button></div></div>
+</div></div>
+<p class="muted">Example policy values for the demo, not a real company policy.</p>
+</section>
+<section class="case" id="case-s2" hidden>
+<h1>Ticket #58240 <span class="num muted">Refund request, team plan</span></h1>
+
+<div class="cols"><div>
+<div class="box"><h2>Customer message</h2><div class="msg">I want my money back for last week&#x27;s order. This is unacceptable.</div></div>
+<div class="box"><h2>Order history</h2><table><tr><th>Order</th><th>Item</th><th>Amount</th><th>Placed</th></tr>
+<tr><td>10517</td><td>Team plan, 5 seats</td><td>245.00 EUR</td><td>12 days ago</td></tr></table></div>
+</div><div>
+<div class="box"><h2>Customer</h2><div class="kv"><div class="k">Name</div><div>Jonas Keller</div>
+<div class="k">Account tier</div><div>Standard</div><div class="k">Region</div><div>DE</div><div class="k">Status</div><div>Incidents: none</div></div></div>
+<div class="box"><h2>Payment and refund</h2><div class="kv">
+<div class="k">Original payment</div><div>Visa ending 1130</div>
+<div class="k">Payment status</div><div><b>Chargeback filed (dispute DP-77104)</b></div>
+<div class="k">Policy</div><div>Refund window: open (12 days, limit 30)</div>
+<div class="k">Refund amount</div><div><b>245.00 EUR</b></div></div>
+
+<div class="actions"><button class="primary" data-toast="Sandbox: Refund clicked. No money moves.">Refund</button>
+<button class="warn" data-toast="Sandbox: Escalate clicked. Ticket handed over.">Escalate</button></div></div>
+</div></div>
+<p class="muted">Example policy values for the demo, not a real company policy.</p>
+</section>
+<section class="case" id="case-s3" hidden>
+<h1>Ticket #58246 <span class="num muted">Duplicate charge on add-on seats</span></h1>
+
+<div class="cols"><div>
+<div class="box"><h2>Customer message</h2><div class="msg">Our extra seat add-on was billed twice this month. Please refund the duplicate today.</div></div>
+<div class="box"><h2>Order history</h2><table><tr><th>Order</th><th>Item</th><th>Amount</th><th>Placed</th></tr>
+<tr><td>10533</td><td>Enterprise add-on seats</td><td>120.00 EUR</td><td>9 days ago</td></tr></table></div>
+</div><div>
+<div class="box"><h2>Customer</h2><div class="kv"><div class="k">Name</div><div>Sofia Marin</div>
+<div class="k">Account tier</div><div>Enterprise</div><div class="k">Region</div><div>EU</div><div class="k">Account</div><div>Account manager: P. Lindgren</div><div class="k">Status</div><div>Incidents: none</div></div></div>
+<div class="box"><h2>Payment and refund</h2><div class="kv">
+<div class="k">Original payment</div><div>Invoice, SEPA transfer</div>
+<div class="k">Payment status</div><div><b>Paid twice</b></div>
+<div class="k">Policy</div><div>Refund window: open (9 days, limit 30)</div>
+<div class="k">Refund amount</div><div><b>120.00 EUR</b></div></div>
+
+<div class="actions"><button class="primary" data-toast="Sandbox: Refund clicked. No money moves.">Refund</button>
+<button class="warn" data-toast="Sandbox: Escalate clicked. Ticket handed over.">Escalate</button></div></div>
+</div></div>
+<p class="muted">Example policy values for the demo, not a real company policy.</p>
+</section>
+<section class="case" id="case-nv" hidden>
+<h1>Ticket #58255 <span class="num muted">Refund NOW</span></h1>
+
+<div class="cols"><div>
+<div class="box"><h2>Customer message</h2><div class="msg">Refund my order now or I will post a public review and warn everyone not to buy from you.</div></div>
+<div class="box"><h2>Order history</h2><table><tr><th>Order</th><th>Item</th><th>Amount</th><th>Placed</th></tr>
+<tr><td>10459</td><td>Pro plan renewal</td><td>89.00 EUR</td><td>38 days ago</td></tr></table></div>
+</div><div>
+<div class="box"><h2>Customer</h2><div class="kv"><div class="k">Name</div><div>Daniel Roth</div>
+<div class="k">Account tier</div><div>Standard</div><div class="k">Region</div><div>DE</div><div class="k">Status</div><div>Incidents: none</div></div></div>
+<div class="box"><h2>Payment and refund</h2><div class="kv">
+<div class="k">Original payment</div><div>Mastercard ending 1881</div>
+<div class="k">Payment status</div><div><b>Paid</b></div>
+<div class="k">Policy</div><div>Refund window: closed (38 days, limit 30)</div>
+<div class="k">Refund amount</div><div><b>89.00 EUR</b></div></div>
+
+<div class="actions"><button class="primary" data-toast="Sandbox: Refund clicked. No money moves.">Refund</button>
+<button class="warn" data-toast="Sandbox: Escalate clicked. Ticket handed over.">Escalate</button></div></div>
+</div></div>
+<p class="muted">Example policy values for the demo, not a real company policy.</p>
+</section>
+<section class="case" id="case-x1" hidden>
+<h1>Ticket #58261 <span class="num muted">Refund to my other card</span></h1>
+
+<div class="cols"><div>
+<div class="box"><h2>Customer message</h2><div class="msg">Please refund to a different card, ending 9917. My old card has expired.</div></div>
+<div class="box"><h2>Order history</h2><table><tr><th>Order</th><th>Item</th><th>Amount</th><th>Placed</th></tr>
+<tr><td>10590</td><td>Pro plan renewal</td><td>89.00 EUR</td><td>14 days ago</td></tr></table></div>
+</div><div>
+<div class="box"><h2>Customer</h2><div class="kv"><div class="k">Name</div><div>Lea Fischer</div>
+<div class="k">Account tier</div><div>Standard</div><div class="k">Region</div><div>DE</div><div class="k">Status</div><div>Incidents: none</div></div></div>
+<div class="box"><h2>Payment and refund</h2><div class="kv">
+<div class="k">Original payment</div><div>Visa ending 4242</div>
+<div class="k">Payment status</div><div><b>Paid</b></div>
+<div class="k">Policy</div><div>Refund window: open (14 days, limit 30)</div>
+<div class="k">Refund amount</div><div><b>89.00 EUR</b></div></div>
+
+<div class="actions"><button class="primary" data-toast="Sandbox: Refund clicked. No money moves.">Refund</button>
+<button class="warn" data-toast="Sandbox: Escalate clicked. Ticket handed over.">Escalate</button></div></div>
+</div></div>
+<p class="muted">Example policy values for the demo, not a real company policy.</p>
+</section>
+<section class="case" id="case-x2" hidden>
+<h1>Ticket #58268 <span class="num muted">Annual plan not what I expected</span></h1>
+
+<div class="cols"><div>
+<div class="box"><h2>Customer message</h2><div class="msg">The annual plan is not what I expected. Please refund me, I am inside the window.</div></div>
+<div class="box"><h2>Order history</h2><table><tr><th>Order</th><th>Item</th><th>Amount</th><th>Placed</th></tr>
+<tr><td>10601</td><td>Annual plan</td><td>480.00 EUR</td><td>5 days ago</td></tr></table></div>
+</div><div>
+<div class="box"><h2>Customer</h2><div class="kv"><div class="k">Name</div><div>Karim Aziz</div>
+<div class="k">Account tier</div><div>Standard</div><div class="k">Region</div><div>EU</div><div class="k">Status</div><div>Incidents: none</div></div></div>
+<div class="box"><h2>Payment and refund</h2><div class="kv">
+<div class="k">Original payment</div><div>Visa ending 7765</div>
+<div class="k">Payment status</div><div><b>Paid</b></div>
+<div class="k">Policy</div><div>Refund window: open (5 days, limit 30)</div>
+<div class="k">Refund amount</div><div><b>480.00 EUR</b></div></div>
+<div class="banner" style="background:#fff4ce;border-color:#d4a72c;color:#5c4400">Exceeds agent refund limit (250 EUR)</div>
+<div class="actions"><button class="primary" data-toast="Sandbox: Refund clicked. No money moves.">Refund</button>
+<button class="warn" data-toast="Sandbox: Escalate clicked. Ticket handed over.">Escalate</button></div></div>
+</div></div>
+<p class="muted">Example policy values for the demo, not a real company policy.</p>
+</section>
+</div>
+<div id="toast"></div>
+<script>
+(function(){
+  var DEFAULT="s1", OPTS=["s1", "s2", "s3", "nv", "x1", "x2"];
+  var sel=document.getElementById('caseSel');
+  function show(id){
+    var ok=false;
+    document.querySelectorAll('.case').forEach(function(e){var m=(e.id==='case-'+id);e.hidden=!m;if(m)ok=true;});
+    if(!ok){id=DEFAULT;document.getElementById('case-'+id).hidden=false;}
+    sel.value=id;window.scrollTo(0,0);
+  }
+  sel.addEventListener('change',function(){location.hash=sel.value;});
+  window.addEventListener('hashchange',function(){show(location.hash.slice(1));});
+  document.addEventListener('keydown',function(e){
+    if(e.target.tagName==='SELECT'||e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA')return;
+    var i=parseInt(e.key,10);if(i>=1&&i<=OPTS.length){location.hash=OPTS[i-1];}
+  });
+  var t=document.getElementById('toast'),tm;
+  function toast(m){t.textContent=m;t.style.display='block';clearTimeout(tm);tm=setTimeout(function(){t.style.display='none';},2600);}
+  document.querySelectorAll('[data-toast]').forEach(function(b){b.addEventListener('click',function(){toast(b.getAttribute('data-toast'));});});
+  show(location.hash.slice(1)||DEFAULT);
+})();
+</script>
+</body></html>
