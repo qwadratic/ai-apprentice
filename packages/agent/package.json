@@ -1,0 +1,10 @@
+{
+  "name": "@apprentice/agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Stream B: ScreenBridge v1 draft, agent schema, in-memory knowledge store and fakes (mock screen bridge, fake voice).",
+  "scripts": {
+    "test": "node --test"
+  }
+}
