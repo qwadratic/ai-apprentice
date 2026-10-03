@@ -19,6 +19,11 @@ import {
 const HOST = process.env.RUNNER_HOST || '127.0.0.1';
 const PORT = Number(process.env.RUNNER_PORT || 8787);
 const MODEL = process.env.RUNNER_MODEL || 'claude-sonnet-5-5';
+// Models a request may pick; RUNNER_MODEL is always allowed.
+const MODELS = new Set([
+  MODEL,
+  ...(process.env.RUNNER_MODELS || 'claude-sonnet-5-5,claude-opus-5-5,claude-haiku-4-5-20251001').split(',').map((m) => m.trim()).filter(Boolean),
+]);
 const CONCURRENCY = Math.max(1, Number(process.env.RUNNER_CONCURRENCY || 2));
 const QUEUE_MAX = 10;
 const TIMEOUT_MS = Number(process.env.RUNNER_TIMEOUT_MS || 60_000);
@@ -236,7 +241,13 @@ function send(res: http.ServerResponse, status: number, body: unknown): number {
 }
 
 const server = http.createServer(async (req, res) => {
-  const rid = (req.headers['x-request-id'] as string) || randomUUID();
+  const given = String(req.headers['x-request-id'] || '');
+  const rid = /^[A-Za-z0-9._-]{1,64}$/.test(given) ? given : randomUUID();
+  // A queued request whose client went away is dropped before it runs.
+  let clientGone = false;
+  res.on('close', () => {
+    if (!res.writableEnded) clientGone = true;
+  });
   const started = Date.now();
   const route = (req.url || '/').split('?')[0];
   const meta: Record<string, unknown> = { rid, method: req.method, route };
@@ -295,6 +306,11 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     const body = v.data;
+    if (body.model && !MODELS.has(body.model)) {
+      status = 400;
+      resBytes = send(res, 400, { ok: false, error: 'model_not_allowed', allowed: [...MODELS] });
+      return;
+    }
     meta.model = body.model || MODEL;
     meta.schema = !!body.schema;
     if (isVision) meta.images = (body as VisionReq).images.length;
@@ -311,6 +327,12 @@ const server = http.createServer(async (req, res) => {
       throw e;
     }
     meta.wait_ms = Date.now() - started;
+    if (clientGone) {
+      release();
+      status = 499;
+      meta.error = 'client_gone';
+      return;
+    }
     try {
       const r = await run(body, isVision ? (body as VisionReq).images : undefined);
       status = r.status;

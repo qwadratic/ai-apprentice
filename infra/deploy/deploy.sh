@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # Deploys origin/$DEPLOY_REF into /opt/apprentice/repo. Run as apprentice:
 #   sudo -u apprentice /opt/apprentice/infra/deploy/deploy.sh [--force]
-# Without --force it does nothing when the ref has not moved.
+# Without --force it does nothing when the ref has not moved, and it skips a
+# sha that already failed once (remembered in $FAILED_FILE).
 # On a failed health check it resets to the previous sha and exits 1.
+# It ships apps/ only: infra/ changes need `sudo infra/install.sh`.
 set -euo pipefail
 
 # Keep only what deploy needs; never hand secrets to install or build scripts.
@@ -11,6 +13,7 @@ for v in ELEVENLABS_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY RUNNER_TOK
 export COREPACK_ENABLE_DOWNLOAD_PROMPT=0 CI=1
 
 REPO=/opt/apprentice/repo
+FAILED_FILE=/var/lib/apprentice/deploy.failed-sha
 HEALTH="${DEPLOY_HEALTH_URL:-http://127.0.0.1:8000/health}"
 FORCE=0
 [ "${1:-}" = "--force" ] && FORCE=1
@@ -40,9 +43,20 @@ install_and_build() {
   fi
 }
 
+checkout() {
+  # The deploy checkout holds no data (that lives in /var/lib/apprentice), so
+  # untracked and ignored files go too: every deploy builds from a clean tree.
+  git reset -q --hard "$1" && git clean -qfdx
+}
+
+# The runner runs from /opt/apprentice/infra, not from this checkout, so it is
+# restarted only when the deployed change touches infra/claude-runner.
+RESTART_RUNNER=0
 restart() {
   # set -e is inactive inside `if`, so every step returns explicitly.
-  sudo -n /usr/bin/systemctl restart apprentice-runner.service || return 1
+  if [ $RESTART_RUNNER = 1 ]; then
+    sudo -n /usr/bin/systemctl restart apprentice-runner.service || return 1
+  fi
   sudo -n /usr/bin/systemctl restart apprentice-api.service
 }
 
@@ -61,16 +75,25 @@ new="$(git rev-parse "origin/$DEPLOY_REF")"
 if [ "$old" = "$new" ] && [ $FORCE = 0 ]; then
   exit 0
 fi
+if [ $FORCE = 0 ] && [ "$(cat "$FAILED_FILE" 2>/dev/null)" = "$new" ]; then
+  exit 0  # already failed once; push a fix or run with --force
+fi
 log "deploying $DEPLOY_REF ${old:0:12} -> ${new:0:12}"
-git reset -q --hard "origin/$DEPLOY_REF"
+if ! git diff --quiet "$old" "$new" -- infra/claude-runner; then RESTART_RUNNER=1; fi
+if ! git diff --quiet "$old" "$new" -- infra; then
+  log "note: infra/ changed; deploy does not ship it, run sudo infra/install.sh from a clone"
+fi
+checkout "origin/$DEPLOY_REF"
 
 if install_and_build && restart && healthy; then
+  rm -f "$FAILED_FILE"
   log "ok ${new:0:12}"
   exit 0
 fi
 
 log "FAILED at ${new:0:12}, rolling back to ${old:0:12}"
-git reset -q --hard "$old"
+echo "$new" > "$FAILED_FILE"
+checkout "$old"
 install_and_build || log "rollback install/build failed"
 restart || true
 if healthy; then log "rolled back to ${old:0:12}"; else log "rollback unhealthy"; fi

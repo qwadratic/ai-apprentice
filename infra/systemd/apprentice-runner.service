@@ -16,6 +16,11 @@ Restart=always
 RestartSec=3
 NoNewPrivileges=true
 PrivateTmp=true
+# Read-only system; the SDK writes only its cwd and ~apprentice (config, caches).
+ProtectSystem=strict
+ReadWritePaths=/var/lib/apprentice/runner-cwd /home/apprentice
+# ~1 GiB per SDK subprocess at RUNNER_CONCURRENCY=2, plus the server.
+MemoryMax=2560M
 StandardOutput=journal
 StandardError=journal
 

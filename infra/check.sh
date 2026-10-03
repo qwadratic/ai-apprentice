@@ -12,7 +12,10 @@ ORIGIN="${ORIGIN:-https://qwadratic.github.io}"
 if [ -z "${T:-}" ]; then T="$(sudo grep ^API_TOKEN= /etc/apprentice/env | cut -d= -f2)"; fi
 [ -n "$T" ] || { echo "no API token" >&2; exit 2; }
 W="$(mktemp -d)"; trap 'rm -rf "$W"' EXIT
-AUTH=(-H "Authorization: Bearer $T")
+# The token goes into a 0600 header file, so it never shows up in `ps`.
+( umask 077; printf 'Authorization: Bearer %s\n' "$T" > "$W/auth" )
+unset T
+AUTH=(-H @"$W/auth")
 pass=0; fail=0
 ok() { echo "PASS  $*"; pass=$((pass+1)); }
 ko() { echo "FAIL  $*"; fail=$((fail+1)); }
@@ -44,13 +47,16 @@ c="$(code -X POST "$BASE/agent/sessions/$SID/events" -H 'Origin: https://evil.ex
 r="$(curl -s -X POST "$BASE/agent/sessions/$SID/events" -H "Origin: $ORIGIN" -H 'Content-Type: application/json' \
   -d '{"conversationId":"conv_check","events":[{"t":1,"dir":"sys","type":"check","text":"check.sh synthetic event"},{"t":2,"dir":"sent","type":"user_transcript","text":"hello"}]}')"
 echo "$r" | jq -e '.ok and .stored==2' >/dev/null && ok "session events stored $r" || ko "session events $r"
-c="$(head -c 300000 /dev/zero | tr '\0' 'a' | curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/agent/sessions/$SID/events" -H "Origin: $ORIGIN" --data-binary @-)"
-[ "$c" = 413 ] && ok "session events 300 KB -> 413" || ko "session events 300 KB -> $c"
+c="$(head -c 600000 /dev/zero | tr '\0' 'a' | curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/agent/sessions/$SID/events" -H "Origin: $ORIGIN" --data-binary @-)"
+[ "$c" = 413 ] && ok "session events 600 KB -> 413" || ko "session events 600 KB -> $c"
+c="$(code -X POST "$BASE/agent/sessions/$SID/events" -H "Origin: $ORIGIN" -d '{"conversationId":"conv_other","events":[{"t":3,"dir":"sys","type":"check","text":"x"}]}')"
+[ "$c" = 409 ] && ok "session bound to its first conversationId (other -> 409)" || ko "session conversation mismatch -> $c"
 c="$(code "$BASE/agent/sessions")"; [ "$c" = 401 ] && ok "session list without token -> 401" || ko "session list without token -> $c"
 r="$(curl -s "$BASE/agent/sessions" "${AUTH[@]}")"
 echo "$r" | jq -e --arg s "$SID" '.ok and any(.sessions[]; .id==$s and .hasEvents)' >/dev/null && ok "session list has $SID (total $(echo "$r" | jq .total_bytes) bytes)" || ko "session list"
 r="$(curl -s "$BASE/agent/sessions/$SID" "${AUTH[@]}")"
 echo "$r" | jq -e '.ok and (.events|length)==2 and .events[0].conversationId=="conv_check"' >/dev/null && ok "session get returns 2 events" || ko "session get $r"
+c="$(code -X DELETE "$BASE/agent/sessions/$SID" "${AUTH[@]}")"; [ "$c" = 200 ] && ok "check session deleted" || ko "check session delete -> $c"
 
 c="$(head -c 13000000 /dev/zero | curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/runner/v1/complete" "${AUTH[@]}" --data-binary @-)"
 [ "$c" = 413 ] && ok "13 MB -> 413" || ko "13 MB -> $c"

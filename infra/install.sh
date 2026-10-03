@@ -19,11 +19,13 @@ if [ ! -d /opt/apprentice/repo/.git ]; then
 fi
 install -d -o root -g root -m 700 /etc/apprentice
 if [ ! -f /etc/apprentice/env ]; then
-  umask 077
+  # umask only for this file; the rest of the install (dist/) must stay readable.
+  ( umask 077
   cat > /etc/apprentice/env <<EOF
 # Secrets for apprentice services. root:root 0600. Edit with: sudoedit /etc/apprentice/env
 ELEVENLABS_API_KEY=
 ELEVENLABS_AGENT_ID_INTERVIEWER=
+ELEVENLABS_AGENT_ID_TUTOR=
 # Exactly ONE of the next two. The OAuth token is for private development only.
 CLAUDE_CODE_OAUTH_TOKEN=
 ANTHROPIC_API_KEY=
@@ -37,8 +39,11 @@ RUNNER_CONCURRENCY=2
 DEPLOY_REF=main
 DEBUG_ENDPOINTS=
 EOF
+  )
 fi
-grep -q '^ELEVENLABS_AGENT_ID_INTERVIEWER=' /etc/apprentice/env || echo 'ELEVENLABS_AGENT_ID_INTERVIEWER=' >> /etc/apprentice/env
+for v in ELEVENLABS_AGENT_ID_INTERVIEWER ELEVENLABS_AGENT_ID_TUTOR; do
+  grep -q "^$v=" /etc/apprentice/env || echo "$v=" >> /etc/apprentice/env
+done
 chown root:root /etc/apprentice/env
 chmod 600 /etc/apprentice/env
 

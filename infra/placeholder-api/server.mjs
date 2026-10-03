@@ -17,9 +17,14 @@ const DEBUG = process.env.DEBUG_ENDPOINTS === '1';
 const MAX_BODY = 12 * 1024 * 1024;
 const EL_AGENT_ID = process.env.ELEVENLABS_AGENT_ID_INTERVIEWER || '';
 const EL_KEY = process.env.ELEVENLABS_API_KEY || '';
+// Agents whose conversations /finish may store.
+const EL_AGENT_IDS = new Set([process.env.ELEVENLABS_AGENT_ID_INTERVIEWER, process.env.ELEVENLABS_AGENT_ID_TUTOR].filter(Boolean));
 const SESSIONS_DIR = process.env.SESSIONS_DIR || '/var/lib/apprentice/sessions';
-const SESSION_EVENTS_MAX_BODY = 256 * 1024;
+const SESSION_EVENTS_MAX_BODY = 512 * 1024; // the page counts UTF-16 chars, not bytes
 const SESSION_FILE_MAX = 5 * 1024 * 1024; // one session's .jsonl
+const EVENTS_BYTES_PER_HOUR = Number(process.env.EVENTS_BYTES_PER_HOUR || 50 * 1024 * 1024); // all sessions together
+const SESSIONS_MIN_AGE_MS = 24 * 3_600_000; // rotation never deletes newer sessions
+const AUDIO_MAX = 50 * 1024 * 1024;
 const SESSIONS_WARN_BYTES = Number(process.env.SESSIONS_WARN_BYTES || 1024 ** 3); // 1 GiB: warn in logs and listings
 const SESSIONS_ROTATE_BYTES = Number(process.env.SESSIONS_ROTATE_BYTES || 2 * 1024 ** 3); // 2 GiB: delete oldest sessions
 const SESSIONS_ROTATE_TARGET = 0.75 * SESSIONS_ROTATE_BYTES;
@@ -37,7 +42,7 @@ function cors(req, res) {
   if (origin && ALLOWED.has(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
     res.setHeader('Access-Control-Max-Age', '600');
   }
 }
@@ -112,11 +117,18 @@ function originAllowed(req) {
 }
 
 // ---- session storage ------------------------------------------------------
-// Files per session in SESSIONS_DIR: {id}.jsonl (events), {id}.elevenlabs.json
-// (conversation from ElevenLabs), {id}.mp3 (conversation audio).
+// Files per session in SESSIONS_DIR: {id}.jsonl (events), {id}.conv (the
+// conversationId the session is bound to), {id}.elevenlabs.json (conversation
+// from ElevenLabs), {id}.{mp3,wav,...} (conversation audio).
 const SESSION_ID = /^[A-Za-z0-9-]{8,64}$/;
 const CONVERSATION_ID = /^[A-Za-z0-9_-]{1,128}$/;
 const EVENT_DIRS = new Set(['sent', 'recv', 'sys', 'err']);
+const AUDIO_EXT = {
+  'audio/mpeg': 'mp3', 'audio/mp3': 'mp3', 'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/wave': 'wav',
+  'audio/ogg': 'ogg', 'audio/webm': 'webm', 'audio/mp4': 'm4a', 'audio/aac': 'aac',
+};
+const AUDIO_EXTS = [...new Set(Object.values(AUDIO_EXT))];
+const SESSION_FILE = new RegExp(`^([A-Za-z0-9-]{8,64})\\.(jsonl|conv|elevenlabs\\.json|${AUDIO_EXTS.join('|')})$`);
 const sessionFile = (id, ext) => join(SESSIONS_DIR, `${id}.${ext}`);
 
 async function writeAtomic(path, data) {
@@ -133,11 +145,52 @@ async function fileSize(path) {
   }
 }
 
+async function readJson(path) {
+  try {
+    return JSON.parse(await fsp.readFile(path, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+async function findAudio(id) {
+  for (const ext of AUDIO_EXTS) {
+    const size = await fileSize(sessionFile(id, ext));
+    if (size) return { ext, size };
+  }
+  return null;
+}
+
+// A session is bound to the first conversationId it reports (events or
+// finish). Returns false when it is already bound to a different one.
+async function bindConversation(id, conversationId) {
+  const path = sessionFile(id, 'conv');
+  try {
+    await fsp.writeFile(path, conversationId, { flag: 'wx', mode: 0o640 });
+    return true;
+  } catch (e) {
+    if (e.code !== 'EEXIST') throw e;
+    return (await fsp.readFile(path, 'utf8')).trim() === conversationId;
+  }
+}
+async function boundConversation(id) {
+  try {
+    return (await fsp.readFile(sessionFile(id, 'conv'), 'utf8')).trim();
+  } catch {
+    return null;
+  }
+}
+
 async function listSessions() {
   const byId = new Map();
   let total = 0;
+  const tmp = [];
   for (const name of await fsp.readdir(SESSIONS_DIR)) {
-    const m = /^([A-Za-z0-9-]{8,64})\.(jsonl|elevenlabs\.json|mp3)$/.exec(name);
+    if (name.endsWith('.tmp')) {
+      tmp.push(name);
+      continue;
+    }
+    const m = SESSION_FILE.exec(name);
     if (!m) continue;
     const st = await fsp.stat(join(SESSIONS_DIR, name));
     total += st.size;
@@ -146,36 +199,65 @@ async function listSessions() {
     s.mtime = Math.max(s.mtime, st.mtimeMs);
     if (m[2] === 'jsonl') s.hasEvents = true;
     if (m[2] === 'elevenlabs.json') s.hasTranscript = true;
-    if (m[2] === 'mp3') s.hasAudio = true;
+    if (AUDIO_EXTS.includes(m[2])) s.hasAudio = true;
     byId.set(m[1], s);
   }
   const sessions = [...byId.values()].sort((a, b) => b.mtime - a.mtime);
-  return { sessions, total };
+  return { sessions, total, tmp };
 }
 
-// Rotation: at most once a minute after a write; deletes the oldest sessions
-// when the directory passes 2 GiB, and warns in the log above 1 GiB.
+async function deleteSession(id) {
+  for (const ext of ['jsonl', 'conv', 'elevenlabs.json', ...AUDIO_EXTS]) await fsp.rm(sessionFile(id, ext), { force: true });
+}
+
+// Rotation, at most once a minute after a write: removes orphaned *.tmp files
+// older than 10 min, warns above SESSIONS_WARN_BYTES, and above
+// SESSIONS_ROTATE_BYTES deletes the oldest sessions that are older than 24 h.
+// Recent sessions are never deleted; if they alone exceed the cap it only warns.
 let lastRotateCheck = 0;
 async function maybeRotate() {
   const now = Date.now();
   if (now - lastRotateCheck < 60_000) return;
   lastRotateCheck = now;
   try {
-    const { sessions, total } = await listSessions();
+    const { sessions, total, tmp } = await listSessions();
+    let orphans = 0;
+    for (const name of tmp) {
+      const path = join(SESSIONS_DIR, name);
+      const st = await fsp.stat(path).catch(() => null);
+      if (st && now - st.mtimeMs > 10 * 60_000) {
+        await fsp.rm(path, { force: true });
+        orphans++;
+      }
+    }
+    if (orphans) log({ level: 'warn', msg: 'sessions orphaned tmp files removed', count: orphans });
     if (total > SESSIONS_WARN_BYTES) log({ level: 'warn', msg: 'sessions dir over warn threshold', bytes: total, warn_bytes: SESSIONS_WARN_BYTES });
     if (total <= SESSIONS_ROTATE_BYTES) return;
     let left = total;
     let removed = 0;
     for (const s of [...sessions].reverse()) {
       if (left <= SESSIONS_ROTATE_TARGET) break;
-      for (const ext of ['jsonl', 'elevenlabs.json', 'mp3']) await fsp.rm(sessionFile(s.id, ext), { force: true });
+      if (now - s.mtime < SESSIONS_MIN_AGE_MS) break; // oldest-first, so the rest are newer
+      await deleteSession(s.id);
       left -= s.size;
       removed++;
     }
     log({ level: 'warn', msg: 'sessions rotated', removed, bytes_before: total, bytes_after: left });
+    if (left > SESSIONS_ROTATE_BYTES) log({ level: 'warn', msg: 'sessions over cap but all remaining are newer than 24 h; nothing deleted', bytes: left });
   } catch {
     log({ level: 'error', msg: 'sessions rotation failed' });
   }
+}
+
+// Global byte budget for /events per hour.
+let eventBytes = []; // [time, bytes]
+function eventBytesOverBudget(n) {
+  const now = Date.now();
+  eventBytes = eventBytes.filter(([t]) => now - t < 3_600_000);
+  const used = eventBytes.reduce((a, [, b]) => a + b, 0);
+  if (used + n > EVENTS_BYTES_PER_HOUR) return true;
+  eventBytes.push([now, n]);
+  return false;
 }
 
 function parseEvents(raw) {
@@ -199,48 +281,94 @@ function parseEvents(raw) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Fetches the finished conversation (retrying while ElevenLabs is still
-// processing) and its audio; stores both next to the session's events.
-async function fetchConversation(sessionId, conversationId) {
-  const base = `https://api.elevenlabs.io/v1/convai/conversations/${encodeURIComponent(conversationId)}`;
-  const headers = { 'xi-api-key': EL_KEY };
-  const out = { transcriptStored: false, audioStored: false, transcriptStatus: null, conversationStatus: null, audioStatus: null };
-  let conv = null;
-  for (let attempt = 1; attempt <= 5; attempt++) {
-    try {
-      const r = await fetch(base, { headers, signal: AbortSignal.timeout(10_000) });
-      out.transcriptStatus = r.status;
-      if (r.ok) {
-        conv = await r.json();
-        out.conversationStatus = typeof conv.status === 'string' ? conv.status : null;
-        if (conv.status === 'done' || conv.status === 'failed') break;
-      } else if (r.status < 500 && r.status !== 429) {
+// ---- ElevenLabs conversation fetch ----------------------------------------
+const elBase = (conversationId) => `https://api.elevenlabs.io/v1/convai/conversations/${encodeURIComponent(conversationId)}`;
+
+async function getConversation(conversationId) {
+  try {
+    const r = await fetch(elBase(conversationId), { headers: { 'xi-api-key': EL_KEY }, signal: AbortSignal.timeout(8_000) });
+    if (!r.ok) {
+      await r.arrayBuffer().catch(() => {});
+      return { status: r.status };
+    }
+    return { status: r.status, conv: await r.json() };
+  } catch {
+    return { status: 'unreachable' };
+  }
+}
+
+// Stores a transcript unless a finished ('done') one is already there: a
+// partial transcript may be replaced by the finished one, nothing else.
+async function storeTranscript(id, conv) {
+  const existing = await readJson(sessionFile(id, 'elevenlabs.json'));
+  if (existing && existing.status === 'done') return false;
+  await writeAtomic(sessionFile(id, 'elevenlabs.json'), JSON.stringify(conv));
+  return true;
+}
+
+// Downloads the audio once (never overwrites), capped at AUDIO_MAX bytes,
+// with the extension taken from the content type.
+async function storeAudio(id, conversationId) {
+  if (await findAudio(id)) return { status: 'exists' };
+  const r = await fetch(`${elBase(conversationId)}/audio`, { headers: { 'xi-api-key': EL_KEY }, signal: AbortSignal.timeout(60_000) });
+  const type = (r.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+  const ext = AUDIO_EXT[type];
+  if (!r.ok || !ext) {
+    await r.arrayBuffer().catch(() => {});
+    return { status: r.status, type };
+  }
+  if (Number(r.headers.get('content-length') || 0) > AUDIO_MAX) {
+    await r.body?.cancel().catch(() => {});
+    return { status: 'too_large' };
+  }
+  const chunks = [];
+  let size = 0;
+  for await (const c of r.body) {
+    size += c.length;
+    if (size > AUDIO_MAX) return { status: 'too_large' };
+    chunks.push(c);
+  }
+  const path = sessionFile(id, ext);
+  const tmp = `${path}.${randomUUID()}.tmp`;
+  await fsp.writeFile(tmp, Buffer.concat(chunks), { mode: 0o640 });
+  try {
+    await fsp.link(tmp, path); // fails if the file appeared meanwhile: never overwrite
+  } catch (e) {
+    if (e.code !== 'EEXIST') throw e;
+  } finally {
+    await fsp.rm(tmp, { force: true });
+  }
+  return { status: r.status, ext, bytes: size };
+}
+
+// After /finish has answered: wait (up to 5 min) for a finished transcript if
+// only a partial one was stored, then fetch the audio. Logs statuses only.
+async function finishInBackground(id, conversationId, partial) {
+  const t0 = Date.now();
+  let conversationStatus = null;
+  try {
+    while (partial && Date.now() - t0 < 5 * 60_000) {
+      await sleep(5000);
+      const g = await getConversation(conversationId);
+      if (g.conv) {
+        conversationStatus = g.conv.status ?? null;
+        if (g.conv.status === 'done' || g.conv.status === 'failed') {
+          await storeTranscript(id, g.conv);
+          partial = false;
+        }
+      } else if (typeof g.status === 'number' && g.status < 500 && g.status !== 429) {
         break;
       }
-    } catch {
-      out.transcriptStatus = 'unreachable';
     }
-    if (attempt < 5) await sleep(3000);
-  }
-  if (conv) {
-    await writeAtomic(sessionFile(sessionId, 'elevenlabs.json'), JSON.stringify(conv));
-    out.transcriptStored = true;
-  }
-  try {
-    const r = await fetch(`${base}/audio`, { headers, signal: AbortSignal.timeout(30_000) });
-    out.audioStatus = r.status;
-    const type = r.headers.get('content-type') || '';
-    if (r.ok && type.startsWith('audio/')) {
-      await writeAtomic(sessionFile(sessionId, 'mp3'), Buffer.from(await r.arrayBuffer()));
-      out.audioStored = true;
-    } else {
-      await r.arrayBuffer().catch(() => {});
-    }
+    const a = await storeAudio(id, conversationId);
+    log({ level: 'info', msg: 'finish background done', session: id, partial, conversation_status: conversationStatus, audio_status: a.status, audio_bytes: a.bytes ?? 0, ms: Date.now() - t0 });
   } catch {
-    out.audioStatus = 'unreachable';
+    log({ level: 'error', msg: 'finish background failed', session: id, ms: Date.now() - t0 });
+  } finally {
+    finishing.delete(id);
   }
-  return out;
 }
+const finishing = new Set(); // sessions with a finish in progress
 
 async function elevenLabsSignedUrl() {
   const url = `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${encodeURIComponent(EL_AGENT_ID)}`;
@@ -340,7 +468,7 @@ const server = http.createServer(async (req, res) => {
     }
     const sessionRoute = /^\/agent\/sessions(?:\/([^/]+)(?:\/(events|finish))?)?$/.exec(route);
     if (sessionRoute) {
-      // Bodies, transcripts and keys are never logged.
+      // Bodies, transcripts, audio and keys are never logged.
       const [, sessionId, action] = sessionRoute;
       if (sessionId !== undefined && !SESSION_ID.test(sessionId)) {
         status = 400;
@@ -367,13 +495,14 @@ const server = http.createServer(async (req, res) => {
           resBytes = send(res, 429, { ok: false, error: 'rate_limited' });
           return;
         }
+        const maxBody = action === 'events' ? SESSION_EVENTS_MAX_BODY : 4096;
         let raw;
         try {
-          raw = await readBody(req, action === 'events' ? SESSION_EVENTS_MAX_BODY : 4096);
+          raw = await readBody(req, maxBody);
         } catch (e) {
           if (e.tooLarge) {
             status = 413;
-            resBytes = send(res, 413, { ok: false, error: 'body_too_large', max_bytes: action === 'events' ? SESSION_EVENTS_MAX_BODY : 4096 });
+            resBytes = send(res, 413, { ok: false, error: 'body_too_large', max_bytes: maxBody });
             res.on('finish', () => req.destroy());
             return;
           }
@@ -387,14 +516,28 @@ const server = http.createServer(async (req, res) => {
             resBytes = send(res, 400, { ok: false, error: p.error, field: p.field });
             return;
           }
+          if (p.conversationId && !(await bindConversation(sessionId, p.conversationId))) {
+            status = 409;
+            resBytes = send(res, 409, { ok: false, error: 'conversation_mismatch' });
+            return;
+          }
           const receivedAt = Date.now();
           const lines = p.events
             .map((e) => JSON.stringify({ t: e.t, dir: e.dir, type: e.type, text: e.text, conversationId: p.conversationId ?? null, receivedAt }))
             .join('\n') + '\n';
+          const bytes = Buffer.byteLength(lines);
           const path = sessionFile(sessionId, 'jsonl');
-          if ((await fileSize(path)) + Buffer.byteLength(lines) > SESSION_FILE_MAX) {
-            status = 413;
-            resBytes = send(res, 413, { ok: false, error: 'session_full', max_bytes: SESSION_FILE_MAX });
+          if ((await fileSize(path)) + bytes > SESSION_FILE_MAX) {
+            // 507, not 413: the request was fine, this session has no room left.
+            status = 507;
+            resBytes = send(res, 507, { ok: false, error: 'session_full', max_bytes: SESSION_FILE_MAX });
+            return;
+          }
+          if (eventBytesOverBudget(bytes)) {
+            status = 429;
+            res.setHeader('Retry-After', '300');
+            resBytes = send(res, 429, { ok: false, error: 'hourly_byte_cap', max_bytes_per_hour: EVENTS_BYTES_PER_HOUR });
+            log({ level: 'warn', msg: 'events hourly byte cap reached' });
             return;
           }
           await fsp.appendFile(path, lines, { mode: 0o640 });
@@ -404,7 +547,9 @@ const server = http.createServer(async (req, res) => {
           void maybeRotate();
           return;
         }
-        // finish
+        // finish: answers within ~20 s once a transcript is stored (partial if
+        // ElevenLabs is still processing); the finished transcript and the
+        // audio follow in the background. The lab page gives up at 30 s.
         let conversationId;
         try {
           conversationId = JSON.parse(raw.toString('utf8')).conversationId;
@@ -418,28 +563,95 @@ const server = http.createServer(async (req, res) => {
           resBytes = send(res, 400, { ok: false, error: 'invalid_body', field: 'conversationId' });
           return;
         }
-        if (!EL_KEY) {
+        if (!EL_KEY || EL_AGENT_IDS.size === 0) {
           status = 503;
-          resBytes = send(res, 503, { ok: false, error: 'elevenlabs_not_configured', missing: ['ELEVENLABS_API_KEY'] });
+          resBytes = send(res, 503, { ok: false, error: 'elevenlabs_not_configured' });
           return;
         }
-        const r = await fetchConversation(sessionId, conversationId);
-        Object.assign(meta, { transcript_status: r.transcriptStatus, conversation_status: r.conversationStatus, audio_status: r.audioStatus });
-        // 502 when ElevenLabs gave no conversation, so a client never sees an empty success.
-        status = r.transcriptStored ? 200 : 502;
-        resBytes = send(res, status, { ok: r.transcriptStored, ...r });
-        void maybeRotate();
+        const bound = await boundConversation(sessionId);
+        if (bound && bound !== conversationId) {
+          status = 409;
+          resBytes = send(res, 409, { ok: false, error: 'conversation_mismatch' });
+          return;
+        }
+        const existing = await readJson(sessionFile(sessionId, 'elevenlabs.json'));
+        if (existing && existing.status === 'done' && (await findAudio(sessionId))) {
+          status = 200;
+          resBytes = send(res, 200, { ok: true, transcriptStored: true, partial: false, audioStored: true, already: true });
+          return;
+        }
+        if (finishing.has(sessionId)) {
+          status = 409;
+          resBytes = send(res, 409, { ok: false, error: 'finish_in_progress' });
+          return;
+        }
+        finishing.add(sessionId);
+        let handedOff = false;
+        try {
+          const deadline = Date.now() + 18_000;
+          let g;
+          for (;;) {
+            g = await getConversation(conversationId);
+            meta.transcript_status = g.status;
+            if (g.conv) {
+              if (!EL_AGENT_IDS.has(g.conv.agent_id)) {
+                status = 422;
+                resBytes = send(res, 422, { ok: false, error: 'agent_not_allowed' });
+                return;
+              }
+              if (g.conv.status === 'done' || g.conv.status === 'failed') break;
+            } else if (typeof g.status === 'number' && g.status < 500 && g.status !== 429) {
+              break;
+            }
+            if (Date.now() + 3000 > deadline) break;
+            await sleep(3000);
+          }
+          if (!g.conv) {
+            status = 502;
+            resBytes = send(res, 502, { ok: false, error: 'conversation_unavailable', transcriptStatus: g.status, transcriptStored: false, audioStored: false });
+            return;
+          }
+          if (!(await bindConversation(sessionId, conversationId))) {
+            status = 409;
+            resBytes = send(res, 409, { ok: false, error: 'conversation_mismatch' });
+            return;
+          }
+          await storeTranscript(sessionId, g.conv);
+          const partial = !(g.conv.status === 'done' || g.conv.status === 'failed');
+          meta.conversation_status = g.conv.status ?? null;
+          status = 200;
+          resBytes = send(res, 200, {
+            ok: true,
+            transcriptStored: true,
+            partial,
+            conversationStatus: g.conv.status ?? null,
+            audioStored: false,
+            audioPending: true,
+          });
+          handedOff = true;
+          void finishInBackground(sessionId, conversationId, partial);
+          void maybeRotate();
+        } finally {
+          if (!handedOff) finishing.delete(sessionId);
+        }
         return;
       }
-      // Reading stored sessions needs the API token.
+      // Reading and deleting stored sessions needs the API token.
+      if (!bearerOk(req, API_TOKEN)) {
+        status = 401;
+        req.resume();
+        resBytes = send(res, 401, { ok: false, error: 'unauthorized' });
+        return;
+      }
+      if (req.method === 'DELETE' && sessionId !== undefined) {
+        await deleteSession(sessionId);
+        status = 200;
+        resBytes = send(res, 200, { ok: true, deleted: sessionId });
+        return;
+      }
       if (req.method !== 'GET') {
         status = 405;
         resBytes = send(res, 405, { ok: false, error: 'method_not_allowed' });
-        return;
-      }
-      if (!bearerOk(req, API_TOKEN)) {
-        status = 401;
-        resBytes = send(res, 401, { ok: false, error: 'unauthorized' });
         return;
       }
       if (sessionId === undefined) {
@@ -454,21 +666,26 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       let events = null;
-      let transcript = null;
       try {
         events = (await fsp.readFile(sessionFile(sessionId, 'jsonl'), 'utf8')).split('\n').filter(Boolean).map((l) => JSON.parse(l));
       } catch {}
-      try {
-        transcript = JSON.parse(await fsp.readFile(sessionFile(sessionId, 'elevenlabs.json'), 'utf8'));
-      } catch {}
-      const audioBytes = await fileSize(sessionFile(sessionId, 'mp3'));
-      if (events === null && transcript === null && !audioBytes) {
+      const transcript = await readJson(sessionFile(sessionId, 'elevenlabs.json'));
+      const audio = await findAudio(sessionId);
+      const conversationId = await boundConversation(sessionId);
+      if (events === null && transcript === null && !audio && !conversationId) {
         status = 404;
         resBytes = send(res, 404, { ok: false, error: 'session_not_found' });
         return;
       }
       status = 200;
-      resBytes = send(res, 200, { ok: true, id: sessionId, events: events ?? [], transcript, audio_bytes: audioBytes });
+      resBytes = send(res, 200, {
+        ok: true,
+        id: sessionId,
+        conversationId,
+        events: events ?? [],
+        transcript,
+        audio: audio ? { ext: audio.ext, bytes: audio.size } : null,
+      });
       return;
     }
     if (DEBUG && req.method === 'GET' && route === '/debug/sse') {

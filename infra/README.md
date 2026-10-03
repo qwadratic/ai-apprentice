@@ -65,16 +65,23 @@ T=$(ssh apprentice.exe.xyz "sudo grep ^API_TOKEN= /etc/apprentice/env | cut -d= 
   BASE=https://apprentice.exe.xyz bash <(ssh apprentice.exe.xyz cat work/ai-apprentice/infra/check.sh)
 ```
 
-The token goes only into the environment of that one command and is never printed. About a minute: 11 model calls plus 6–11.9 MB uploads. Without ImageMagick the script stops with "ImageMagick not found".
+The token goes only into the environment of that one command and into a 0600 header file for curl, so it is never printed and never visible in `ps`; the check session it creates is deleted at the end. About a minute: 11 model calls plus 6–11.9 MB uploads. Without ImageMagick the script stops with "ImageMagick not found".
 
-`deploy.sh` (run as `apprentice` under `flock`): records the current sha, `git fetch`, `git reset --hard origin/$DEPLOY_REF`, installs at the repo root by lockfile (`pnpm-lock.yaml` → `pnpm install --frozen-lockfile`, `package-lock.json` → `npm ci`, none → skip), runs `apps/api`'s `build` script if it has one, restarts both units via the sudoers rule, polls `http://127.0.0.1:8000/health` for 30 s and on failure resets to the old sha, reinstalls, restarts and exits 1. It unsets all secrets before running install or build scripts. `apprentice-api` keeps answering `/health` with `runner:"down"` when the runner is down, so a missing Claude credential does not block deploys.
+`deploy.sh` (run as `apprentice` under `flock`): records the current sha, `git fetch`, `git reset --hard origin/$DEPLOY_REF` plus `git clean -fdx` (the checkout holds no data), installs at the repo root by lockfile (`pnpm-lock.yaml` → `pnpm install --frozen-lockfile`, `package-lock.json` → `npm ci`, none → skip), runs `apps/api`'s `build` script if it has one, restarts `apprentice-api` (and `apprentice-runner` only if `infra/claude-runner` changed), polls `http://127.0.0.1:8000/health` for 30 s and on failure resets to the old sha, reinstalls, restarts and exits 1. A sha that failed is remembered in `/var/lib/apprentice/deploy.failed-sha` and skipped on later timer ticks until a new commit lands or you pass `--force`. `apprentice-api` keeps answering `/health` with `runner:"down"` when the runner is down, so a missing Claude credential does not block deploys.
+
+**Deploy ships `apps/` only.** `infra/` runs from `/opt/apprentice/infra`; after an `infra/` change run `sudo infra/install.sh` from a clone (deploy logs a note when it sees one).
+
+**Security notes on deploy:**
+- `pnpm install` / `npm ci` run the dependencies' install lifecycle scripts as `apprentice`, the same user the services run as. deploy.sh unsets the secrets in its own environment, but a malicious dependency could still read the service processes' environment or `/var/lib/apprentice` data. Review new dependencies before they land on `main`.
+- With the timer on, every push to `main`, even a backlog-only one, triggers a deploy and restarts `apprentice-api` (live sessions drop). **Keep the timer off during the pitch** and deploy by hand.
 
 ## Environment (`/etc/apprentice/env`)
 
 | Variable | Used by | Notes |
 |---|---|---|
 | `ELEVENLABS_API_KEY` | real API (B), placeholder signed-URL route | never sent to the browser |
-| `ELEVENLABS_AGENT_ID_INTERVIEWER` | placeholder signed-URL route | interviewer agent id from stream B's ElevenLabs spike; empty → 503 |
+| `ELEVENLABS_AGENT_ID_INTERVIEWER` | placeholder signed-URL and finish routes | interviewer agent id from stream B's ElevenLabs spike; empty → 503 |
+| `ELEVENLABS_AGENT_ID_TUTOR` | placeholder finish route | optional; the tutor agent's conversations may be stored too |
 | `CLAUDE_CODE_OAUTH_TOKEN` | runner | private development only (`claude setup-token`) |
 | `ANTHROPIC_API_KEY` | runner | required for anything judges can reach; exactly one of the two |
 | `RUNNER_TOKEN` | runner, API | `openssl rand -hex 32` |
@@ -83,6 +90,7 @@ The token goes only into the environment of that one command and is never printe
 | `DATABASE_PATH` | real API | `/var/lib/apprentice/db/apprentice.sqlite` |
 | `MEDIA_DIR` | real API | `/var/lib/apprentice/media` |
 | `RUNNER_MODEL` | runner | default `claude-sonnet-5-5` |
+| `RUNNER_MODELS` | runner | optional allowlist for a request's `model` (default sonnet-5-5, opus-5-5, haiku-4-5); others get 400 `model_not_allowed` |
 | `RUNNER_CONCURRENCY` | runner | default 2 (about 1 GiB RAM per SDK subprocess) |
 | `DEPLOY_REF` | deploy | default `main` |
 | `DEBUG_ENDPOINTS` | placeholder | `1` enables `GET /debug/sse` |
@@ -117,6 +125,7 @@ Success: `200 {ok: true, json, ms}` when `schema` was given (the SDK's `structur
 | Status | Body | Meaning |
 |---|---|---|
 | 400 | `{ok:false, error:"invalid_json"\|"invalid_body", fields?}` | bad request (field paths only) |
+| 400 | `{ok:false, error:"model_not_allowed", allowed}` | `model` not in the allowlist |
 | 401 | `{ok:false, error:"unauthorized"}` | missing or wrong bearer |
 | 413 | `{ok:false, error:"body_too_large", max_bytes}` | body above 12 MiB |
 | 429 | `{ok:false, error:"queue_full"}` + `Retry-After: 5` | `RUNNER_CONCURRENCY` busy and 10 already queued |
@@ -124,7 +133,7 @@ Success: `200 {ok: true, json, ms}` when `schema` was given (the SDK's `structur
 | 502 | `{ok:false, error:"no_structured_output"\|"no_result"\|"sdk_exception"}` | no usable result; never an empty success |
 | 504 | `{ok:false, error:"timeout", ms}` | 60 s run limit; the subprocess is aborted (`AbortController`) |
 
-Every call: `tools: []`, `permissionMode: "dontAsk"`, `settingSources: []`, `persistSession: false`, `cwd: /var/lib/apprentice/runner-cwd`, `maxTurns: 3`, `maxBudgetUsd: 0.5`, a short custom system prompt (the request's `system` is appended), `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`. The subprocess environment excludes `RUNNER_TOKEN`, `API_TOKEN` and `ELEVENLABS_API_KEY`. The runner refuses to start unless exactly one Claude credential is set and logs its mode at start. At boot it spawns and discards one warm subprocess (`startup()`), because per-request options differ.
+Every call: `tools: []`, `permissionMode: "dontAsk"`, `settingSources: []`, `persistSession: false`, `cwd: /var/lib/apprentice/runner-cwd`, `maxTurns: 3`, `maxBudgetUsd: 0.5`, a short custom system prompt (the request's `system` is appended), `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`. The subprocess environment excludes `RUNNER_TOKEN`, `API_TOKEN` and `ELEVENLABS_API_KEY`. The runner refuses to start unless exactly one Claude credential is set and logs its mode at start. At boot it spawns and discards one warm subprocess (`startup()`), because per-request options differ. A queued request whose client disconnected is dropped before it runs (logged as 499). `x-request-id` is used for logs only if it matches `[A-Za-z0-9._-]{1,64}`. The unit runs with `ProtectSystem=strict` (writable: the runner cwd and `/home/apprentice`) and `MemoryMax=2560M`.
 
 The placeholder exposes the runner publicly as `POST /runner/v1/*` behind `Authorization: Bearer $API_TOKEN` for testing only.
 
@@ -144,19 +153,41 @@ Logs carry status, duration and the upstream status only, never the URL or the k
 
 ## Session logs (placeholder, TASK-3.22, for stream B's lab page)
 
-Files in `/var/lib/apprentice/sessions` (apprentice, 750): `{sessionId}.jsonl` (events), `{sessionId}.elevenlabs.json` (conversation from ElevenLabs), `{sessionId}.mp3` (audio). `sessionId` must match `^[A-Za-z0-9-]{8,64}$`, `conversationId` `^[A-Za-z0-9_-]{1,128}$`.
+Files in `/var/lib/apprentice/sessions` (apprentice, 750): `{sessionId}.jsonl` (events), `{sessionId}.conv` (the conversationId the session is bound to), `{sessionId}.elevenlabs.json` (conversation from ElevenLabs), `{sessionId}.{mp3,wav,ogg,webm,m4a,aac}` (audio, extension from the content type). `sessionId` must match `^[A-Za-z0-9-]{8,64}$`, `conversationId` `^[A-Za-z0-9_-]{1,128}$`. A session is bound to the first conversationId it reports (in events or finish); another one gets 409 `conversation_mismatch`.
 
 **Browser routes** (no token; `Origin` must be in `ALLOWED_ORIGINS`, else 403; CORS as above):
 
-- `POST /agent/sessions/{sessionId}/events` with `{conversationId?, events: [{t: ms epoch, dir: "sent"|"recv"|"sys"|"err", type, text}]}` → `200 {ok: true, stored: n}`. Appends one JSON line per event plus `conversationId` and `receivedAt`. Body ≤ 256 KiB (413), one session file ≤ 5 MiB (413 `session_full`), 120 requests/min per IP (429), bad shape → 400 with the failing `field`.
-- `POST /agent/sessions/{sessionId}/finish` with `{conversationId}` → fetches `GET /v1/convai/conversations/{conversationId}` (up to 5 tries, 3 s apart, until `status` is `done` or `failed`) and stores the JSON, then `GET .../audio` and stores it if ElevenLabs returns `audio/*`. Answers `200 {ok: true, transcriptStored, audioStored, transcriptStatus, conversationStatus, audioStatus}`, or `502` with the same fields when no conversation could be fetched. 6 requests/min per IP; body ≤ 4 KiB; up to ~25 s.
+- `POST /agent/sessions/{sessionId}/events` with `{conversationId?, events: [{t: ms epoch, dir: "sent"|"recv"|"sys"|"err", type, text}]}` → `200 {ok: true, stored: n}`. Appends one JSON line per event plus `conversationId` and `receivedAt`.
 
-**Reading** (`Authorization: Bearer $API_TOKEN`, else 401):
+  | Status | Error | Limit |
+  |---|---|---|
+  | 400 | `invalid_json` / `invalid_body` + `field` | bad shape |
+  | 409 | `conversation_mismatch` | the session is bound to another conversationId |
+  | 413 | `body_too_large` | body over 512 KiB |
+  | 429 | `rate_limited` | over 120 requests/min per IP |
+  | 429 | `hourly_byte_cap` | over 50 MiB/hour across all sessions (`EVENTS_BYTES_PER_HOUR`) |
+  | 507 | `session_full` | this session's `.jsonl` would exceed 5 MiB |
+
+- `POST /agent/sessions/{sessionId}/finish` with `{conversationId}` (6/min per IP, body ≤ 4 KiB). Polls `GET /v1/convai/conversations/{conversationId}` every 3 s for at most ~18 s, so it answers within ~20 s (the lab page aborts at 30 s):
+  - **200** `{ok: true, transcriptStored: true, partial, conversationStatus, audioStored: false, audioPending: true}`. The transcript is stored at once; `partial: true` means ElevenLabs was still processing. In the background the server then keeps polling for up to 5 min, replaces a partial transcript with the finished one, and fetches the audio (≤ 50 MiB). The audio is never overwritten, and a finished transcript is never overwritten. The outcome is logged as `finish background done` with statuses only.
+  - **200** `{..., already: true}` when the finished transcript and the audio are already stored.
+  - **422** `agent_not_allowed` when the conversation's `agent_id` is neither `ELEVENLABS_AGENT_ID_INTERVIEWER` nor `ELEVENLABS_AGENT_ID_TUTOR`; nothing is stored.
+  - **409** `conversation_mismatch` or `finish_in_progress`.
+  - **502** `conversation_unavailable` with `transcriptStatus` when ElevenLabs gave no conversation.
+  - **503** `elevenlabs_not_configured`.
+
+**Reading and deleting** (`Authorization: Bearer $API_TOKEN`, else 401):
 
 - `GET /agent/sessions` → `{ok, total_bytes, warn, sessions: [{id, size, mtime, hasEvents, hasTranscript, hasAudio}]}`, newest first.
-- `GET /agent/sessions/{sessionId}` → `{ok, id, events: [...], transcript: {...}|null, audio_bytes}`; 404 if nothing is stored.
+- `GET /agent/sessions/{sessionId}` → `{ok, id, conversationId, events: [...], transcript: {...}|null, audio: {ext, bytes}|null}`; 404 if nothing is stored.
+- `DELETE /agent/sessions/{sessionId}` → removes all of the session's files (`check.sh` uses it to clean up).
 
-**Disk:** above 1 GiB the API logs `sessions dir over warn threshold` and listings show `warn: true`; above 2 GiB it deletes the oldest sessions (all three files) down to 1.5 GiB and logs `sessions rotated`. Checked at most once a minute after a write. Logs never contain bodies, transcripts, keys or signed URLs. Check usage: `sudo du -sh /var/lib/apprentice/sessions` or `sudo journalctl -u apprentice-api | grep -E 'warn threshold|rotated'`.
+**Disk:** checked at most once a minute after a write.
+- Orphaned `*.tmp` files older than 10 min are removed and counted in the log.
+- Above 1 GiB the API logs `sessions dir over warn threshold` and listings show `warn: true`.
+- Above 2 GiB it deletes the oldest sessions down to 1.5 GiB and logs `sessions rotated`. Sessions newer than 24 h are never deleted; if they alone are over the cap it only logs a warning.
+
+Logs never contain bodies, transcripts, audio, keys or signed URLs. Check usage with `sudo du -sh /var/lib/apprentice/sessions` or `sudo journalctl -u apprentice-api | grep -E 'warn threshold|rotated|over cap'`.
 
 ## Measurements
 
