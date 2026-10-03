@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { FakeClock } from "../src/fake/clock.ts";
 import { FakeVoiceAdapter, userSays } from "../src/fake/voice-adapter.ts";
 import type { VoiceEvent } from "../src/fake/voice-adapter.ts";
+import { must } from "./helpers.ts";
 
 const EPOCH = 2_000_000;
 
@@ -27,9 +28,9 @@ test("script drives user_speaking and transcript events in order with relative t
     "user_speaking:false",
     "transcript:final",
   ]);
-  const speakingTrue = events.find((e) => e.type === "user_speaking" && e.speaking)!;
+  const speakingTrue = must(events.find((e) => e.type === "user_speaking" && e.speaking));
   assert.equal(speakingTrue.tsMs, 1000);
-  const final = events.find((e) => e.type === "transcript" && e.final)!;
+  const final = must(events.find((e) => e.type === "transcript" && e.final));
   assert.equal(final.type === "transcript" && final.role, "expert");
   assert.equal(final.tsMs, 4000);
 });
@@ -47,7 +48,7 @@ test("speak() emits mode speaking, an agent transcript, 'spoken' and then mode l
   clock.advance(1000);
   await p;
   assert.deepEqual(events.map((e) => e.type), ["mode", "transcript", "spoken", "mode"]);
-  const spoken = events.find((e) => e.type === "spoken")!;
+  const spoken = must(events.find((e) => e.type === "spoken"));
   assert.ok(spoken.type === "spoken" && spoken.commandId === "cmd-1");
   assert.equal(voice.spokenLog.length, 1);
   await assert.rejects(Promise.all([voice.speak({ id: "a", text: "one" }), voice.speak({ id: "b", text: "two" })]), /already speaking/);
@@ -101,7 +102,7 @@ test("the script keeps wall-clock time across a pause: later steps fire at start
   clock.advance(1); // 9000: the second turn starts on the wall clock, not 9000 ms after resume
   assert.ok(events.some((e) => e.type === "user_speaking" && e.speaking && e.tsMs === 9000));
   clock.advance(1000);
-  const late = events.find((e) => e.type === "transcript" && e.final && e.text === "late")!;
+  const late = must(events.find((e) => e.type === "transcript" && e.final && e.text === "late"));
   assert.equal(late.tsMs, 10_000);
   assert.equal(events.some((e) => e.type === "transcript" && e.text === "early"), false, "the early turn was dropped");
 });
@@ -111,7 +112,7 @@ test("scripted transcripts may come from a novice", async () => {
   const { clock, voice, events } = setup(script);
   await voice.start({ sessionId: "s", sessionEpochMs: EPOCH });
   clock.advance(100);
-  const t = events.find((e) => e.type === "transcript")!;
+  const t = must(events.find((e) => e.type === "transcript"));
   assert.ok(t.type === "transcript" && t.role === "novice");
 });
 
