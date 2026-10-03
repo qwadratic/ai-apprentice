@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Acceptance checks from doc-5. Never prints the token.
 #   On the VM (local, through port 8000):  infra/check.sh
-#   From a laptop (public proxy):
+#   From a Mac (public proxy), once: brew install jq imagemagick   (curl, perl, base64 ship with macOS)
 #     T=$(ssh apprentice.exe.xyz "sudo grep ^API_TOKEN= /etc/apprentice/env | cut -d= -f2") \
-#       BASE=https://apprentice.exe.xyz ORIGIN=https://qwadratic.github.io infra/check.sh
-# Needs curl, jq, base64 and ImageMagick (convert or magick).
+#       BASE=https://apprentice.exe.xyz bash <(ssh apprentice.exe.xyz cat work/ai-apprentice/infra/check.sh)
+#   ORIGIN (default https://qwadratic.github.io) must be one of ALLOWED_ORIGINS.
+# Needs curl, jq, perl, base64 and ImageMagick (magick or convert).
 set -uo pipefail
 BASE="${BASE:-http://127.0.0.1:8000}"
 ORIGIN="${ORIGIN:-https://qwadratic.github.io}"

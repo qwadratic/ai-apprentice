@@ -53,9 +53,19 @@ sudo systemctl start apprentice-deploy.service
 sudo journalctl -u apprentice-api -u apprentice-runner -f
 sudo journalctl -u apprentice-deploy -n 50
 systemctl list-timers apprentice-deploy.timer
-# acceptance checks (on the VM; see the header of check.sh for the public variant)
+# acceptance checks on the VM (through port 8000)
 ~/work/ai-apprentice/infra/check.sh
 ```
+
+### Running the checks from a Mac (through the public proxy)
+
+```bash
+brew install jq imagemagick          # once; curl, perl and base64 ship with macOS
+T=$(ssh apprentice.exe.xyz "sudo grep ^API_TOKEN= /etc/apprentice/env | cut -d= -f2") \
+  BASE=https://apprentice.exe.xyz bash <(ssh apprentice.exe.xyz cat work/ai-apprentice/infra/check.sh)
+```
+
+The token goes only into the environment of that one command and is never printed. About a minute: 11 model calls plus 6–11.9 MB uploads. Without ImageMagick the script stops with "ImageMagick not found".
 
 `deploy.sh` (run as `apprentice` under `flock`): records the current sha, `git fetch`, `git reset --hard origin/$DEPLOY_REF`, installs at the repo root by lockfile (`pnpm-lock.yaml` → `pnpm install --frozen-lockfile`, `package-lock.json` → `npm ci`, none → skip), runs `apps/api`'s `build` script if it has one, restarts both units via the sudoers rule, polls `http://127.0.0.1:8000/health` for 30 s and on failure resets to the old sha, reinstalls, restarts and exits 1. It unsets all secrets before running install or build scripts. `apprentice-api` keeps answering `/health` with `runner:"down"` when the runner is down, so a missing Claude credential does not block deploys.
 
