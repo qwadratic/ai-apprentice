@@ -201,11 +201,14 @@ function checkStep(value: unknown, path: string, errors: string[]): void {
     str(o.environment, `${path}.environment`, errors);
     strArray(o.alternatives, `${path}.alternatives`, errors);
     strArray(o.unknowns, `${path}.unknowns`, errors);
-    // A confirmed step needs a reason and a quote; observation alone is never a rule.
+    // A confirmed step needs a reason, a quote and a screen moment; observation alone is never a rule.
     if (o.status === "confirmed") {
       if (o.rationale === null) errors.push(`${path}: confirmed step needs a rationale`);
       if (Array.isArray(o.utteranceIds) && o.utteranceIds.length === 0) {
         errors.push(`${path}: confirmed step needs at least one utteranceId`);
+      }
+      if (Array.isArray(o.evidenceIds) && o.evidenceIds.length === 0) {
+        errors.push(`${path}: confirmed step needs at least one evidenceId (a screen moment)`);
       }
     }
   });
@@ -225,6 +228,9 @@ function checkGuardrail(value: unknown, path: string, errors: string[]): void {
     num(o.version, `${path}.version`, errors, { min: 1, integer: true });
     if (o.status === "confirmed" && Array.isArray(o.utteranceIds) && o.utteranceIds.length === 0) {
       errors.push(`${path}: confirmed guardrail needs at least one utteranceId`);
+    }
+    if (o.status === "confirmed" && Array.isArray(o.evidenceIds) && o.evidenceIds.length === 0) {
+      errors.push(`${path}: confirmed guardrail needs at least one evidenceId (a screen moment)`);
     }
   });
 }

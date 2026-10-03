@@ -2,13 +2,15 @@
 // interface on an injectable clock. Stream B develops and tests against it until
 // stream A's real bridge lands; the real bridge must behave the same way.
 //
+// This module is browser-safe: it takes the fixture object and imports no node: module.
+// The Node loader is in ./fixture-node.ts (package subpath "@apprentice/agent/node").
+//
 // Time model:
 // - observation.timestampMs = clock.now() - sessionEpochMs at emission;
 // - the fixture timeline advances only while capturing, so pause() freezes it and
 //   resume() continues from the same point: nothing is dropped, nothing is emitted
 //   in a burst, and later timestamps (and evidence times) shift by the paused time.
 
-import { readFileSync } from "node:fs";
 import { SCHEMA_VERSION, validateCheckpointReply, validateScreenObservation } from "../contract-draft.ts";
 import type {
   ActionCheckpoint,
@@ -51,17 +53,6 @@ export interface ScreenFixture {
   durationMs: number;
   evidence: FixtureEvidence[];
   observations: FixtureObservation[];
-}
-
-export function loadFixture(path: string | URL): ScreenFixture {
-  return JSON.parse(readFileSync(path, "utf8")) as ScreenFixture;
-}
-
-/** The Learn fixture shipped in fixtures/agent. */
-export const LEARN_CUSTOMER07_FIXTURE_URL = new URL("../../../../fixtures/agent/learn-customer07.json", import.meta.url);
-
-export function loadLearnCustomer07(): ScreenFixture {
-  return loadFixture(LEARN_CUSTOMER07_FIXTURE_URL);
 }
 
 type BridgeState = "idle" | "capturing" | "paused" | "stopped";

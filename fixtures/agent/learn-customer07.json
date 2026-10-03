@@ -197,6 +197,19 @@
       }
     },
     {
+      "id": "obs-010b",
+      "atMs": 19500,
+      "kind": "input_activity",
+      "frameId": "f-0010b",
+      "entityRef": null,
+      "evidenceIds": [],
+      "facts": {
+        "surface": "email",
+        "typing": false,
+        "idleMs": 0
+      }
+    },
+    {
       "id": "obs-011",
       "atMs": 20000,
       "kind": "email_draft",

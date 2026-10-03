@@ -104,7 +104,11 @@ test("valid samples pass", () => {
   );
 });
 
-test("a confirmed step or guardrail needs a quote; observation alone is not a rule", () => {
+test("a confirmed step or guardrail needs a quote and a screen moment; observation alone is not a rule", () => {
+  assert.equal(validateWorkStep(step({ evidenceIds: [] })).ok, false);
+  assert.equal(validateWorkStep(step({ status: "inferred", evidenceIds: [], utteranceIds: [] })).ok, true);
+  assert.equal(validateGuardrail(guardrail({ evidenceIds: [] })).ok, false);
+  assert.equal(validateGuardrail(guardrail({ evidenceIds: [], status: "proposed" })).ok, true);
   assert.equal(validateWorkStep(step({ rationale: null })).ok, false);
   assert.equal(validateWorkStep(step({ utteranceIds: [] })).ok, false);
   assert.equal(validateWorkStep(step({ status: "observed", rationale: null, utteranceIds: [] })).ok, true);

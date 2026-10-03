@@ -10,7 +10,7 @@ import {
   validateScreenStatus,
 } from "../src/contract-draft.ts";
 import type { ActionCheckpoint, ScreenObservation } from "../src/contract-draft.ts";
-import { loadLearnCustomer07 } from "../src/fake/screen-bridge.ts";
+import { loadLearnCustomer07 } from "../src/fake/fixture-node.ts";
 
 function obs(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {

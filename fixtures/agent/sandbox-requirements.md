@@ -43,7 +43,7 @@ The agent uses it only to stay quiet while the expert types and to detect a paus
 | Teach T1, T2 | `customer_07` | a second, different order (`ORD-2057`, other address and window) | T1: image only, expected to be caught before Send. T2: full text plus image, expected to be allowed. The same customer must have two clearly different orders. |
 | Teach T3 | another known customer, e.g. `customer_03` | one order | The personal rule must not be applied automatically. |
 | Teach T4 | unknown customer: not in the customer list, `customerRef: null` | one order | The agent must ask, not guess a match to `customer_07`. |
-| Live new-fact test | spare `customer_12` | one order, with no hint in the data about any preference | During the show the expert states a new rule about `customer_12` out loud; the tutor must apply it on another `customer_12` order. Keep this order untouched until then. |
+| Live new-fact test | spare `customer_12` | **two** orders: `ORD-3001` (expert order) and `ORD-3002` (novice order), different addresses and windows, no hint in the data about any preference | During the show the expert processes `ORD-3001` and states a new rule about `customer_12` out loud; the tutor must apply it on the novice order `ORD-3002`. Keep both orders untouched until then. |
 
 Customer names, e-mail addresses and addresses are invented. No real people or companies.
 

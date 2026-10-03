@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { validateScreenObservation } from "../src/contract-draft.ts";
 import type { ScreenObservation, ScreenStatus } from "../src/contract-draft.ts";
 import { FakeClock } from "../src/fake/clock.ts";
-import { FakeScreenBridge, loadLearnCustomer07 } from "../src/fake/screen-bridge.ts";
+import { FakeScreenBridge } from "../src/fake/screen-bridge.ts";
+import { loadLearnCustomer07 } from "../src/fake/fixture-node.ts";
 
 const EPOCH = 5_000_000;
 
@@ -90,14 +91,39 @@ test("after pause() nothing is emitted; resume() continues without a jump or a b
   assert.deepEqual(ids, fixture.observations.map((o) => o.id));
 });
 
-test("stop() ends emission and reports stopped; start() again restarts", async () => {
-  const { clock, bridge, seen, statuses } = await setup();
+test("stop() ends emission and reports stopped; start() again restarts the replay", async () => {
+  const { clock, fixture, bridge, seen, statuses } = await setup();
   clock.advance(3000);
   await bridge.stop();
   assert.equal(statuses.at(-1)!.state, "stopped");
   const n = seen.length;
+  assert.equal(n, 2);
   clock.advance(60_000);
-  assert.equal(seen.length, n);
+  assert.equal(seen.length, n, "nothing after stop");
+
+  const epoch2 = clock.now();
+  await bridge.start({ sessionId: "sess-test-2", sessionEpochMs: epoch2 });
+  assert.equal(statuses.at(-1)!.state, "capturing");
+  assert.equal(bridge.emitted.length, 0, "replay state is reset");
+  clock.advance(1);
+  const first = seen.at(-1)!;
+  assert.equal(first.id, fixture.observations[0]!.id, "replay starts again from the first observation");
+  assert.equal(first.sequence, 1);
+  assert.equal(first.sessionId, "sess-test-2");
+  assert.equal(first.timestampMs, 0, "timestamps count from the new sessionEpochMs");
+  clock.advance(fixture.durationMs);
+  assert.equal(bridge.emitted.length, fixture.observations.length);
+});
+
+test("fixture follows the spec heartbeat: one typing:false heartbeat right when typing stops", () => {
+  const f = loadLearnCustomer07();
+  const beats = f.observations.filter((o) => o.kind === "input_activity");
+  const typing = (o: (typeof beats)[number]) => (o.facts as { typing: boolean }).typing;
+  const lastTyping = beats.filter(typing).at(-1)!;
+  const stop = beats.find((o) => !typing(o) && o.atMs > lastTyping.atMs)!;
+  assert.equal(stop.atMs, 19500);
+  assert.equal((stop.facts as { idleMs: number }).idleMs, 0);
+  assert.ok(stop.atMs - lastTyping.atMs < 2000, "emitted promptly after the last typing heartbeat");
 });
 
 test("resolveEvidence returns the asset and shifts times by paused duration", async () => {
