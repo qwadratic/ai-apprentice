@@ -201,3 +201,57 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  deploy-vm:
+    name: deploy API to the exe.dev VM
+    # Runs after the site and deploy.json are published, so the web app and the API move together.
+    # The VM verifies the HMAC, the timestamp and that the sha is on main, then deploys it with its own
+    # build, health check and rollback (infra/deploy). This job waits for the result and fails if the
+    # VM rolled back, so every backend deploy is visible here.
+    needs: [prepare, pages-deploy]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      API: https://apprentice.exe.xyz
+      SHA: ${{ needs.prepare.outputs.sha }}
+      DEPLOY_WEBHOOK_SECRET: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}
+    steps:
+      - name: Request the deploy
+        run: |
+          set -euo pipefail
+          if [ -z "${DEPLOY_WEBHOOK_SECRET}" ]; then
+            echo "::notice::DEPLOY_WEBHOOK_SECRET is not set; skipping the VM deploy."
+            exit 0
+          fi
+          body=$(jq -cn --arg sha "$SHA" --argjson ts "$(date +%s)" '{sha: $sha, ts: $ts}')
+          sig=$(printf '%s' "$body" | openssl dgst -sha256 -hmac "$DEPLOY_WEBHOOK_SECRET" -r | cut -d' ' -f1)
+          code=$(curl -sS -o response.json -w '%{http_code}' --max-time 30 -X POST "$API/ops/deploy" \
+            -H 'Content-Type: application/json' -H "X-Deploy-Signature: sha256=$sig" --data-binary "$body")
+          cat response.json; echo
+          if [ "$code" != "202" ] && [ "$code" != "200" ]; then
+            echo "::error::The VM refused the deploy request (HTTP $code)."
+            exit 1
+          fi
+      - name: Wait for the VM to finish
+        run: |
+          set -euo pipefail
+          if [ -z "${DEPLOY_WEBHOOK_SECRET}" ]; then exit 0; fi
+          for i in $(seq 1 72); do
+            status=$(curl -sS --max-time 10 "$API/ops/deploy/status" || echo '{}')
+            last_sha=$(printf '%s' "$status" | jq -r '.last.sha // empty')
+            state=$(printf '%s' "$status" | jq -r '.last.state // empty')
+            echo "$(date -u +%H:%M:%S) state=${state:-?} last=${last_sha:0:12} deployed=$(printf '%s' "$status" | jq -r '.deployed_sha // empty' | cut -c1-12)"
+            if [ "$last_sha" = "$SHA" ]; then
+              case "$state" in
+                ok) echo "Deployed $SHA"; printf '%s\n' "$status" | jq .; exit 0 ;;
+                failed|rolled_back) printf '%s\n' "$status" | jq .; echo "::error::The VM could not deploy $SHA ($state)."; exit 1 ;;
+              esac
+            fi
+            sleep 5
+          done
+          echo "::error::Timed out after 6 minutes waiting for the VM to deploy $SHA."
+          exit 1
+      - name: Health after deploy
+        if: ${{ env.DEPLOY_WEBHOOK_SECRET != '' }}
+        run: curl -sS --max-time 10 "$API/health" | jq .
