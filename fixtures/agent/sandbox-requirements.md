@@ -21,7 +21,7 @@ Per observation: `schemaVersion: 1`, `id`, `sessionId`, `sequence`, `timestampMs
 | `order_view` | `customerRef` (`customer_07` ... ), `orderId`, `deliveryAddress`, `deliveryWindow`; each is `null` when unreadable, masked or unknown |
 | `email_draft` | `recipientRef` (or `null`), `subject`, `bodyText`, `attachments[]` = `{kind: image\|pdf\|other, ocrText?}`, `previewState` = `editing\|preview\|sent` |
 | `ticket` | `ticketId`, `orderId`, `customerRef`, `status` = `open\|done`, `summary` |
-| `input_activity` | `surface` = `order\|email\|ticket`, `typing` (bool), `idleMs`, `lastInputAtMs` (session-relative time of the last actual input) |
+| `input_activity` | `surface` = `order\|email\|ticket`, `typing` (bool), `idleMs`, `lastInputAtMs` (session-relative time of the last actual input); always `idleMs = timestampMs - lastInputAtMs` (within 1 ms), `lastInputAtMs <= timestampMs` |
 
 A new observation is expected whenever one of these changes (order opened, attachment added or removed, body text changed, preview state changed). An unrecognised customer is `null`, not a guess. Fixture example: `fixtures/agent/learn-customer07.json`.
 
@@ -29,8 +29,10 @@ A new observation is expected whenever one of these changes (order opened, attac
 
 Screen capture cannot see keystrokes, so the workspace emits `input_activity` itself:
 
-- every 2 s while the person types in any workspace field (`typing: true`, `idleMs: 0`);
-- one heartbeat when typing stops (`typing: false`, `idleMs` growing), then again every 2 s while idle up to about 10 s, then stop;
+- no heartbeat before the first real input of the session (no invented initial last-input time);
+- one heartbeat immediately on real input (`typing: true`, `idleMs: 0`), then at most every 2 s while the person keeps typing (`idleMs` is the real time since the last input, small but not forced to 0);
+- the first `typing: false` heartbeat comes about 2000 ms after the last input and carries that real idle time (about 2000), never 0; then one every 2 s with growing `idleMs`; stop after the first one at or after 10000 ms idle;
+- off-record, reset and dispose cancel the timers and any queued callbacks;
 - `source: workspace`, `frameId: null`, `sourceRevision: null`, `evidenceIds: []` (a heartbeat is not a screen moment); `entityRef: null`.
 
 The agent uses it only to stay quiet while the expert types and to detect a pause.
@@ -49,7 +51,7 @@ Customer names, e-mail addresses and addresses are invented. No real people or c
 
 ## Preview -> Send checkpoint
 
-- **Preview** switches the email to `previewState: "preview"`, emits an observation, then sends an `ActionCheckpoint` `{schemaVersion: 1, id, sessionId, timestampMs, observationIds, revisions: {order, email}, facts: {order, email}, action: "send"}`. `revisions` are opaque strings that change on every edit; `facts` are the workspace's own snapshot at Preview.
+- **Preview** switches the email to `previewState: "preview"`, emits an observation, then sends an `ActionCheckpoint` `{schemaVersion: 1, id, sessionId, timestampMs, observationIds, revisions: {order, email}, action: "send"}`. `revisions` are opaque strings that change on every edit and never carry content. There are no `facts` on the checkpoint: the agent reads the order and email facts from the referenced vision observations (doc-7 section 3).
 - `observationIds` must include the latest `order_view` observation and the latest `email_draft` observation (more are fine).
 - The workspace waits for the agent's reply `{checkpointId, status: clear|warn|unknown, message, evidenceIds, basedOn: {order, email}}` and shows the message in the preview panel only if `basedOn` equals the current revisions (checked again on Send). `warn` and `unknown` do not disable **Send**: the human decides.
 - Timeout (provisional 4 s after dispatch, per doc-7) or error: show "check did not complete" and never display it as a pass.

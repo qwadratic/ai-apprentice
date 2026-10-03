@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "scenario": "learn-customer07",
-  "description": "Synthetic Learn session. The expert opens order ORD-2041 for customer_07, attaches the template screenshot to the email, removes it and types the essential delivery data as text, then opens Preview. All data is invented. Timestamps (atMs) are offsets from the moment capturing begins, after mask review.",
+  "description": "Synthetic Learn session. The expert opens order ORD-2041 for customer_07, attaches the template screenshot to the email, removes it and types the essential delivery data as text, then opens Preview. All data is invented. Timestamps (atMs) are offsets from the moment capturing begins, after mask review. Heartbeats follow idleMs = timestampMs - lastInputAtMs: none before the first input, one right on input, the first typing:false about 2000 ms after the last input.",
   "sessionId": "sess-mock-learn-01",
-  "durationMs": 26000,
+  "durationMs": 27000,
   "evidence": [
     {
       "id": "ev-f-0001",
@@ -61,8 +61,8 @@
       }
     },
     {
-      "id": "obs-002",
-      "atMs": 2000,
+      "id": "hb-01",
+      "atMs": 4800,
       "kind": "input_activity",
       "source": "workspace",
       "frameId": null,
@@ -70,10 +70,10 @@
       "entityRef": null,
       "evidenceIds": [],
       "facts": {
-        "surface": "order",
-        "typing": false,
-        "idleMs": 2000,
-        "lastInputAtMs": 0
+        "surface": "email",
+        "typing": true,
+        "idleMs": 0,
+        "lastInputAtMs": 4800
       }
     },
     {
@@ -93,6 +93,38 @@
         "bodyText": "",
         "attachments": [],
         "previewState": "editing"
+      }
+    },
+    {
+      "id": "hb-02",
+      "atMs": 6800,
+      "kind": "input_activity",
+      "source": "workspace",
+      "frameId": null,
+      "sourceRevision": null,
+      "entityRef": null,
+      "evidenceIds": [],
+      "facts": {
+        "surface": "email",
+        "typing": false,
+        "idleMs": 2000,
+        "lastInputAtMs": 4800
+      }
+    },
+    {
+      "id": "hb-03",
+      "atMs": 7800,
+      "kind": "input_activity",
+      "source": "workspace",
+      "frameId": null,
+      "sourceRevision": null,
+      "entityRef": null,
+      "evidenceIds": [],
+      "facts": {
+        "surface": "email",
+        "typing": true,
+        "idleMs": 0,
+        "lastInputAtMs": 7800
       }
     },
     {
@@ -120,6 +152,38 @@
       }
     },
     {
+      "id": "hb-04",
+      "atMs": 9800,
+      "kind": "input_activity",
+      "source": "workspace",
+      "frameId": null,
+      "sourceRevision": null,
+      "entityRef": null,
+      "evidenceIds": [],
+      "facts": {
+        "surface": "email",
+        "typing": false,
+        "idleMs": 2000,
+        "lastInputAtMs": 7800
+      }
+    },
+    {
+      "id": "hb-05",
+      "atMs": 10800,
+      "kind": "input_activity",
+      "source": "workspace",
+      "frameId": null,
+      "sourceRevision": null,
+      "entityRef": null,
+      "evidenceIds": [],
+      "facts": {
+        "surface": "email",
+        "typing": true,
+        "idleMs": 0,
+        "lastInputAtMs": 10800
+      }
+    },
+    {
       "id": "obs-005",
       "atMs": 11000,
       "kind": "email_draft",
@@ -139,7 +203,23 @@
       }
     },
     {
-      "id": "obs-006",
+      "id": "hb-06",
+      "atMs": 12800,
+      "kind": "input_activity",
+      "source": "workspace",
+      "frameId": null,
+      "sourceRevision": null,
+      "entityRef": null,
+      "evidenceIds": [],
+      "facts": {
+        "surface": "email",
+        "typing": false,
+        "idleMs": 2000,
+        "lastInputAtMs": 10800
+      }
+    },
+    {
+      "id": "hb-07",
       "atMs": 13000,
       "kind": "input_activity",
       "source": "workspace",
@@ -174,7 +254,7 @@
       }
     },
     {
-      "id": "obs-008",
+      "id": "hb-08",
       "atMs": 15000,
       "kind": "input_activity",
       "source": "workspace",
@@ -185,12 +265,12 @@
       "facts": {
         "surface": "email",
         "typing": true,
-        "idleMs": 0,
-        "lastInputAtMs": 15000
+        "idleMs": 200,
+        "lastInputAtMs": 14800
       }
     },
     {
-      "id": "obs-009",
+      "id": "hb-09",
       "atMs": 17000,
       "kind": "input_activity",
       "source": "workspace",
@@ -201,12 +281,12 @@
       "facts": {
         "surface": "email",
         "typing": true,
-        "idleMs": 0,
-        "lastInputAtMs": 17000
+        "idleMs": 100,
+        "lastInputAtMs": 16900
       }
     },
     {
-      "id": "obs-010",
+      "id": "hb-10",
       "atMs": 19000,
       "kind": "input_activity",
       "source": "workspace",
@@ -217,24 +297,8 @@
       "facts": {
         "surface": "email",
         "typing": true,
-        "idleMs": 0,
-        "lastInputAtMs": 19000
-      }
-    },
-    {
-      "id": "obs-010b",
-      "atMs": 19500,
-      "kind": "input_activity",
-      "source": "workspace",
-      "frameId": null,
-      "sourceRevision": null,
-      "entityRef": null,
-      "evidenceIds": [],
-      "facts": {
-        "surface": "email",
-        "typing": false,
-        "idleMs": 0,
-        "lastInputAtMs": 19500
+        "idleMs": 100,
+        "lastInputAtMs": 18900
       }
     },
     {
@@ -257,8 +321,8 @@
       }
     },
     {
-      "id": "obs-012",
-      "atMs": 22000,
+      "id": "hb-11",
+      "atMs": 21900,
       "kind": "input_activity",
       "source": "workspace",
       "frameId": null,
@@ -269,12 +333,12 @@
         "surface": "email",
         "typing": false,
         "idleMs": 2000,
-        "lastInputAtMs": 20000
+        "lastInputAtMs": 19900
       }
     },
     {
-      "id": "obs-013",
-      "atMs": 24000,
+      "id": "hb-12",
+      "atMs": 23900,
       "kind": "input_activity",
       "source": "workspace",
       "frameId": null,
@@ -285,7 +349,23 @@
         "surface": "email",
         "typing": false,
         "idleMs": 4000,
-        "lastInputAtMs": 20000
+        "lastInputAtMs": 19900
+      }
+    },
+    {
+      "id": "hb-13",
+      "atMs": 24800,
+      "kind": "input_activity",
+      "source": "workspace",
+      "frameId": null,
+      "sourceRevision": null,
+      "entityRef": null,
+      "evidenceIds": [],
+      "facts": {
+        "surface": "email",
+        "typing": true,
+        "idleMs": 0,
+        "lastInputAtMs": 24800
       }
     },
     {
@@ -305,6 +385,22 @@
         "bodyText": "Hello, here are the delivery details for order ORD-2041.\nAddress: 14 Sample Lane, 1010 Exampletown\nDelivery window: 2026-10-12 14:00-16:00",
         "attachments": [],
         "previewState": "preview"
+      }
+    },
+    {
+      "id": "hb-14",
+      "atMs": 26800,
+      "kind": "input_activity",
+      "source": "workspace",
+      "frameId": null,
+      "sourceRevision": null,
+      "entityRef": null,
+      "evidenceIds": [],
+      "facts": {
+        "surface": "email",
+        "typing": false,
+        "idleMs": 2000,
+        "lastInputAtMs": 24800
       }
     }
   ]

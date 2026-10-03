@@ -16,6 +16,11 @@
 //   cannot see keystrokes in other apps); it exists so the agent can stay quiet
 //   while the expert types. Its envelope has source "workspace" and frameId null;
 //   everything else is source "vision" with a real processed frame;
+// - input_activity idle time: idleMs = timestampMs - lastInputAtMs, always. No heartbeat
+//   before the first input of a session; one right on input, then at most every 2 s; the
+//   first typing:false heartbeat comes about 2000 ms after the last input with its real
+//   idle time; idle heartbeats every 2 s stop after the first one at or after 10000 ms;
+// - an ActionCheckpoint carries observationIds and opaque revisions only, no facts;
 // - start() ends paused with reason "mask-review" and resume() can be refused
 //   (mask review, geometry change, muted source); both resolve to {state, reason}
 //   and a refused resume is a normal result, not an error.
@@ -92,9 +97,13 @@ export type WorkspaceSurface = (typeof WORKSPACE_SURFACES)[number];
 export interface InputActivityFacts {
   surface: WorkspaceSurface;
   typing: boolean;
-  /** Milliseconds since the last input event in the workspace. */
+  /**
+   * Milliseconds since the last input event in the workspace. Always
+   * observation.timestampMs - lastInputAtMs (the validator enforces it within 1 ms):
+   * it is not reset to zero when typing stops.
+   */
   idleMs: number;
-  /** Session-relative timestamp (ms since sessionEpochMs) of the last actual input. */
+  /** Session-relative timestamp (ms since sessionEpochMs) of the last actual input; never after timestampMs. */
   lastInputAtMs: number;
 }
 
@@ -211,12 +220,10 @@ export interface WorkspaceRevisions {
  * Raised by the demo workspace on Preview (and before Send).
  * observationIds MUST include the latest order observation and the latest
  * email-draft observation the workspace has produced so far (evidence links, replay).
- * revisions and facts are the workspace's own exact state at Preview, so vision latency
- * never gates the checkpoint (doc-7 section 3).
- *
- * Open point: stream A's review of doc-7 asks to drop `facts` (reading the workspace
- * snapshot bypasses the vision route and masks); this draft keeps B's position until
- * the owners settle it in TASK-1.
+ * revisions are opaque identity/version tokens, never content. The checkpoint carries NO
+ * order or email facts: the agent reads them from the referenced vision observations (see
+ * factsFromCheckpoint), because reading the workspace snapshot would bypass the vision
+ * route and the privacy masks (doc-7, section 3, agreed by both streams).
  */
 export interface ActionCheckpoint {
   schemaVersion: SchemaVersion;
@@ -225,7 +232,6 @@ export interface ActionCheckpoint {
   timestampMs: number;
   observationIds: string[];
   revisions: WorkspaceRevisions;
-  facts: { order: OrderFacts; email: EmailDraftFacts };
   action: "send";
 }
 
@@ -334,6 +340,19 @@ function checkInputActivityFacts(value: unknown, path: string, errors: string[])
   });
 }
 
+/** idleMs = timestampMs - lastInputAtMs (within 1 ms) and the last input is never in the future. */
+function checkIdleRule(o: Record<string, unknown>, errors: string[]): void {
+  const f = o.facts;
+  if (typeof f !== "object" || f === null) return;
+  const { idleMs, lastInputAtMs } = f as Record<string, unknown>;
+  const ts = o.timestampMs;
+  if (typeof ts !== "number" || typeof idleMs !== "number" || typeof lastInputAtMs !== "number") return;
+  if (lastInputAtMs > ts) errors.push("observation.facts.lastInputAtMs: must be <= timestampMs");
+  if (Math.abs(idleMs - (ts - lastInputAtMs)) > 1) {
+    errors.push("observation.facts.idleMs: must equal timestampMs - lastInputAtMs (within 1 ms)");
+  }
+}
+
 function checkRevisions(value: unknown, path: string, errors: string[]): void {
   object(value, path, errors, (o) => {
     str(o.order, `${path}.order`, errors);
@@ -373,6 +392,7 @@ export function validateScreenObservation(value: unknown): ValidationResult<Scre
         break;
       case "input_activity":
         checkInputActivityFacts(o.facts, "observation.facts", errors);
+        checkIdleRule(o, errors);
         break;
       default:
         errors.push(`observation.kind: expected one of ${OBSERVATION_KINDS.join("|")}`);
@@ -417,10 +437,7 @@ export function validateActionCheckpoint(value: unknown): ValidationResult<Actio
     num(o.timestampMs, "checkpoint.timestampMs", errors, { min: 0 });
     strArray(o.observationIds, "checkpoint.observationIds", errors);
     checkRevisions(o.revisions, "checkpoint.revisions", errors);
-    object(o.facts, "checkpoint.facts", errors, (f) => {
-      checkOrderFacts(f.order, "checkpoint.facts.order", errors);
-      checkEmailFacts(f.email, "checkpoint.facts.email", errors);
-    });
+    if ("facts" in o) errors.push("checkpoint.facts: not part of the contract; read facts from the referenced observations");
     if (o.action !== "send") errors.push("checkpoint.action: expected send");
   });
   return finish(value, errors);
@@ -462,4 +479,43 @@ export function checkpointCoversLatest(
 /** True when the reply judged exactly the revisions the workspace holds now; otherwise it must not be applied. */
 export function replyIsCurrent(reply: CheckpointReply, current: WorkspaceRevisions): boolean {
   return reply.basedOn.order === current.order && reply.basedOn.email === current.email;
+}
+
+export type CheckpointFacts =
+  | { incomplete: false; order: OrderFacts; email: EmailDraftFacts }
+  | { incomplete: true; reason: string };
+
+/**
+ * The order and email facts a checkpoint refers to, read from the vision observations it
+ * references. Anything missing or unmatched yields {incomplete: true, reason}, which the
+ * agent must treat as unknown, never as clear. An observation counts only if it is from the
+ * checkpoint's session, has source "vision" and its sourceRevision equals the checkpoint's
+ * revision for that surface.
+ */
+export function factsFromCheckpoint(
+  checkpoint: ActionCheckpoint,
+  observations: readonly ScreenObservation[],
+): CheckpointFacts {
+  const surfaces = [
+    { kind: "order_view", key: "order" },
+    { kind: "email_draft", key: "email" },
+  ] as const;
+  const found: Partial<Record<"order" | "email", ScreenObservation>> = {};
+  for (const { kind, key } of surfaces) {
+    const referenced = observations.filter((o) => o.kind === kind && checkpoint.observationIds.includes(o.id));
+    if (referenced.length === 0) return { incomplete: true, reason: `no ${kind} observation referenced by the checkpoint is available` };
+    const matching = referenced.filter(
+      (o) => o.source === "vision" && o.sessionId === checkpoint.sessionId && o.sourceRevision === checkpoint.revisions[key],
+    );
+    if (matching.length === 0) {
+      return { incomplete: true, reason: `${kind} observation does not match the checkpoint's ${key} revision (must be vision-sourced, same session, same revision)` };
+    }
+    if (matching.length > 1) return { incomplete: true, reason: `more than one ${kind} observation matches the checkpoint's ${key} revision` };
+    found[key] = matching[0];
+  }
+  return {
+    incomplete: false,
+    order: structuredClone(found.order!.facts as OrderFacts),
+    email: structuredClone(found.email!.facts as EmailDraftFacts),
+  };
 }

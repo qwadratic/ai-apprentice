@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { validateActionCheckpoint, validateScreenObservation, validateScreenStatus } from "../src/contract-draft.ts";
+import { factsFromCheckpoint, validateActionCheckpoint, validateScreenObservation, validateScreenStatus } from "../src/contract-draft.ts";
 import type { ScreenObservation, ScreenStatus } from "../src/contract-draft.ts";
 import { FakeClock } from "../src/fake/clock.ts";
 import { FakeScreenBridge } from "../src/fake/screen-bridge.ts";
@@ -108,10 +108,10 @@ test("emission is driven by the clock, not by start()", async () => {
   const { clock, seen } = await setup();
   clock.advance(1);
   assert.equal(seen.length, 1); // the order view at 0 ms
-  clock.advance(3000);
-  assert.equal(seen.length, 2); // heartbeat at 2000
-  clock.advance(2000);
-  assert.equal(seen.length, 3); // email opened at 5000
+  clock.advance(4000);
+  assert.equal(seen.length, 1, "no heartbeat before the first input (4800 ms)");
+  clock.advance(1000);
+  assert.deepEqual(seen.map((o) => o.kind), ["order_view", "input_activity", "email_draft"]); // input at 4800, email at 5000
 });
 
 test("events that fall due while paused are dropped, not deferred; later ones keep their wall-clock time", async () => {
@@ -121,7 +121,7 @@ test("events that fall due while paused are dropped, not deferred; later ones ke
   assert.equal(before, 3);
   await bridge.pause();
   assert.deepEqual([statuses.at(-1)!.state, statuses.at(-1)!.reason], ["paused", "user-paused"]);
-  clock.advance(4000); // 6000 -> 10000: obs-004 (8000) falls inside the pause
+  clock.advance(4000); // 6000 -> 10000: hb-02 (6800), hb-03 (7800), obs-004 (8000) and hb-04 (9800) fall inside the pause
   assert.equal(seen.length, before, "nothing while paused");
   assert.equal(clock.pendingTimers(), 0, "no pending emission survives a pause");
 
@@ -130,20 +130,26 @@ test("events that fall due while paused are dropped, not deferred; later ones ke
   assert.equal(statuses.at(-1)!.state, "capturing");
   clock.advance(0);
   assert.equal(seen.length, before, "no burst on resume");
-  assert.deepEqual(bridge.dropped, ["obs-004"], "the paused observation is dropped");
+  const inPause = fixture.observations.filter((o) => o.atMs >= 6000 && o.atMs < 10_000).map((o) => o.id);
+  assert.ok(inPause.includes("obs-004") && inPause.length >= 2);
+  assert.deepEqual(bridge.dropped, inPause, "everything that fell due in the paused interval is dropped");
 
-  clock.advance(999);
-  assert.equal(seen.length, before, "obs-005 is due at 11000 on the wall clock, not 2000 ms after resume");
+  clock.advance(799);
+  assert.equal(seen.length, before, "hb-05 is due at 10800 on the wall clock, not 800 ms after a replay");
   clock.advance(1);
-  assert.equal(seen.length, before + 1);
+  assert.equal(seen.at(-1)!.id, "hb-05");
+  clock.advance(199);
+  assert.equal(seen.length, before + 1, "obs-005 is due at 11000");
+  clock.advance(1);
+  assert.equal(seen.length, before + 2);
   assert.equal(seen.at(-1)!.id, "obs-005");
   assert.equal(seen.at(-1)!.timestampMs, 11_000, "wall-clock offset, unchanged by the pause");
 
   clock.advance(fixture.durationMs);
   assert.deepEqual(
     seen.map((o) => o.id),
-    fixture.observations.map((o) => o.id).filter((id) => id !== "obs-004"),
-    "everything except the paused observation arrives, in order",
+    fixture.observations.map((o) => o.id).filter((id) => !inPause.includes(id)),
+    "everything except the paused interval arrives, in order",
   );
   assert.deepEqual(seen.map((o) => o.sequence), seen.map((_, i) => i + 1), "sequence has no gap or repeat");
 });
@@ -181,7 +187,7 @@ test("a refused resume resolves with the reason and is not an error; the session
   assert.deepEqual(refused, { state: "paused", reason: "geometry-changed" });
   assert.deepEqual([statuses.at(-1)!.state, statuses.at(-1)!.reason], ["paused", "geometry-changed"]);
   clock.advance(10_000);
-  assert.equal(seen.length, 2, "still nothing while the resume is blocked");
+  assert.equal(seen.length, 1, "still nothing while the resume is blocked");
 
   bridge.blockResume(null);
   assert.deepEqual(await bridge.resume(), { state: "capturing" });
@@ -205,7 +211,7 @@ test("stop() ends emission and reports stopped; start() again restarts the repla
   await bridge.stop();
   assert.equal(statuses.at(-1)!.state, "stopped");
   const n = seen.length;
-  assert.equal(n, 2);
+  assert.equal(n, 1);
   clock.advance(60_000);
   assert.equal(seen.length, n, "nothing after stop");
 
@@ -227,15 +233,15 @@ test("stop() ends emission and reports stopped; start() again restarts the repla
   assert.equal(bridge.emitted.length, fixture.observations.length);
 });
 
-test("fixture follows the spec heartbeat: one typing:false heartbeat right when typing stops", () => {
+test("fixture heartbeats carry the real idle time: the first typing:false is about 2000 ms after the last input", () => {
   const f = loadLearnCustomer07();
   const beats = f.observations.filter((o) => o.kind === "input_activity");
-  const typing = (o: (typeof beats)[number]) => (o.facts as { typing: boolean }).typing;
-  const lastTyping = beats.filter(typing).at(-1)!;
-  const stop = beats.find((o) => !typing(o) && o.atMs > lastTyping.atMs)!;
-  assert.equal(stop.atMs, 19500);
-  assert.equal((stop.facts as { idleMs: number }).idleMs, 0);
-  assert.ok(stop.atMs - lastTyping.atMs < 2000, "emitted promptly after the last typing heartbeat");
+  type Hb = { typing: boolean; idleMs: number; lastInputAtMs: number };
+  const stop = beats.find((o) => !(o.facts as unknown as Hb).typing)!;
+  const h = stop.facts as unknown as Hb;
+  assert.equal(h.idleMs, stop.atMs - h.lastInputAtMs);
+  assert.ok(h.idleMs >= 1500 && h.idleMs <= 2500, `about 2000 ms, got ${h.idleMs}`);
+  assert.ok(beats.every((o) => o.atMs >= (o.facts as unknown as Hb).lastInputAtMs));
 });
 
 test("resolveEvidence returns the asset; a pause does not shift evidence times (paused time is a gap)", async () => {
@@ -267,14 +273,87 @@ test("checkpoint at Preview carries the latest observations, the workspace revis
   assert.deepEqual(got[0], [lastOrder.id, lastEmail.id]);
   assert.equal(validateActionCheckpoint(cp).ok, true);
   assert.deepEqual(cp.revisions, { order: lastOrder.sourceRevision, email: lastEmail.sourceRevision });
-  assert.deepEqual(cp.facts, { order: lastOrder.facts, email: lastEmail.facts });
-  assert.equal(cp.facts.email.previewState, "preview");
+  assert.equal("facts" in cp, false, "a checkpoint carries no facts");
+  const facts = factsFromCheckpoint(cp, seen);
+  assert.deepEqual(facts, { incomplete: false, order: lastOrder.facts, email: lastEmail.facts });
+  assert.equal(facts.incomplete === false && facts.email.previewState, "preview");
   const ok = { schemaVersion: 1 as const, checkpointId: cp.id, status: "unknown" as const, message: "No rule known.", evidenceIds: [], basedOn: cp.revisions };
   await bridge.replyToCheckpoint(ok);
   assert.equal(bridge.replies.length, 1);
   await assert.rejects(bridge.replyToCheckpoint({ ...ok, status: "block" as never }));
   const { basedOn: _dropped, ...withoutBasedOn } = ok;
   await assert.rejects(bridge.replyToCheckpoint(withoutBasedOn as never), /basedOn/);
+  await assert.rejects(bridge.replyToCheckpoint({ ...ok, checkpointId: "cp-nope" }), /unknown checkpoint/);
+  await assert.rejects(bridge.replyToCheckpoint({ ...ok, basedOn: { ...cp.revisions, email: "rev-email-5" } }), /revisions/);
+  await assert.rejects(bridge.replyToCheckpoint({ ...ok, basedOn: { ...cp.revisions, order: "rev-order-0" } }), /revisions/);
+  assert.equal(bridge.replies.length, 1, "rejected replies are not recorded");
+});
+
+test("a checkpoint from a previous session is unknown after start() again", async () => {
+  const { clock, fixture, bridge } = await setup();
+  clock.advance(fixture.durationMs);
+  const cp = bridge.raiseCheckpoint();
+  await bridge.stop();
+  await bridge.start({ sessionId: "sess-2", sessionEpochMs: clock.now() });
+  const reply = { schemaVersion: 1 as const, checkpointId: cp.id, status: "clear" as const, message: "m", evidenceIds: [], basedOn: cp.revisions };
+  await assert.rejects(bridge.replyToCheckpoint(reply), /unknown checkpoint/);
+});
+
+test("lastInputAtMs moves by the same capture-start offset as timestampMs (5 s mask-review delay)", async () => {
+  const clock = new FakeClock(EPOCH);
+  const fixture = loadLearnCustomer07();
+  const bridge = new FakeScreenBridge(fixture, clock);
+  const seen: ScreenObservation[] = [];
+  bridge.onObservation((o) => seen.push(o));
+  await bridge.start({ sessionId: "s", sessionEpochMs: EPOCH });
+  clock.advance(5000); // mask review takes 5 s
+  await bridge.confirmMasks();
+  clock.advance(fixture.durationMs);
+  const beats = seen.filter((o) => o.kind === "input_activity");
+  assert.equal(beats.length, fixture.observations.filter((o) => o.kind === "input_activity").length);
+  for (const b of beats) {
+    const h = b.facts as { idleMs: number; lastInputAtMs: number };
+    const src = fixture.observations.find((o) => o.id === b.id)!;
+    assert.equal(b.timestampMs, src.atMs + 5000);
+    assert.equal(h.lastInputAtMs, (src.facts as { lastInputAtMs: number }).lastInputAtMs + 5000, `${b.id}: same offset as timestampMs`);
+    assert.equal(h.idleMs, b.timestampMs - h.lastInputAtMs, `${b.id}: idleMs = timestampMs - lastInputAtMs`);
+    assert.ok(h.lastInputAtMs <= b.timestampMs);
+    assert.equal(validateScreenObservation(b).ok, true, b.id);
+  }
+});
+
+test("confirmMasks() never lifts an off-the-record pause", async () => {
+  // off_record pressed during mask review: confirming the masks must not resume.
+  const clock = new FakeClock(EPOCH);
+  const bridge = new FakeScreenBridge(loadLearnCustomer07(), clock);
+  const seen: ScreenObservation[] = [];
+  const statuses: ScreenStatus[] = [];
+  bridge.onObservation((o) => seen.push(o));
+  bridge.onStatus((s) => statuses.push(s));
+  await bridge.start({ sessionId: "s", sessionEpochMs: EPOCH });
+  await bridge.pause("off_record");
+  assert.deepEqual([statuses.at(-1)!.state, statuses.at(-1)!.reason], ["paused", "off_record"]);
+  assert.deepEqual(await bridge.confirmMasks(), { state: "paused", reason: "off_record" });
+  assert.deepEqual([statuses.at(-1)!.state, statuses.at(-1)!.reason], ["paused", "off_record"]);
+  clock.advance(60_000);
+  assert.equal(seen.length, 0, "still off the record");
+  // the review flag is cleared, so the explicit resume works
+  assert.deepEqual(await bridge.resume(), { state: "capturing" });
+  assert.equal(statuses.at(-1)!.state, "capturing");
+
+  // off_record after capturing began, then confirmMasks() (e.g. a late mask edit confirmation)
+  const { clock: c2, bridge: b2, seen: seen2, statuses: st2 } = await setup();
+  c2.advance(3000);
+  await b2.pause("off_record");
+  const n = seen2.length;
+  assert.deepEqual(await b2.confirmMasks(), { state: "paused", reason: "off_record" });
+  assert.deepEqual([st2.at(-1)!.state, st2.at(-1)!.reason], ["paused", "off_record"]);
+  c2.advance(30_000);
+  assert.equal(seen2.length, n);
+  assert.equal(c2.pendingTimers(), 0);
+  // confirmMasks() while capturing is a no-op
+  assert.deepEqual(await b2.resume(), { state: "capturing" });
+  assert.deepEqual(await b2.confirmMasks(), { state: "capturing" });
 });
 
 test("a checkpoint needs a sourceRevision on the latest order and email observations", async () => {

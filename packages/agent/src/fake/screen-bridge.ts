@@ -15,6 +15,10 @@
 // - observation.timestampMs = clock.now() - sessionEpochMs at emission (wall clock);
 // - the fixture timeline is anchored at the moment capturing first begins and runs on
 //   the wall clock: a fixture observation is due at captureStart + atMs;
+// - input_activity facts: the fixture's lastInputAtMs counts from capture start like atMs
+//   and is shifted by the same offset when emitted, so idleMs = timestampMs - lastInputAtMs holds;
+// - confirmMasks() never lifts a pause other than "mask-review" (off-record stays in force);
+// - replyToCheckpoint() accepts only a checkpoint raised in this session, with matching basedOn;
 // - pause() cancels emission; observations that fall due while paused are DROPPED
 //   (never deferred, never replayed in a burst on resume). Paused time is a gap in
 //   the session timeline, so evidence times are not shifted by pauses.
@@ -23,10 +27,9 @@ import { SCHEMA_VERSION, validateCheckpointReply, validateScreenObservation } fr
 import type {
   ActionCheckpoint,
   CheckpointReply,
-  EmailDraftFacts,
   EvidenceKind,
   EvidenceRef,
-  OrderFacts,
+  InputActivityFacts,
   PauseReason,
   ScreenBridge,
   ScreenBridgeResult,
@@ -91,6 +94,8 @@ export class FakeScreenBridge implements ScreenBridge {
   private checkpointListeners = new Set<(c: ActionCheckpoint) => void>();
   private resolved = new Map<string, EvidenceRef>();
   private checkpointCount = 0;
+  /** Checkpoints raised in this session; a reply must name one of them. */
+  private raised = new Map<string, ActionCheckpoint>();
 
   /** Everything emitted so far, in order. */
   readonly emitted: ScreenObservation[] = [];
@@ -118,6 +123,7 @@ export class FakeScreenBridge implements ScreenBridge {
     this.dropped.length = 0;
     this.replies.length = 0;
     this.checkpointCount = 0;
+    this.raised.clear();
     this.state = "paused";
     this.pauseReason = "mask-review";
     this.emitStatus("paused", "mask-review");
@@ -166,11 +172,17 @@ export class FakeScreenBridge implements ScreenBridge {
     return { state: "capturing" };
   }
 
-  /** Masks reviewed and confirmed: capturing begins (or continues) if nothing else blocks it. */
+  /**
+   * Masks reviewed and confirmed: clears the review flag and resumes only if the current
+   * pause reason is "mask-review". It never lifts any other pause: an off-the-record pause
+   * (or a user pause, or a refused resume) stays in force and is reported back.
+   */
   async confirmMasks(): Promise<ScreenBridgeResult> {
     if (this.state === "idle" || this.state === "stopped") throw new Error(`confirmMasks(): bridge is ${this.state}`);
     this.masksConfirmed = true;
-    return this.resume();
+    if (this.state === "paused" && this.pauseReason === "mask-review") return this.resume();
+    if (this.state === "paused") return { state: "paused", reason: this.pauseReason };
+    return { state: this.state };
   }
 
   async stop(): Promise<void> {
@@ -205,6 +217,11 @@ export class FakeScreenBridge implements ScreenBridge {
   async replyToCheckpoint(reply: CheckpointReply): Promise<void> {
     const r = validateCheckpointReply(reply);
     if (!r.ok) throw new ValidationError("checkpoint reply", r.errors);
+    const cp = this.raised.get(reply.checkpointId);
+    if (!cp) throw new Error(`replyToCheckpoint(): unknown checkpoint ${reply.checkpointId}`);
+    if (reply.basedOn.order !== cp.revisions.order || reply.basedOn.email !== cp.revisions.email) {
+      throw new Error(`replyToCheckpoint(): reply to ${cp.id} is based on revisions that differ from the checkpoint's`);
+    }
     this.replies.push(structuredClone(reply));
   }
 
@@ -218,7 +235,8 @@ export class FakeScreenBridge implements ScreenBridge {
   /**
    * Plays the sandbox's role at Preview: raises an ActionCheckpoint whose
    * observationIds include the latest order and latest email-draft observation,
-   * with the workspace's revisions (the observations' sourceRevision) and facts.
+   * with the workspace's revisions (the observations' sourceRevision). No facts: the
+   * agent reads them from the referenced observations (see factsFromCheckpoint).
    */
   raiseCheckpoint(): ActionCheckpoint {
     if (this.state !== "capturing") throw new Error(`raiseCheckpoint(): bridge is ${this.state}`);
@@ -238,9 +256,9 @@ export class FakeScreenBridge implements ScreenBridge {
       timestampMs: this.clock.now() - this.sessionEpochMs,
       observationIds: [order.id, email.id],
       revisions: { order: order.sourceRevision!, email: email.sourceRevision! },
-      facts: { order: structuredClone(order.facts as OrderFacts), email: structuredClone(email.facts as EmailDraftFacts) },
       action: "send",
     };
+    this.raised.set(checkpoint.id, structuredClone(checkpoint));
     for (const l of [...this.checkpointListeners]) l(structuredClone(checkpoint));
     return checkpoint;
   }
@@ -283,6 +301,13 @@ export class FakeScreenBridge implements ScreenBridge {
       if (!e) throw new Error(`fixture observation ${f.id} references unknown evidence ${id}`);
       this.resolved.set(id, { assetRef: e.assetRef, startMs: e.startOffsetMs + shift, endMs: e.endOffsetMs + shift });
     }
+    let facts = structuredClone(f.facts);
+    if (f.kind === "input_activity") {
+      // The fixture counts lastInputAtMs from capture start, like atMs; the session timeline
+      // counts from sessionEpochMs, so it moves by the same offset as timestampMs does.
+      const hb = facts as InputActivityFacts;
+      facts = { ...hb, lastInputAtMs: hb.lastInputAtMs + shift };
+    }
     const obs = {
       schemaVersion: SCHEMA_VERSION,
       id: f.id,
@@ -293,7 +318,7 @@ export class FakeScreenBridge implements ScreenBridge {
       frameId: f.frameId,
       sourceRevision: f.sourceRevision,
       kind: f.kind,
-      facts: structuredClone(f.facts),
+      facts,
       entityRef: f.entityRef,
       evidenceIds: [...f.evidenceIds],
     } as ScreenObservation;

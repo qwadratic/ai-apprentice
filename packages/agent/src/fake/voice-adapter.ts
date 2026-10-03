@@ -10,12 +10,14 @@
 //   not counted as asked);
 // - pause() (off-record) stops microphone handling and discards anything unspoken;
 //   nothing is emitted afterwards until resume();
-// - timestamps (tsMs) count from the same sessionEpochMs as screen observations.
+// - timestamps (tsMs) count from the same sessionEpochMs as screen observations;
+// - time is wall-clock, like the screen bridge: a scripted event is due at start() + atMs,
+//   and an event that falls due while paused is dropped, never replayed after resume().
 
 import { systemClock } from "../clock.ts";
 import type { Clock, TimerHandle } from "../clock.ts";
 
-export type VoiceRole = "expert" | "agent";
+export type VoiceRole = "expert" | "novice" | "agent";
 export type VoiceMode = "listening" | "speaking";
 export type VoiceStatusState = "connecting" | "connected" | "paused" | "disconnected" | "error";
 
@@ -54,10 +56,10 @@ export interface VoiceAdapter {
 /** An event the scripted "expert side" produces; the adapter adds role and timestamp. */
 export type ScriptedUserEvent =
   | { type: "user_speaking"; speaking: boolean }
-  | { type: "transcript"; text: string; final: boolean };
+  | { type: "transcript"; text: string; final: boolean; role?: Exclude<VoiceRole, "agent"> };
 
 export interface ScriptStep {
-  /** Offset on the active (non-paused) timeline, from start(). */
+  /** Wall-clock offset from start(); paused time is a gap, not removed. */
   atMs: number;
   event: ScriptedUserEvent;
 }
@@ -101,8 +103,7 @@ export class FakeVoiceAdapter implements VoiceAdapter {
   private state: "idle" | "active" | "paused" | "stopped" = "idle";
   private sessionEpochMs = 0;
   private index = 0;
-  private activeElapsedMs = 0;
-  private activeSinceMs = 0;
+  private startedAtMs = 0;
   private timer: TimerHandle | null = null;
   private speech: PendingSpeech | null = null;
 
@@ -122,8 +123,7 @@ export class FakeVoiceAdapter implements VoiceAdapter {
     if (this.state === "active" || this.state === "paused") throw new Error(`start(): adapter is ${this.state}`);
     this.sessionEpochMs = opts.sessionEpochMs;
     this.index = 0;
-    this.activeElapsedMs = 0;
-    this.activeSinceMs = this.clock.now();
+    this.startedAtMs = this.clock.now();
     this.state = "active";
     this.emit({ type: "status", state: "connected" });
     this.emit({ type: "mode", mode: "listening" });
@@ -141,7 +141,6 @@ export class FakeVoiceAdapter implements VoiceAdapter {
   async pause(): Promise<void> {
     if (this.state !== "active") return;
     this.cancelTimer();
-    this.activeElapsedMs = this.elapsedActive();
     this.rejectSpeech("paused");
     this.state = "paused";
     this.emit({ type: "status", state: "paused" });
@@ -149,7 +148,9 @@ export class FakeVoiceAdapter implements VoiceAdapter {
 
   async resume(): Promise<void> {
     if (this.state !== "paused") return;
-    this.activeSinceMs = this.clock.now();
+    // Whatever fell due while paused is dropped, not replayed.
+    const now = this.clock.now();
+    while (this.script[this.index] && this.startedAtMs + this.script[this.index]!.atMs < now) this.index++;
     this.state = "active";
     this.emit({ type: "status", state: "connected" });
     this.emit({ type: "mode", mode: "listening" });
@@ -201,10 +202,6 @@ export class FakeVoiceAdapter implements VoiceAdapter {
     for (const l of [...this.listeners]) l(full);
   }
 
-  private elapsedActive(): number {
-    return this.activeElapsedMs + (this.state === "active" ? this.clock.now() - this.activeSinceMs : 0);
-  }
-
   private cancelTimer(): void {
     if (this.timer !== null) this.clock.clearTimeout(this.timer);
     this.timer = null;
@@ -222,14 +219,14 @@ export class FakeVoiceAdapter implements VoiceAdapter {
     this.cancelTimer();
     const next = this.script[this.index];
     if (!next) return;
-    const delay = Math.max(0, next.atMs - this.elapsedActive());
+    const delay = Math.max(0, this.startedAtMs + next.atMs - this.clock.now());
     this.timer = this.clock.setTimeout(() => {
       this.timer = null;
       if (this.state !== "active") return;
       this.index++;
       const e = next.event;
       if (e.type === "user_speaking") this.emit({ type: "user_speaking", speaking: e.speaking });
-      else this.emit({ type: "transcript", role: "expert", text: e.text, final: e.final });
+      else this.emit({ type: "transcript", role: e.role ?? "expert", text: e.text, final: e.final });
       this.scheduleNext();
     }, delay);
   }
