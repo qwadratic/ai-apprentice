@@ -1,33 +1,33 @@
 # ElevenLabs spike (TASK-3.2)
 
-Node 22 scripts (no dependencies, global `fetch` and `WebSocket`) that check the ElevenLabs account, provision the dev interviewer agent and test the "speak only when our code says so" protocol in text-only mode.
+Node 22 TypeScript scripts (run directly with `node file.ts`, native type stripping; no runtime dependencies, global `fetch` and `WebSocket`) that check the ElevenLabs account, provision the dev interviewer agent and test the "speak only when our code says so" protocol in text-only mode. API shapes and validators live in `types.ts`. `npm ci && npm run typecheck` (TypeScript 7, strict) type-checks them; the package has devDependencies only, so `node file.ts` also works without `npm ci`.
 
-Scripts never print the API key or signed URLs. The agent id is not committed; export it from the `provision.mjs` output.
+Scripts never print the API key or signed URLs. The agent id is not committed; export it from the `provision.ts` output.
 
 ## Environment
 
 | Variable | Used by | Meaning |
 | --- | --- | --- |
 | `ELEVENLABS_API_KEY` | all scripts | ElevenLabs API key (server side only; never in git, never in the browser). |
-| `ELEVENLABS_AGENT_ID_INTERVIEWER` | `signed-url.mjs`, `textonly-test.mjs` | Agent id printed by `provision.mjs`. |
-| `PHASE_A_MS` | `textonly-test.mjs` | Optional. Length of the silence phase in ms (default 60000; 9000 with `--quick`). |
+| `ELEVENLABS_AGENT_ID_INTERVIEWER` | `signed-url.ts`, `textonly-test.ts` | Agent id printed by `provision.ts`. |
+| `PHASE_A_MS` | `textonly-test.ts` | Optional. Length of the silence phase in ms (default 60000; 9000 with `--quick`). |
 
 See `.env.example`.
 
 ## Scripts
 
-Run from this directory.
+Run from this directory (every script is also an npm script: `check-account`, `provision`, `provision:dry`, `signed-url`, `textonly-test`).
 
-- `node check-account.mjs` : subscription tier, quota, agent list and convai settings (read-only).
-- `node provision.mjs [--dry]` : idempotently creates or PATCHes the agent named in `agents.config.json` (matched by name) and prints the stored config. `--dry` prints the payload only. A config update costs no conversation minutes.
-- `node signed-url.mjs` : mints a signed URL and prints only status, protocol, host and path.
-- `node textonly-test.mjs [--quick]` : live text-only conversation (burns agent minutes while connected, about 75 s for the full run). Phase A: contextual updates every 3 s, expect zero replies. Phase B: one non-`[ASK]` user message, expect silence. Phase C: five `[ASK]` messages, expect the exact question back and measure latency. `--quick` shortens phase A.
+- `node check-account.ts` : subscription tier, quota, agent list and convai settings (read-only).
+- `node provision.ts [--dry]` : idempotently creates or PATCHes the agent named in `agents.config.json` (matched by name) and prints the stored config. `--dry` prints the payload only. A config update costs no conversation minutes.
+- `node signed-url.ts` : mints a signed URL and prints only status, protocol, host and path.
+- `node textonly-test.ts [--quick]` : live text-only conversation (burns agent minutes while connected, about 75 s for the full run). Phase A: contextual updates every 3 s, expect zero replies. Phase B: one non-`[ASK]` user message, expect silence. Phase C: five `[ASK]` messages, expect the exact question back and measure latency. `--quick` shortens phase A.
 
 ## Config notes
 
 - `tts.model_id` stays `eleven_flash_v2` (low latency). Expressive Mode (V3 conversational TTS) is deferred until a human has listened to it; flash keeps latency low.
-- `platform_settings.overrides` allows only `conversation.text_only` (used by `textonly-test.mjs`). The `prompt`, `first_message`, `language` and `tts.voice_id` overrides are disabled (TASK-3.21 hardening): the signed-URL route is reachable from a public page, and anyone who could mint a signed URL could otherwise run the agent with their own prompt. Everything else (llm, tts model, knowledge base) is not overridable either. **Status: the hardened config is in this file but has not been applied to the live agent yet.** Run `node provision.mjs` once and check in the read-back that `overrides` shows `prompt: false`, `first_message: false`.
-- `conversation.max_duration_seconds` is set to 600 (the field exists in the ElevenAgents conversation config; the platform default is also 600 s). The read-back of `provision.mjs` prints it. The lab page additionally ends the session itself after 10 minutes.
+- `platform_settings.overrides` allows only `conversation.text_only` (used by `textonly-test.ts`). The `prompt`, `first_message`, `language` and `tts.voice_id` overrides are disabled (TASK-3.21 hardening): the signed-URL route is reachable from a public page, and anyone who could mint a signed URL could otherwise run the agent with their own prompt. Everything else (llm, tts model, knowledge base) is not overridable either. **Status: the hardened config is in this file but has not been applied to the live agent yet.** Run `node provision.ts` once and check in the read-back that `overrides` shows `prompt: false`, `first_message: false`.
+- `conversation.max_duration_seconds` is set to 600 (the field exists in the ElevenAgents conversation config; the platform default is also 600 s). The read-back of `provision.ts` prints it. The lab page additionally ends the session itself after 10 minutes.
 - The tutor agent is not provisioned here. It moves to TASK-3.13 (coordinator decision).
 - The browser never sees the API key. The web page asks the API for a signed URL: `GET {api}/agent/elevenlabs/signed-url` returns `{ "signed_url": "wss://..." }`. For now the VM placeholder API serves this route. Treat the signed URL as a secret and never log it.
 
@@ -97,9 +97,9 @@ Real-voice silence (needs a human with a mic), SDK mic mute vs end session, know
 ### Manual real-voice silence test (for Ivan)
 
 1. Apply the Creator code and check the dashboard for remaining agent minutes first (the test burns about 2 minutes).
-2. `export ELEVENLABS_API_KEY=...` and `export ELEVENLABS_AGENT_ID_INTERVIEWER=...` (id from `node provision.mjs`).
+2. `export ELEVENLABS_API_KEY=...` and `export ELEVENLABS_AGENT_ID_INTERVIEWER=...` (id from `node provision.ts`).
 3. Start a real voice session (mic on, speaker on) from the web page or the ElevenLabs dashboard widget for `apprentice-interviewer-dev`, using a signed URL, without sending any `[ASK]`.
-4. Alongside it, send a `contextual_update` every 3 s using the same message shape as phase A of `textonly-test.mjs` (that script uses its own text-only socket, so for a real session send them on the voice socket).
+4. Alongside it, send a `contextual_update` every 3 s using the same message shape as phase A of `textonly-test.ts` (that script uses its own text-only socket, so for a real session send them on the voice socket).
 5. For 60 s, talk and type as the expert would: read aloud, think aloud, include several 5-10 s pauses and one 30 s pause.
 6. Pass: zero `agent_response` events and zero audible agent speech. Fail: the agent speaks at any point.
 7. If it fails, gate the mic (unmute only while an answer is open) and use Scribe v2 Realtime for expert transcripts, as in the recommendation above. Record the result here.

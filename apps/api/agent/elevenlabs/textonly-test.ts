@@ -1,17 +1,39 @@
-// Step 4: text-only conversation test with the global WebSocket (Node 22).
+// Step 4: text-only conversation test with Node's global WebSocket (Node 22).
 // Phase A: 60 s (PHASE_A_MS) of contextual_update every 3 s -> expect zero agent replies.
 // Phase B: one non-[ASK] user_message -> expect silence (skip_turn).
 // Phase C: [ASK] user_messages -> expect the exact question, measure latency.
-// Usage: ELEVENLABS_AGENT_ID_INTERVIEWER=... node textonly-test.mjs [--quick]
-import { getSignedUrl } from './signed-url.mjs';
+// Usage: ELEVENLABS_AGENT_ID_INTERVIEWER=... node textonly-test.ts [--quick]
+import { getSignedUrl } from './signed-url.ts';
+import { parseServerEvent } from './types.ts';
+import type { ClientEvent, JsonRecord } from './types.ts';
+
+type Phase = 'init' | 'A' | 'B' | 'C';
+
+interface AgentReply {
+  t: number;
+  text: string;
+  phase: Phase;
+}
+
+interface AskResult {
+  try: number;
+  ms: number | null;
+  verbatim: boolean;
+  text: string | null;
+}
+
+interface PendingResponse {
+  phase: Phase;
+  text: string;
+}
 
 const QUICK = process.argv.includes('--quick');
 // Phase A duration: PHASE_A_MS env wins; otherwise 9 s with --quick and 60 s by default.
-const PHASE_A_MS = Number(process.env.PHASE_A_MS) || (QUICK ? 9000 : 60000);
+const PHASE_A_MS = Number(process.env['PHASE_A_MS']) || (QUICK ? 9000 : 60000);
 const QUESTION = 'Why did you type the delivery address instead of attaching the screenshot?';
 const ASK_TRIES = 5;
 const t0 = Date.now();
-const ts = () => ((Date.now() - t0) / 1000).toFixed(1).padStart(5);
+const ts = (): string => ((Date.now() - t0) / 1000).toFixed(1).padStart(5);
 
 const s = await getSignedUrl();
 if (!s.ok) {
@@ -20,56 +42,55 @@ if (!s.ok) {
 }
 const ws = new WebSocket(s.url);
 
-const typeCounts = {};
-const agentReplies = []; // {t, text, phase}
-const toolEvents = [];
-let phase = 'init';
+const typeCounts: Record<string, number> = {};
+const agentReplies: AgentReply[] = [];
+const toolEvents: { type: string; keys: string }[] = [];
+let phase: Phase = 'init';
 let audioEvents = 0;
 let askSentAt = 0;
-const askResults = [];
-let meta = null;
-const partsByPhase = {};
-const emptyCheck = {};
-const silentTurns = [];
+const askResults: AskResult[] = [];
+let meta: JsonRecord | null = null;
+const partsByPhase: Partial<Record<Phase, number>> = {};
+const emptyCheck: Record<string, PendingResponse> = {};
+const silentTurns: Phase[] = [];
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 // Never send on a closed or closing socket.
-const send = (o) => {
+const send = (o: ClientEvent): boolean => {
   if (ws.readyState !== WebSocket.OPEN) return false;
   ws.send(JSON.stringify(o));
   return true;
 };
 
 ws.addEventListener('message', (ev) => {
-  let m;
-  try { m = JSON.parse(ev.data); } catch { return; }
-  typeCounts[m.type] = (typeCounts[m.type] ?? 0) + 1;
+  const m = parseServerEvent(ev.data);
+  if (!m) return;
+  const eventType = m.type === 'other' ? m.eventType : m.type;
+  typeCounts[eventType] = (typeCounts[eventType] ?? 0) + 1;
   switch (m.type) {
     case 'ping':
       setTimeout(() => send({ type: 'pong', event_id: m.ping_event.event_id }), m.ping_event.ping_ms ?? 0);
       break;
     case 'conversation_initiation_metadata':
       meta = m.conversation_initiation_metadata_event;
-      console.log(ts(), 'metadata keys:', Object.keys(meta).join(','), 'audio fmt:', meta.agent_output_audio_format);
+      console.log(ts(), 'metadata keys:', Object.keys(meta).join(','), 'audio fmt:', meta['agent_output_audio_format']);
       break;
     case 'audio':
       audioEvents++;
       break;
     case 'agent_response': {
-      const text = m.agent_response_event?.agent_response ?? '';
+      const text = m.agent_response_event.agent_response ?? '';
       agentReplies.push({ t: Date.now(), text, phase });
       console.log(ts(), `agent_response [${phase}]:`, JSON.stringify(text));
-      if (phase === 'C' && askSentAt && askResults.length < ASK_TRIES && !askResults.some((r) => r.pending)) {
-        // handled by the sender loop via agentReplies
-      }
       break;
     }
     case 'agent_chat_response_part': {
       // Streaming parts (text-only mode). An empty start/stop pair means the LLM took a turn and said nothing (skip_turn).
       const p = m.text_response_part;
+      const key = String(p.response_id);
       if (p.type === 'delta' && p.text) partsByPhase[phase] = (partsByPhase[phase] ?? 0) + 1;
-      if (p.type === 'start') emptyCheck[p.response_id] = { phase, text: '' };
-      const entry = emptyCheck[p.response_id];
+      if (p.type === 'start') emptyCheck[key] = { phase, text: '' };
+      const entry = emptyCheck[key];
       if (!entry) break; // delta or stop without a start: nothing to track
       if (p.type === 'delta') entry.text += p.text ?? '';
       if (p.type === 'stop' && !entry.text) {
@@ -81,16 +102,17 @@ ws.addEventListener('message', (ev) => {
     case 'user_transcript':
     case 'vad_score':
       break;
-    default:
-      if (!['agent_response_correction'].includes(m.type)) {
-        toolEvents.push({ type: m.type, keys: Object.keys(m).join(',') });
-        console.log(ts(), 'event', m.type, JSON.stringify(m).slice(0, 220));
+    case 'other':
+      if (m.eventType !== 'agent_response_correction') {
+        toolEvents.push({ type: m.eventType, keys: Object.keys(m.raw).join(',') });
+        console.log(ts(), 'event', m.eventType, JSON.stringify(m.raw).slice(0, 220));
       }
+      break;
   }
 });
 
-await new Promise((res, rej) => {
-  ws.addEventListener('open', res, { once: true });
+await new Promise<void>((res, rej) => {
+  ws.addEventListener('open', () => res(), { once: true });
   ws.addEventListener('error', () => rej(new Error('ws error')), { once: true });
 });
 console.log(ts(), 'connected');
@@ -99,7 +121,7 @@ send({
   conversation_config_override: { conversation: { text_only: true } },
 });
 
-const closeAndReport = (code = 0) => {
+const closeAndReport = (code = 0): void => {
   try { ws.close(1000, 'done'); } catch {}
   console.log('\n=== summary ===');
   console.log('live seconds:', ((Date.now() - t0) / 1000).toFixed(1));
@@ -129,7 +151,7 @@ const events = [
 let i = 0;
 const endA = Date.now() + PHASE_A_MS;
 while (Date.now() < endA && ws.readyState === WebSocket.OPEN) {
-  send({ type: 'contextual_update', text: events[i++ % events.length] });
+  send({ type: 'contextual_update', text: events[i++ % events.length] ?? '' });
   await sleep(3000);
 }
 console.log(ts(), `phase A done: ${agentReplies.filter((r) => r.phase === 'A').length} replies`);
@@ -150,8 +172,8 @@ for (let n = 1; n <= ASK_TRIES; n++) {
   send({ type: 'user_message', text: `[ASK] ${QUESTION}` });
   const deadline = Date.now() + 15000;
   while (agentReplies.length === before && Date.now() < deadline && ws.readyState === WebSocket.OPEN) await sleep(50);
-  if (agentReplies.length > before) {
-    const r = agentReplies[before];
+  const r = agentReplies[before];
+  if (r) {
     askResults.push({ try: n, ms: r.t - askSentAt, verbatim: r.text.trim() === QUESTION, text: r.text });
   } else {
     askResults.push({ try: n, ms: null, verbatim: false, text: null });
