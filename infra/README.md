@@ -6,14 +6,15 @@ Owner: TASK-4 (@qwadratic, delegated to the agent on the exe.dev VM). Nothing he
 infra/
   claude-runner/      Claude runner (TypeScript, Agent SDK), 127.0.0.1:8787, own package-lock.json
   placeholder-api/    public API placeholder, 0.0.0.0:8000 (TypeScript, no runtime deps, `node server.ts`)
+  start-runner.sh     starts the runner from the deployed checkout
   start-api.sh        starts apps/api/dist/server.js if it exists, else the placeholder
   systemd/            apprentice-runner/-api/-deploy units, deploy timer, sudoers rule
-  deploy/deploy.sh    pull, install by lockfile, build, restart, health check, roll back
-  install.sh          idempotent installer (sudo)
+  deploy/deploy.sh    deploy the published sha: build what changed, restart, health check, roll back
+  install.sh          idempotent installer for the root-owned parts (sudo)
   check.sh            doc-5 acceptance checks (local or through the public URL)
 ```
 
-All code under `infra/` is TypeScript with `strict`, `noUncheckedIndexedAccess`, `verbatimModuleSyntax` and `erasableSyntaxOnly`, and no `any` (`unknown` plus validators at the boundaries). The runner is built with `tsc`; the placeholder runs through Node 24's built-in type stripping, so it needs no build step and no runtime dependencies (`typescript` and `@types/node` are dev-only, for `tsc --noEmit`).
+All code under `infra/` is TypeScript with `strict`, `noUncheckedIndexedAccess`, `verbatimModuleSyntax` and `erasableSyntaxOnly`, and no `any` (`unknown` plus validators at the boundaries). The runner is built with `tsc`; the placeholder runs through Node's built-in type stripping (**Node ≥ 22.18**; the VM has Node 24), so it needs no build step and no runtime dependencies (`typescript` and `@types/node` are dev-only, for `tsc --noEmit`).
 
 `infra/` uses **npm**, not the root package manager, and must never match a root workspace glob (keep `pnpm-workspace.yaml` / `workspaces` to `apps/*` and `packages/*`).
 
@@ -23,7 +24,7 @@ All code under `infra/` is TypeScript with `strict`, `noUncheckedIndexedAccess`,
 |---|---|
 | Public URL | `https://apprentice.exe.xyz` → VM port **8000** (only public port) |
 | Runner | `http://127.0.0.1:8787` (loopback only; bearer `RUNNER_TOKEN`) |
-| Code | `/opt/apprentice/infra` (copy installed by `install.sh`), `/opt/apprentice/repo` (anonymous clone of `main`, touched only by `deploy.sh`) |
+| Code | `/opt/apprentice/repo`: anonymous clone, detached at the deployed sha; the services run from it and only `deploy.sh` moves it. `/opt/apprentice/bin/apprentice-deploy`: the deploy script, installed by `install.sh` |
 | Data | `/var/lib/apprentice/{db,media,runner-cwd,sessions}`, owner `apprentice`, mode 750; survives restarts and reboots |
 | Secrets | `/etc/apprentice/env`, root:root 0600, loaded by systemd `EnvironmentFile=` |
 | OS | Ubuntu 24.04, systemd 255, Node 24 LTS, pnpm via corepack |
@@ -39,21 +40,21 @@ All code under `infra/` is TypeScript with `strict`, `noUncheckedIndexedAccess`,
 2. Fill the secrets on the VM: `sudoedit /etc/apprentice/env` — `ELEVENLABS_API_KEY`, exactly **one** of `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY`, and `ALLOWED_ORIGINS`. Then `sudo systemctl restart apprentice-runner apprentice-api`.
 3. **Before any judge-facing URL is shared:** switch to API-key auth (Agent SDK terms): set `ANTHROPIC_API_KEY`, delete the `CLAUDE_CODE_OAUTH_TOKEN` value, restart, and confirm `mode` is `apikey`:
    `curl -s localhost:8787/health | jq .mode`.
-4. Optional: enable automatic deploys (every minute, only acts when `origin/$DEPLOY_REF` moved):
-   `sudo systemctl enable --now apprentice-deploy.timer` (disable with `sudo systemctl disable --now apprentice-deploy.timer`).
+4. Automatic deploys (doc-8): `DEPLOY_SOURCE=pages` in the env file, then `sudo systemctl enable --now apprentice-deploy.timer` (stop with `sudo systemctl disable --now apprentice-deploy.timer`). To freeze before the pitch, set `DEPLOY_FREEZE=1` in the repository so `release.yml` stops publishing; the VM then has nothing new to deploy.
+5. After a deploy logs `not applied, run sudo infra/install.sh`: on the VM, `cd ~/work/ai-apprentice && git fetch && git checkout --detach <sha from the log> && sudo infra/install.sh`.
 
 ## Operations
 
 ```bash
-# install or update infra from a clone (idempotent)
-sudo ~/work/ai-apprentice/infra/install.sh
-# deploy main now (no-op if unchanged; --force redeploys the same sha)
-sudo -u apprentice /opt/apprentice/infra/deploy/deploy.sh [--force]
-# or through systemd (same script, logs in journald)
+# deploy now (reads /etc/apprentice/env, so DEPLOY_SOURCE applies; logs in journald)
 sudo systemctl start apprentice-deploy.service
+sudo journalctl -u apprentice-deploy -n 50
+# the same script by hand; --force rebuilds and restarts everything
+sudo -u apprentice /opt/apprentice/bin/apprentice-deploy [--force]
+# install or update the root-owned parts from a clone (idempotent)
+sudo ~/work/ai-apprentice/infra/install.sh
 # logs (metadata only: request id, route, status, duration, sizes, model)
 sudo journalctl -u apprentice-api -u apprentice-runner -f
-sudo journalctl -u apprentice-deploy -n 50
 systemctl list-timers apprentice-deploy.timer
 # acceptance checks on the VM (through port 8000)
 ~/work/ai-apprentice/infra/check.sh
@@ -69,13 +70,22 @@ T=$(ssh apprentice.exe.xyz "sudo grep ^API_TOKEN= /etc/apprentice/env | cut -d= 
 
 The token goes only into the environment of that one command and into a 0600 header file for curl, so it is never printed and never visible in `ps`; the check session it creates is deleted at the end. About a minute: 11 model calls plus 6–11.9 MB uploads. Without ImageMagick the script stops with "ImageMagick not found".
 
-`deploy.sh` (run as `apprentice` under `flock`): records the current sha, `git fetch`, `git reset --hard origin/$DEPLOY_REF` plus `git clean -fdx` (the checkout holds no data), installs at the repo root by lockfile (`pnpm-lock.yaml` → `pnpm install --frozen-lockfile`, `package-lock.json` → `npm ci`, none → skip), runs `apps/api`'s `build` script if it has one, restarts `apprentice-api` (and `apprentice-runner` only if `infra/claude-runner` changed), polls `http://127.0.0.1:8000/health` for 30 s and on failure resets to the old sha, reinstalls, restarts and exits 1. A sha that failed is remembered in `/var/lib/apprentice/deploy.failed-sha` and skipped on later timer ticks until a new commit lands or you pass `--force`. `apprentice-api` keeps answering `/health` with `runner:"down"` when the runner is down, so a missing Claude credential does not block deploys.
+### How a commit reaches the VM (doc-8)
 
-**Deploy ships `apps/` only.** `infra/` runs from `/opt/apprentice/infra`; after an `infra/` change run `sudo infra/install.sh` from a clone (deploy logs a note when it sees one).
+1. `release.yml` checks `main` and, if green and not frozen, publishes the site to Pages together with `deploy.json` (`{"sha": "<40 hex>", "at", "run"}`).
+2. `apprentice-deploy.timer` runs `apprentice-deploy` every minute as `apprentice` under `flock`. With `DEPLOY_SOURCE=pages` (default) it fetches `https://qwadratic.github.io/ai-apprentice/deploy.json` (`curl --max-time 10`). The sha must be 40 hex characters and an ancestor of `origin/main`; otherwise it logs `deploy.json missing` / `invalid` / `not on origin/main` and does nothing (no fallback to `main`). `DEPLOY_SOURCE=ref` deploys `origin/$DEPLOY_REF` instead, for manual use.
+3. If the sha differs from the checkout's HEAD:
+   - it logs changed install-managed paths (`infra/systemd`, `infra/install.sh`, `infra/deploy`) with `run sudo infra/install.sh` and never applies them;
+   - it checks the sha out detached and runs `git clean -fdx`. Only `node_modules` at the root and the runner's `node_modules` and `dist` survive, and they are rebuilt when their sources change;
+   - it rebuilds only what changed: the runner (`npm ci` + `tsc`) when `infra/claude-runner` or `start-runner.sh` changed, and the API side when `apps/`, `packages/`, `infra/placeholder-api`, `start-api.sh` or a root package or lockfile changed. The API side means the root install by lockfile and the `apps/api` build; the placeholder needs nothing, since it has no runtime dependencies;
+   - it restarts only those services, polls `http://127.0.0.1:8000/health` for 30 s, and records the sha in `/var/lib/apprentice/deployed-sha` (shown as `deployed_sha` in `/health`).
+4. On a failed health check it checks the old sha out, rebuilds what differs, restarts, and exits 1. The failed sha goes to `/var/lib/apprentice/deploy.failed-sha` and is skipped until a new sha is published or `--force` is given.
+
+A backlog-only or docs-only release moves the checkout and `deployed_sha` but restarts nothing. `apprentice-api` keeps answering `/health` with `runner:"down"` when the runner is down, so a missing Claude credential does not block deploys.
 
 **Security notes on deploy:**
 - `pnpm install` / `npm ci` run the dependencies' install lifecycle scripts as `apprentice`, the same user the services run as. deploy.sh unsets the secrets in its own environment, but a malicious dependency could still read the service processes' environment or `/var/lib/apprentice` data. Review new dependencies before they land on `main`.
-- With the timer on, every push to `main`, even a backlog-only one, triggers a deploy and restarts `apprentice-api` (live sessions drop). **Keep the timer off during the pitch** and deploy by hand.
+- With the timer on, every release that touches the API's paths restarts `apprentice-api`, and live sessions drop; backlog- or docs-only releases restart nothing. **Freeze releases (`DEPLOY_FREEZE=1`) or disable the timer during the pitch.**
 
 ## Environment (`/etc/apprentice/env`)
 
@@ -94,13 +104,15 @@ The token goes only into the environment of that one command and into a 0600 hea
 | `RUNNER_MODEL` | runner | default `claude-sonnet-5-5` |
 | `RUNNER_MODELS` | runner | optional allowlist for a request's `model` (default sonnet-5-5, opus-5-5, haiku-4-5); others get 400 `model_not_allowed` |
 | `RUNNER_CONCURRENCY` | runner | default 2 (about 1 GiB RAM per SDK subprocess) |
-| `DEPLOY_REF` | deploy | default `main` |
+| `DEPLOY_SOURCE` | deploy | `pages` (default): the sha in `deploy.json`; `ref`: `origin/$DEPLOY_REF` |
+| `DEPLOY_REF` | deploy | default `main`; used with `DEPLOY_SOURCE=ref` |
+| `DEPLOY_JSON_URL` | deploy | default `https://qwadratic.github.io/ai-apprentice/deploy.json` |
 | `DEBUG_ENDPOINTS` | placeholder | `1` enables `GET /debug/sse` |
 | `SESSIONS_DIR` | placeholder | default `/var/lib/apprentice/sessions` (not in the env file; set in the unit if needed) |
 
 ## Contract for streams A and B: the real API (`apps/api`)
 
-`start-api.sh` runs `node /opt/apprentice/repo/apps/api/dist/server.js` (cwd `apps/api`) as soon as that file exists after a deploy; otherwise the placeholder. The real server must:
+`start-api.sh` runs `node /opt/apprentice/repo/apps/api/dist/server.js` (cwd `apps/api`) as soon as that file exists after a deploy; otherwise the placeholder (`node server.ts`). The real server must:
 
 - listen on `HOST` (`0.0.0.0`) and `PORT` (`8000`);
 - read `DATABASE_PATH`, `MEDIA_DIR`, `RUNNER_URL` (`http://127.0.0.1:8787`), `RUNNER_TOKEN`, `ALLOWED_ORIGINS`, `ELEVENLABS_API_KEY` from the environment (systemd provides them; `GIT_SHA` is set too);
