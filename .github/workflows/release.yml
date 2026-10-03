@@ -1,30 +1,40 @@
 name: release
 
-# Push to main: re-run every check on the merged result; if green and not frozen,
-# fast-forward branch `deploy` to the commit and publish the site to GitHub Pages.
-# The VM pulls `deploy` (TASK-6.2); nothing here talks to the VM.
+# Push to main: re-run every check on the merged result; if green and not frozen, build the
+# site and publish it to GitHub Pages together with deploy.json:
+#   {"sha": "<40-hex target commit>", "at": "<UTC ISO time>", "run": "<this run's url>"}
+# Site and pointer are one Pages artifact, so they always move together. The VM (TASK-6.2)
+# polls <pages-url>/deploy.json, checks the sha is an ancestor of origin/main and deploys it.
+# Nothing here pushes to git (no deploy branch) and nothing talks to the VM, so the workflow
+# needs no contents: write.
+#
+# Stale re-runs: a non-manual run only publishes while its commit is still the newest
+# releasable state of main. Re-running an old run must not roll the site back.
+# "Newest" ignores backlog/**: those pushes do not start this workflow (paths-ignore), so
+# a code push followed at once by a backlog bookkeeping push still publishes the code push.
 #
 # Manual run (workflow_dispatch, must be started from main):
-#   sha     commit on main to release (default: head of main). Rollback = an older sha.
-#   force   allow a non-fast-forward move of `deploy` (needed for rollback to an older sha).
-#   confirm release even though the repository variable DEPLOY_FREEZE is 1.
+#   sha      commit on main to release (default: head of main). Rollback = an older sha;
+#            it must be an ancestor of main. Skips the stale check.
+#   confirm  release even though the repository variable DEPLOY_FREEZE is 1.
+#
+# Freeze: DEPLOY_FREEZE=1 blocks publishing (site and deploy.json) for pushes, and for manual
+# runs unless confirm=true. A rollback should be combined with the freeze: set DEPLOY_FREEZE=1
+# first (so the next push to main does not publish a newer commit over the rollback), then run
+# the rollback manually with confirm=true. Unset the variable to resume.
 on:
   push:
     branches: [main]
-    # Backlog-only pushes (task bookkeeping) must not move deploy.
+    # Backlog-only pushes (task bookkeeping) must not publish.
     paths-ignore:
       - "backlog/**"
   workflow_dispatch:
     inputs:
       sha:
-        description: "Commit on main to release (empty = head of main). Older sha = rollback, needs force."
+        description: "Commit on main to release (empty = head of main). An older sha is a rollback."
         type: string
         required: false
         default: ""
-      force:
-        description: Allow a non-fast-forward move of the deploy branch (rollback)
-        type: boolean
-        default: false
       confirm:
         description: Release even though DEPLOY_FREEZE is 1
         type: boolean
@@ -43,6 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       sha: ${{ steps.resolve.outputs.sha }}
+      publish: ${{ steps.resolve.outputs.publish }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -62,16 +73,29 @@ jobs:
             echo "::error::sha input must be 7-40 hex characters"
             exit 1
           fi
+          git fetch --quiet origin main
           sha=$(git rev-parse --verify "${target}^{commit}")
           if ! git merge-base --is-ancestor "$sha" origin/main; then
             echo "::error::$sha is not on main; refusing to release it"
             exit 1
           fi
-          echo "Releasing $sha"
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT" != "workflow_dispatch" ]; then
+            head=$(git rev-parse origin/main)
+            # Stale = main has moved on with changes outside backlog/ (those start their own run).
+            if [ "$sha" != "$head" ] && ! git diff --quiet "$sha" "$head" -- . ':(exclude)backlog'; then
+              echo "::notice::Skipping: $sha is no longer the head of main ($head); a newer run publishes that. Use a manual run to release an older commit."
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          echo "Releasing $sha"
+          echo "publish=true" >> "$GITHUB_OUTPUT"
 
   gate:
     name: deploy freeze gate
+    needs: prepare
+    if: needs.prepare.outputs.publish == 'true'
     runs-on: ubuntu-latest
     steps:
       - env:
@@ -92,70 +116,38 @@ jobs:
 
   checks-stream-b:
     needs: prepare
+    if: needs.prepare.outputs.publish == 'true'
     uses: ./.github/workflows/stream-b-checks.yml
     with:
       ref: ${{ needs.prepare.outputs.sha }}
 
   checks-backlog:
     needs: prepare
+    if: needs.prepare.outputs.publish == 'true'
     uses: ./.github/workflows/backlog-check.yml
     with:
       ref: ${{ needs.prepare.outputs.sha }}
 
-  promote:
-    name: fast-forward deploy branch
+  pages-build:
+    name: build site and deploy.json
     needs: [prepare, gate, checks-stream-b, checks-backlog]
+    if: needs.prepare.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
+      pages: read # configure-pages
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.prepare.outputs.sha }}
-          fetch-depth: 0
-      - env:
+      - name: Lab lockfile exists at this commit
+        env:
           SHA: ${{ needs.prepare.outputs.sha }}
-          EVENT: ${{ github.event_name }}
-          FORCE: ${{ inputs.force }}
         run: |
-          set -euo pipefail
-          if ! git ls-remote --exit-code --heads origin deploy > /dev/null; then
-            echo "Branch deploy does not exist; creating it at $SHA"
-            git push origin "$SHA:refs/heads/deploy"
-            exit 0
+          if [ ! -f apps/web/features/agent/lab/package-lock.json ]; then
+            echo "::error::apps/web/features/agent/lab/package-lock.json is missing at $SHA. This commit predates the lab lockfile and cannot be built; pick a newer sha."
+            exit 1
           fi
-          git fetch origin deploy
-          old=$(git rev-parse origin/deploy)
-          if [ "$old" = "$SHA" ]; then
-            echo "deploy is already at $SHA"
-            exit 0
-          fi
-          if git merge-base --is-ancestor "$old" "$SHA"; then
-            echo "Fast-forward deploy $old -> $SHA"
-            git push origin "$SHA:refs/heads/deploy"
-            exit 0
-          fi
-          # Not a fast-forward: $SHA is behind deploy (older commit) or the branches diverged.
-          if [ "$EVENT" = "workflow_dispatch" ] && [ "$FORCE" = "true" ]; then
-            echo "::warning::Non-fast-forward move of deploy $old -> $SHA (force=true)"
-            git push --force-with-lease="refs/heads/deploy:$old" origin "$SHA:refs/heads/deploy"
-            exit 0
-          fi
-          if [ "$EVENT" = "push" ] && git merge-base --is-ancestor "$SHA" "$old"; then
-            echo "::notice::deploy ($old) already contains $SHA; nothing to do."
-            exit 0
-          fi
-          echo "::error::Cannot fast-forward deploy ($old) to $SHA. For a rollback run this workflow manually with force=true."
-          exit 1
-
-  pages-build:
-    name: build site
-    needs: [prepare, gate, checks-stream-b, checks-backlog]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare.outputs.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -167,6 +159,16 @@ jobs:
           npm ci
           npm run typecheck
           npm run build
+      - name: Write deploy.json next to the site
+        env:
+          SHA: ${{ needs.prepare.outputs.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          out=apps/web/features/agent/lab/dist/deploy.json
+          jq -n --arg sha "$SHA" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg run "$RUN_URL" \
+            '{sha: $sha, at: $at, run: $run}' > "$out"
+          cat "$out"
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
@@ -174,7 +176,7 @@ jobs:
 
   pages-deploy:
     name: publish to Pages
-    needs: [pages-build, promote]
+    needs: pages-build
     runs-on: ubuntu-latest
     permissions:
       pages: write
