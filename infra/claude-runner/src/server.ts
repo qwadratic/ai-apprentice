@@ -158,7 +158,8 @@ async function run(req: CompleteReq | VisionReq, images?: VisionReq['images']): 
       { type: 'text' as const, text: req.prompt },
     ];
     prompt = (async function* () {
-      yield { type: 'user', message: { role: 'user', content }, parent_tool_use_id: null } as SDKUserMessage;
+      const msg: SDKUserMessage = { type: 'user', message: { role: 'user', content }, parent_tool_use_id: null };
+      yield msg;
     })();
   }
 
@@ -226,9 +227,9 @@ function readBody(req: http.IncomingMessage): Promise<Buffer> {
 
 function authorized(req: http.IncomingMessage): boolean {
   const h = req.headers.authorization || '';
-  const m = /^Bearer (.+)$/.exec(h);
-  if (!m) return false;
-  const a = Buffer.from(m[1]);
+  const given = /^Bearer (.+)$/.exec(h)?.[1];
+  if (!given) return false;
+  const a = Buffer.from(given);
   const b = Buffer.from(RUNNER_TOKEN);
   return a.length === b.length && timingSafeEqual(a, b);
 }

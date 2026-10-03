@@ -5,13 +5,15 @@ Owner: TASK-4 (@qwadratic, delegated to the agent on the exe.dev VM). Nothing he
 ```
 infra/
   claude-runner/      Claude runner (TypeScript, Agent SDK), 127.0.0.1:8787, own package-lock.json
-  placeholder-api/    dependency-free public API placeholder, 0.0.0.0:8000
+  placeholder-api/    public API placeholder, 0.0.0.0:8000 (TypeScript, no runtime deps, `node server.ts`)
   start-api.sh        starts apps/api/dist/server.js if it exists, else the placeholder
   systemd/            apprentice-runner/-api/-deploy units, deploy timer, sudoers rule
   deploy/deploy.sh    pull, install by lockfile, build, restart, health check, roll back
   install.sh          idempotent installer (sudo)
   check.sh            doc-5 acceptance checks (local or through the public URL)
 ```
+
+All code under `infra/` is TypeScript with `strict`, `noUncheckedIndexedAccess`, `verbatimModuleSyntax` and `erasableSyntaxOnly`, and no `any` (`unknown` plus validators at the boundaries). The runner is built with `tsc`; the placeholder runs through Node 24's built-in type stripping, so it needs no build step and no runtime dependencies (`typescript` and `@types/node` are dev-only, for `tsc --noEmit`).
 
 `infra/` uses **npm**, not the root package manager, and must never match a root workspace glob (keep `pnpm-workspace.yaml` / `workspaces` to `apps/*` and `packages/*`).
 
@@ -207,6 +209,7 @@ Measured 3 Oct 2026 (oauth mode, `claude-sonnet-5-5`, concurrency 2, 2 vCPU / 7 
 ## Fast checks
 
 ```bash
-cd infra/claude-runner && npm ci --include=optional && npm run typecheck
-bash -n infra/*.sh infra/deploy/deploy.sh && node --check infra/placeholder-api/server.mjs
+(cd infra/claude-runner && npm ci --include=optional && npm run typecheck)
+(cd infra/placeholder-api && npm ci && npm run typecheck)      # tsc --noEmit
+bash -n infra/*.sh infra/deploy/deploy.sh
 ```

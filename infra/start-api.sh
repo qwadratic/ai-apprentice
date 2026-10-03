@@ -12,4 +12,4 @@ if [ -f "$REPO/apps/api/dist/server.js" ]; then
   cd "$REPO/apps/api"
   exec node dist/server.js
 fi
-exec node "$INFRA/placeholder-api/server.mjs"
+exec node "$INFRA/placeholder-api/server.ts"
