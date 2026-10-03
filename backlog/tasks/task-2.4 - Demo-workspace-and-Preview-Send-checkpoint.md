@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@kigulx'
 created_date: '2026-10-03 21:16'
-updated_date: '2026-10-03 21:37'
+updated_date: '2026-10-03 22:29'
 labels:
   - stream-a
   - workspace
@@ -21,7 +21,7 @@ ordinal: 8000
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Assigned worker: demo workspace. Own apps/web/features/demo-workspace and its colocated fixtures/tests. Implement synthetic order, email and ticket contexts; begin with email. Use B requirements from TASK-3.1: two customer_07 orders, another customer, unknown customer and spare customer_12 for a live learned fact. Input-activity heartbeat is scoped to this workspace; it does not claim global keyboard access. Start independent workspace state, synthetic cases, draft versioning, reset, checkpoint state machine and UI components now. TASK-2.1 gates final shared integration. Inject a local checkpoint callback for tests; do not create a competing ScreenBridge or expose hidden scenario answers. Publication policy: only Backlog changes go to main; implementation remains on task branches. The orchestrator publishes using the repository-local Kigulx authentication authorized by the user; the connector previously rejected writes. Workers do not push or merge. Branch availability is not completion: Done still requires a future merge. Dependencies may be consumed from an explicitly approved branch revision before that merge. Reserved implementation branch: task-2.4-demo-workspace.
+Assigned worker: demo workspace. Own apps/web/features/demo-workspace and its colocated fixtures/tests. Implement synthetic order, email and ticket contexts; begin with email. Use B requirements from TASK-3.1: two customer_07 orders, another customer, unknown customer and spare customer_12 for a live learned fact. Input-activity heartbeat is scoped to this workspace; it does not claim global keyboard access. Start independent workspace state, synthetic cases, draft versioning, reset, checkpoint state machine and UI components now. TASK-2.1 gates final shared integration. Inject a local checkpoint callback for tests; do not create a competing ScreenBridge or expose hidden scenario answers. Publication policy updated by explicit human instruction on 4 Oct: the orchestrator may publish reviewed Stream A implementation to main if B files are preserved. Workers still develop and hand off on their assigned task branches. Shared contract changes require approval from both owners. The orchestrator publishes using the repository-local Kigulx authentication authorized by the user; the connector previously rejected writes. Workers do not push or merge. Branch availability is not completion: Done still requires a future merge. Dependencies may be consumed from an explicitly approved branch revision before that merge. Reserved implementation branch: task-2.4-demo-workspace.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

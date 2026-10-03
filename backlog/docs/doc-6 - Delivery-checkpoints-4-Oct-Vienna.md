@@ -3,7 +3,7 @@ id: doc-6
 title: Delivery checkpoints - 4 Oct Vienna
 type: guide
 created_date: '2026-10-03 22:19'
-updated_date: '2026-10-03 22:20'
+updated_date: '2026-10-03 22:29'
 ---
 # Delivery checkpoints for 4 October 2026
 
@@ -53,6 +53,28 @@ Commands independently rerun by the coordinator, with /private/tmp/ai-apprentice
 
 73 tests passed in total. This does not establish browser/OS behavior, provider quality, CI success or end-to-end demo readiness.
 
-## Publication rule requiring coordination
+## Updated publication authorization and handoff
 
-The direct instruction in the Codex coordinator chat remains: only Backlog goes to main; code and contracts stay on separate branches. Newly fetched decision-1 permits a different coordinator to merge B-only PRs after CI and review. This is a policy discrepancy to resolve with the human owners before code merges or deployment assumptions. This schedule does not amend decision-1 or authorize such a merge. Work and integration checks can continue on task branches meanwhile.
+The human explicitly authorized reviewed A code on main during this coordination turn, provided it does not overwrite B work. This supersedes the earlier Backlog-only restriction for this coordinator. Workers still hand off local commits; the coordinator publishes. Shared contract changes still require both stream owners' approval. Do not interpret this as permission to overwrite B or merge an unreviewed contract.
+
+The selected independent source commits are 5b92f05, d559334 (TASK-2.2) and 3e7297c (TASK-2.3). Their 18 code/document/test paths were absent from origin/main c61b2a4, so no B file is replaced. They are being integrated with the existing B implementation. On the combined tree, the coordinator reran 50 A capture/vision/API tests and all 30 B agent tests using Node22.22: all passed. This is local verification, not CI or a full app run. TASK-2.2 and TASK-2.3 remain In Progress because integration acceptance criteria are still open.
+
+### What B can use immediately
+
+- packages/screen/capture/README.md: ScreenCapture lifecycle, processed frame callback, invalidation lease, masked processed stream and ScreenPanel DOM mount. The real OS picker requires presenting-machine verification.
+- apps/api/screen/README.md: createScreenService, runner adapter, Evidence adapters, HTTP mount contract, source-revision rules. This is a library slice: mounting, authentication/CORS, production metadata storage and the real runner are not wired yet.
+- TASK-2.1 and TASK-2.4 remain separate active branches pending schema/fixture reconciliation. Do not depend on their mutable worktree files; wait for an exact reviewed handoff SHA.
+
+### Agreements needed before the next tasks
+
+| Agreement | Owner and evidence needed | Unblocks |
+| --- | --- | --- |
+| Canonical ScreenBridge | A foundation worker reconciles B's draft; A/B approve TASK-1 field table and methods, especially order_view, ticket, heartbeat and checkpoint methods | TASK-2.1 and B's move from draft imports to packages/contracts |
+| Single session lifecycle | A bridge and B session owner agree sessionId/sessionEpochMs, off-record propagation, cancel/dispose and reset behavior | TASK-3.15 integration and trustworthy timestamps |
+| Current checkpoint evidence | A integration adapter tracks each observation's frame, session/generation, order revision and email revision; verify both observations when applying a reply and again on Send | TASK-2.4 Preview/Send and B tutor; current vision canUseForCheckpoint tracks only one latest frame and cannot alone validate the required pair |
+| Real latency and timeout policy | A/B run a 60-second real-provider sample, frames every 2 seconds; record p50/p95 capture-to-observation and Preview-to-reply, failures and drops; no frame contents in logs | Choose an achievable checkpoint deadline; never treat the 75-second historical limit as freshness |
+| API/storage composition | A foundation + vision and TASK-4 owner choose route mounting, exact origins/auth, shared SQLite metadata adapter and runner configuration; tokens stay server-side | Real Evidence resolution and browser-to-runner path |
+| Recording and replay | TASK-2.5 owner consumes only processed stream, calls MediaRecorder.pause on lifecycle invalidation, maps session time to clip time across pauses, agrees chunk upload and asset resolver with API owner | Clip Evidence and ReplayPanel; task must be claimed before implementation |
+| Demo fixture and shell mount | A demo owner aligns visible cases/heartbeat/reset with fixtures/agent/sandbox-requirements.md; B owns app shell and agent response hookup | Deterministic rehearsals, including two different customer_12 orders without hidden rules |
+
+The direct sourceRevision value in an HTTP body is not proof of current screen state. Current HTTP uploads remain history-only until the trusted provenance adapter is connected. A 2.5-second checkpoint age is provisional and may reject every slow provider response; increasing it needs both measured latency and unchanged-source checks. Unknown/timeout must stay visibly unverified.

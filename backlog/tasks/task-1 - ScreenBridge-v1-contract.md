@@ -6,7 +6,7 @@ assignee:
   - '@kigulx'
   - '@qwadratic'
 created_date: '2026-10-03 20:54'
-updated_date: '2026-10-03 22:22'
+updated_date: '2026-10-03 22:29'
 labels:
   - shared
   - contract
@@ -45,5 +45,11 @@ author: @qwadratic
 created: 2026-10-03 22:22
 ---
 Stream B's proposal is on main: packages/agent/src/contract-draft.ts (ScreenBridge v1 draft, schemaVersion 1, facts for order, email draft, ticket and the input_activity heartbeat, plus onObservation/onStatus/onCheckpoint/replyToCheckpoint) and fixtures/agent/sandbox-requirements.md (screens, data, customer_07 x2, another customer, unknown customer, customer_12 x2 for the live new-fact test, Preview -> Send, heartbeat cadence, reset). @kigulx please review and say what to change; types move to packages/contracts with your skeleton. Dependencies stream B will need in the root lockfile: zod 4, @elevenlabs/react ^1.16, @elevenlabs/client ^1.26, react.
+---
+
+author: @kigulx
+created: 2026-10-03 22:29
+---
+A coordinator reviewed the B draft and found mismatches in the current A foundation proposal; the foundation worker is reconciling it against packages/agent/src/contract-draft.ts. Shared approval is still pending; no contract has been published by A. Before real integration agree order_view/ticket/input_activity shapes and onCheckpoint/replyToCheckpoint, per-observation provenance for latest order+email, session/reset/off-record semantics, and measured checkpoint deadlines. Detailed handoff and target sync times: doc-6. The independent A capture/vision slices are being published without modifying B files.
 ---
 <!-- COMMENTS:END -->

@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@kigulx'
 created_date: '2026-10-03 21:15'
-updated_date: '2026-10-03 21:37'
+updated_date: '2026-10-03 22:29'
 labels:
   - stream-a
   - infra
@@ -20,7 +20,7 @@ ordinal: 5000
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Owner: Stream A orchestrator. The three worker chats cannot implement compatible modules until they have one web skeleton and package boundary. Own root workspace configuration and lockfile, minimal web/API bootstrap, and packages/contracts implementing the jointly reviewed TASK-1 draft from TASK-3.1. Coordinate app-shell entry points with B and backend mounting with TASK-4. Do not implement the voice or product shell. Publication policy: only Backlog changes go to main; implementation remains on task branches. The orchestrator publishes using the repository-local Kigulx authentication authorized by the user; the connector previously rejected writes. Workers do not push or merge. Branch availability is not completion: Done still requires a future merge. Dependencies may be consumed from an explicitly approved branch revision before that merge. Reserved implementation branch: task-2.1-web-foundation.
+Owner: Stream A orchestrator. The three worker chats cannot implement compatible modules until they have one web skeleton and package boundary. Own root workspace configuration and lockfile, minimal web/API bootstrap, and packages/contracts implementing the jointly reviewed TASK-1 draft from TASK-3.1. Coordinate app-shell entry points with B and backend mounting with TASK-4. Do not implement the voice or product shell. Publication policy updated by explicit human instruction on 4 Oct: the orchestrator may publish reviewed Stream A implementation to main if B files are preserved. Workers still develop and hand off on their assigned task branches. Shared contract changes require approval from both owners. The orchestrator publishes using the repository-local Kigulx authentication authorized by the user; the connector previously rejected writes. Workers do not push or merge. Branch availability is not completion: Done still requires a future merge. Dependencies may be consumed from an explicitly approved branch revision before that merge. Reserved implementation branch: task-2.1-web-foundation.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

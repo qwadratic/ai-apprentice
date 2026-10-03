@@ -5,7 +5,7 @@ status: To Do
 assignee:
   - '@kigulx'
 created_date: '2026-10-03 21:16'
-updated_date: '2026-10-03 21:37'
+updated_date: '2026-10-03 22:29'
 labels:
   - stream-a
   - screen
@@ -21,7 +21,7 @@ ordinal: 9000
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Follow-up for capture/privacy after its capture handoff. Own packages/screen/recording, packages/screen/evidence and apps/web/features/screen/ReplayPanel with scoped tests. Use the processed stream from TASK-2.2 and server persistence from TASK-2.3/TASK-4.1. Do not add microphone or system audio. Publication policy: only Backlog changes go to main; implementation remains on task branches. The orchestrator publishes using the repository-local Kigulx authentication authorized by the user; the connector previously rejected writes. Workers do not push or merge. Branch availability is not completion: Done still requires a future merge. Dependencies may be consumed from an explicitly approved branch revision before that merge. Reserved implementation branch: task-2.5-recording-replay.
+Follow-up for capture/privacy after its capture handoff. Own packages/screen/recording, packages/screen/evidence and apps/web/features/screen/ReplayPanel with scoped tests. Use the processed stream from TASK-2.2 and server persistence from TASK-2.3/TASK-4.1. Do not add microphone or system audio. Publication policy updated by explicit human instruction on 4 Oct: the orchestrator may publish reviewed Stream A implementation to main if B files are preserved. Workers still develop and hand off on their assigned task branches. Shared contract changes require approval from both owners. The orchestrator publishes using the repository-local Kigulx authentication authorized by the user; the connector previously rejected writes. Workers do not push or merge. Branch availability is not completion: Done still requires a future merge. Dependencies may be consumed from an explicitly approved branch revision before that merge. Reserved implementation branch: task-2.5-recording-replay.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
