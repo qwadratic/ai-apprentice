@@ -49,7 +49,7 @@ curl -sN -m 15 "$BASE/debug/sse" | while IFS= read -r line; do
 done
 
 SCHEMA_PROMPT='{"prompt":"Customer_07 asks for order data as text in the email body. Return the customer id and the requested format.","schema":{"type":"object","properties":{"customer":{"type":"string"},"format":{"type":"string"}},"required":["customer","format"],"additionalProperties":false}}'
-IM="$(command -v magick || command -v convert)"
+IM="$(command -v magick || command -v convert)" || { echo "ImageMagick not found (brew install imagemagick)" >&2; exit 2; }
 "$IM" -size 640x160 xc:white -pointsize 30 -fill black -draw "text 20,60 'To: customer_07'" -draw "text 20,110 'Order 1234, qty 5, 24.10.2026'" "$W/t.png"
 jq -n --arg d "$(base64 < "$W/t.png" | tr -d '\n')" '{images:[{media_type:"image/png",data:$d}],prompt:"Read the text.",schema:{type:"object",properties:{recipient:{type:"string"},order:{type:"string"}},required:["recipient","order"],additionalProperties:false}}' > "$W/v.json"
 

@@ -120,7 +120,8 @@ The placeholder exposes the runner publicly as `POST /runner/v1/*` behind `Autho
 
 Measured 3 Oct 2026 (oauth mode, `claude-sonnet-5-5`, concurrency 2, 2 vCPU / 7 GiB).
 
-- Proxy (exe.dev, checked from outside): SSE events arrive one per second, not buffered; CORS preflight correct; `:8787` not reachable. Largest authenticated POST through the proxy: _not yet measured from outside_ — run `check.sh` with `BASE=https://apprentice.exe.xyz` (it posts 6, 8, 10 and 11.9 MB). Through port 8000 directly all four pass and 13 MB gets 413. Recommended upload chunk for A's recording: **≤ 5 MB**.
+- Proxy (exe.dev, `check.sh` from a Mac against `https://apprentice.exe.xyz`): authenticated POSTs of 6, 8, 10 and **11.9 MB pass** (1.4–1.9 s upload), 13 MB gets 413 from our cap; SSE events arrive at +0.28, 1.23, 2.26, 3.23, 4.24 s (not buffered); preflight 204 with the origin echoed over HTTP/2, foreign origin gets no CORS header; `https://apprentice.exe.xyz:8787/health` → 307 to the exe.dev login (runner is loopback-only anyway). Recommended upload chunk for A's recording: **≤ 5 MB**.
+- Public `/v1/complete` p50 2.9 s (3023 / 2620 / 2943 ms from Vienna); 5 parallel calls → 5 × 200.
 - Free disk: 19 GB of 25 GB on `/`.
 - `/v1/complete` with schema, 3 calls through :8000: 2353 / 2781 / 2890 ms, **p50 2.8 s**.
 - `/v1/vision` (one 640×160 PNG) with schema, 3 calls: 2974 / 2469 / 2613 ms, **p50 2.6 s**.
