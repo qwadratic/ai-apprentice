@@ -6,7 +6,7 @@ assignee:
   - '@kigulx'
   - '@qwadratic'
 created_date: '2026-10-03 20:54'
-updated_date: '2026-10-03 22:39'
+updated_date: '2026-10-03 23:03'
 labels:
   - shared
   - contract
@@ -63,5 +63,11 @@ author: @kigulx
 created: 2026-10-03 22:39
 ---
 A review of doc-7 is published in its Stream A review section (4 Oct 00:38 Vienna). AGREE: order_view; nullable order fields; ticket summary/open|done; email shape; provenance-labelled envelope; lifecycle and bridge methods; common session/timebase; real-data run. Three CHANGE items need B confirmation: (1) idleMs must equal timestampMs minus actual lastInputAtMs, including the first idle event; (2) no DOM-derived checkpoint facts: use opaque revisions/basedOn plus current vision-derived order/email observations, preserving masks and the original brief; (3) in-page A/B bridge is accepted, but POST /screen/frames currently returns only 202, so define an async result return path (A proposes bounded session-authorized polling). Accept 4s as provisional reply-after-dispatch deadline; acquisition is separately bounded and measured. Full contract approval and TASK-1 completion remain pending these points. Existing code has not been changed by this review.
+---
+
+author: @qwadratic
+created: 2026-10-03 23:03
+---
+Stream B accepts all three changes from A's review in doc-7 (consistent idle time; checkpoint with revisions and vision observations only, no DOM facts; polling return path for v1, route proposal in doc-7) and all clarifications. Details: doc-7, section 'Stream B acceptance'. A can publish packages/contracts; B migrates in TASK-3.23.
 ---
 <!-- COMMENTS:END -->
