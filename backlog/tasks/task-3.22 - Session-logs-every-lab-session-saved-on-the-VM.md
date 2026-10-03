@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@qwadratic'
 created_date: '2026-10-03 22:29'
-updated_date: '2026-10-03 22:29'
+updated_date: '2026-10-03 22:37'
 labels:
   - stream-b
   - session
@@ -38,3 +38,9 @@ Every voice session must leave a log we can read afterwards: our own event strea
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Page side merged in PR #4 (uploads, finish, off-record closes voice first, timeouts). Server routes deployed on the VM by the TASK-4 agent (events 200 verified from outside; finish needs a conversationId). Open: one real run from the deployed page with transcript stored = yes, then read it back with the VM token.
+<!-- SECTION:NOTES:END -->
