@@ -20,8 +20,8 @@
 //     body {"conversationId": "<id>"}; the server fetches the ElevenLabs transcript, metadata and audio.
 //     Answer: JSON {"transcriptStored": true|false} (anything else is shown as "transcript stored: no").
 // sessionId is crypto.randomUUID(), created on Start session and shown under the Clipa card.
-// Every line of the visible event log is queued, with one rule: signed URLs (wss://, https:// with a
-// token) and API keys are removed from the text before it is logged or queued.
+// Every line of the visible event log is queued, with one rule: signed WebSocket URLs (wss://...),
+// xi-api-key values and sk_ keys are removed from the text before it is logged or queued.
 // Off the record: one SYS event is queued and flushed, then nothing more is queued, the voice session
 // ends and finish is called. It does not delete what was already sent.
 import { Conversation } from 'https://cdn.jsdelivr.net/npm/@elevenlabs/client@1.26.0/+esm';
@@ -126,6 +126,9 @@ const FLUSH_MS = 2000;
 const MAX_BATCH_EVENTS = 200;
 const MAX_BATCH_CHARS = 200000;   // the server refuses bodies over 256 KB
 const MAX_TEXT_CHARS = 4000;
+const EVENTS_TIMEOUT_MS = 8000;
+const FINISH_TIMEOUT_MS = 30000;   // the server polls ElevenLabs for up to ~15 s before it answers
+const PERMANENT_FAILURES = [400, 403, 404, 413];
 let session = null;               // {id, conversationId, queue, recording, timer, flushing, failedShown, finished}
 
 function apiBase() { return els.apiBase.value.trim().replace(/\/+$/, ''); }
@@ -136,7 +139,7 @@ function newSession() {
     timer: null, flushing: false, chain: null, failedShown: false, finished: false, base: apiBase(), ending: false,
   };
   const me = session;
-  me.timer = setInterval(() => { if (!me.flushing && me.queue.length) flush(me); }, FLUSH_MS);
+  me.timer = setInterval(() => { if (!me.flushing && !me.gaveUp && me.queue.length) flush(me); }, FLUSH_MS);
   els.sessionId.textContent = session.id;
   return session;
 }
@@ -184,9 +187,18 @@ async function doFlush(s) {
       try {
         res = await fetch(sessionUrl(s, 'events'), {
           method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+          signal: AbortSignal.timeout(EVENTS_TIMEOUT_MS),
         });
       } catch (e) {
         res = null;
+      }
+      if (res && PERMANENT_FAILURES.includes(res.status)) {
+        // The server will not accept this session's log (route missing, origin refused, bad body): stop retrying.
+        s.gaveUp = true;
+        clearInterval(s.timer);
+        s.timer = null;
+        if (s === session) err(`Session log upload refused (${res.status}); upload stopped for this session.`);
+        return false;
       }
       if (!res || !res.ok) {
         if (!s.failedShown) {
@@ -212,12 +224,13 @@ async function finishSession(s) {
   clearInterval(s.timer);
   s.timer = null;
   s.recording = false;
-  await flush(s);
+  if (!s.gaveUp) await flush(s);
   let line;
   try {
     const res = await fetch(sessionUrl(s, 'finish'), {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ conversationId: s.conversationId || null }),
+      signal: AbortSignal.timeout(FINISH_TIMEOUT_MS),
     });
     if (!res.ok) throw new Error(`finish answered ${res.status}`);
     let body = null;
@@ -250,7 +263,7 @@ async function getSessionConfig() {
   sys(`GET ${url}`);
   let res;
   try {
-    res = await fetch(url, { headers: { accept: 'application/json' } });
+    res = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(10000) });
   } catch (e) {
     throw new Error(`Cannot reach ${base} (network error or CORS). The signed-URL endpoint may not be deployed yet. Open the page with ?agent=<public agent id> to test without it.`);
   }
@@ -355,17 +368,40 @@ async function endSession(reason) {
 }
 
 // Off the record: the switch is the last thing that is logged; nothing after it is queued.
+// The microphone and the voice session close first; uploading what was logged before the switch comes after,
+// so a slow or unreachable server can never keep the microphone open.
 async function goOffRecord() {
   const s = session;
   if (s && s.recording) {
     sys('Off the record: capture and upload stopped');
     s.recording = false;
-    await flush(s);
   }
   offRecord = true;
   await endSession('Off the record: session ended, microphone closed. What was already sent is not deleted or recalled.');
   render();
 }
+
+// Closing or reloading the tab: close the voice session and send what is queued with keepalive (best effort).
+window.addEventListener('pagehide', () => {
+  const s = session;
+  const c = conversation;
+  conversation = null;
+  if (c) { try { c.endSession(); } catch { /* page is going away */ } }
+  if (!s || s.finished || s.gaveUp) return;
+  s.finished = true;
+  s.recording = false;
+  clearInterval(s.timer);
+  const post = (route, body) => {
+    try {
+      fetch(sessionUrl(s, route), {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), keepalive: true,
+      }).catch(() => {});
+    } catch { /* ignore */ }
+  };
+  const batch = nextBatch(s).filter((_, i) => i < 50);   // keepalive bodies are limited to 64 KB
+  if (batch.length) post('events', { conversationId: s.conversationId || undefined, events: batch });
+  post('finish', { conversationId: s.conversationId || null });
+});
 
 // ---- Sending -------------------------------------------------------------
 function sendContext(text) {
