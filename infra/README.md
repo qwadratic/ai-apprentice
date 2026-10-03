@@ -6,9 +6,10 @@ Owner: TASK-4 (@qwadratic, delegated to the agent on the exe.dev VM). Nothing he
 infra/
   claude-runner/      Claude runner (TypeScript, Agent SDK), 127.0.0.1:8787, own package-lock.json
   placeholder-api/    public API placeholder, 0.0.0.0:8000 (TypeScript, no runtime deps, `node server.ts`)
+  ops/                deploy webhook, 127.0.0.1:8788, reached through the API's /ops/* (TypeScript, no runtime deps)
   start-runner.sh     starts the runner from the deployed checkout
   start-api.sh        starts apps/api/dist/server.js if it exists, else the placeholder
-  systemd/            apprentice-runner/-api/-deploy units, deploy timer, sudoers rule
+  systemd/            runner, api, ops units; deploy services, request path unit, optional timer; sudoers rule
   deploy/deploy.sh    deploy the published sha: build what changed, restart, health check, roll back
   install.sh          idempotent installer for the root-owned parts (sudo)
   check.sh            doc-5 acceptance checks (local or through the public URL)
@@ -40,7 +41,7 @@ All code under `infra/` is TypeScript with `strict`, `noUncheckedIndexedAccess`,
 2. Fill the secrets on the VM: `sudoedit /etc/apprentice/env` — `ELEVENLABS_API_KEY`, exactly **one** of `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY`, and `ALLOWED_ORIGINS`. Then `sudo systemctl restart apprentice-runner apprentice-api`.
 3. **Before any judge-facing URL is shared:** switch to API-key auth (Agent SDK terms): set `ANTHROPIC_API_KEY`, delete the `CLAUDE_CODE_OAUTH_TOKEN` value, restart, and confirm `mode` is `apikey`:
    `curl -s localhost:8787/health | jq .mode`.
-4. Automatic deploys (doc-8): `DEPLOY_SOURCE=pages` in the env file, then `sudo systemctl enable --now apprentice-deploy.timer` (stop with `sudo systemctl disable --now apprentice-deploy.timer`). To freeze before the pitch, set `DEPLOY_FREEZE=1` in the repository so `release.yml` stops publishing; the VM then has nothing new to deploy.
+4. Deploys are pushed by GitHub Actions (`release.yml` signs a request to `POST /ops/deploy`, see below); the secret `DEPLOY_WEBHOOK_SECRET` is in `/etc/apprentice/env` and in the repository's Actions secrets. To rotate it: generate a new one into the env file (`sudoedit`), `sudo systemctl restart apprentice-ops`, and set the same value with `gh secret set DEPLOY_WEBHOOK_SECRET -R qwadratic/ai-apprentice` (it reads stdin). The minute timer (`DEPLOY_SOURCE=pages`) is an optional fallback: `sudo systemctl enable --now apprentice-deploy.timer`. To freeze before the pitch, set `DEPLOY_FREEZE=1` in the repository so `release.yml` neither publishes nor calls the webhook.
 5. After a deploy logs `not applied, run sudo infra/install.sh`: on the VM, `cd ~/work/ai-apprentice && git fetch && git checkout --detach <sha from the log> && sudo infra/install.sh`.
 
 ## Operations
@@ -70,22 +71,35 @@ T=$(ssh apprentice.exe.xyz "sudo grep ^API_TOKEN= /etc/apprentice/env | cut -d= 
 
 The token goes only into the environment of that one command and into a 0600 header file for curl, so it is never printed and never visible in `ps`; the check session it creates is deleted at the end. About a minute: 11 model calls plus 6–11.9 MB uploads. Without ImageMagick the script stops with "ImageMagick not found".
 
-### How a commit reaches the VM (doc-8)
+### How a commit reaches the VM
 
-1. `release.yml` checks `main` and, if green and not frozen, publishes the site to Pages together with `deploy.json` (`{"sha": "<40 hex>", "at", "run"}`).
-2. `apprentice-deploy.timer` runs `apprentice-deploy` every minute as `apprentice` under `flock`. With `DEPLOY_SOURCE=pages` (default) it fetches `https://qwadratic.github.io/ai-apprentice/deploy.json` (`curl --max-time 10`). The sha must be 40 hex characters and an ancestor of `origin/main`; otherwise it logs `deploy.json missing` / `invalid` / `not on origin/main` and does nothing (no fallback to `main`). `DEPLOY_SOURCE=ref` deploys `origin/$DEPLOY_REF` instead, for manual use.
-3. If the sha differs from the checkout's HEAD:
-   - it logs changed install-managed paths (`infra/systemd`, `infra/install.sh`, `infra/deploy`) with `run sudo infra/install.sh` and never applies them;
-   - it checks the sha out detached and runs `git clean -fdx`. Only `node_modules` at the root and the runner's `node_modules` and `dist` survive, and they are rebuilt when their sources change;
-   - it rebuilds only what changed: the runner (`npm ci` + `tsc`) when `infra/claude-runner` or `start-runner.sh` changed, and the API side when `apps/`, `packages/`, `infra/placeholder-api`, `start-api.sh` or a root package or lockfile changed. The API side means the root install by lockfile and the `apps/api` build; the placeholder needs nothing, since it has no runtime dependencies;
-   - it restarts only those services, polls `http://127.0.0.1:8000/health` for 30 s, and records the sha in `/var/lib/apprentice/deployed-sha` (shown as `deployed_sha` in `/health`).
-4. On a failed health check it checks the old sha out, rebuilds what differs, restarts, and exits 1. The failed sha goes to `/var/lib/apprentice/deploy.failed-sha` and is skipped until a new sha is published or `--force` is given.
+1. `release.yml` checks `main`; if green and not frozen it publishes the site (and `deploy.json`) to Pages and then calls the deploy webhook with the same sha, polling `GET /ops/deploy/status` until `ok`, `failed` or `rolled_back`, so the result shows in the Actions UI.
+2. **Webhook** (`infra/ops`, `apprentice-ops.service`, 127.0.0.1:8788; the public API forwards `/ops/*` to it with the raw body):
+   - `POST /ops/deploy` with body `{"sha": "<40 hex>", "ts": <unix seconds>}` and header `X-Deploy-Signature: sha256=<hex HMAC-SHA256(DEPLOY_WEBHOOK_SECRET, raw body)>`. Checks, in order: rate limit 6/min per IP and 30/h overall (429), secret configured (503), body ≤ 1 KiB (413), signature, compared timing-safe (401 `bad_signature`), body shape (400), `ts` not older than 300 s nor more than 60 s ahead (401 `timestamp_out_of_window`), the same signature not seen before (409 `replayed`), sha an ancestor of `origin/main` after a fetch (422 `not_on_main`). Then it writes `/var/lib/apprentice/deploy-request.json` and `deploy-status.json` (`queued`) and answers **202** `{accepted: true, sha}`. Bodies and signatures are never logged.
+   - `GET /ops/deploy/status` (public, no secrets) → `{deployed_sha, last: {sha, state: queued|running|ok|failed|rolled_back, source, started_at, finished_at, message}}`.
+   - Signing in a workflow (the body string must be sent byte for byte as signed):
+     ```bash
+     body=$(jq -cn --arg sha "$GITHUB_SHA" --argjson ts "$(date +%s)" '{sha: $sha, ts: $ts}')
+     sig=$(BODY="$body" node -e 'process.stdout.write(require("crypto").createHmac("sha256", process.env.DEPLOY_WEBHOOK_SECRET).update(process.env.BODY).digest("hex"))')
+     curl -fsS -X POST https://apprentice.exe.xyz/ops/deploy -H 'Content-Type: application/json' -H "X-Deploy-Signature: sha256=$sig" --data-raw "$body"
+     ```
+3. `apprentice-deploy-request.path` sees the request file change and starts `apprentice-deploy-request.service` (`apprentice-deploy --request`, as `apprentice`, no sudo needed by the webhook). It waits for a running deploy (lock), checks the sha again (40 hex, on `origin/main`), and after finishing looks once more in case a newer request arrived meanwhile.
+4. The deploy:
+   - logs changed install-managed paths (`infra/systemd`, `infra/install.sh`, `infra/deploy`) with `run sudo infra/install.sh` and never applies them;
+   - checks the sha out detached and runs `git clean -fdx`. Only `node_modules` at the root and the runner's `node_modules` and `dist` survive, and they are rebuilt when their sources change;
+   - rebuilds only what changed: the runner (`npm ci` + `tsc`) when `infra/claude-runner` or `start-runner.sh` changed, and the API side when `apps/`, `packages/`, `infra/placeholder-api`, `start-api.sh` or a root package or lockfile changed. The API side means the root install by lockfile and the `apps/api` build; the placeholder and ops need nothing, since they have no runtime dependencies;
+   - restarts only those services (`infra/ops` changes restart `apprentice-ops`);
+   - health-checks for 30 s: `/health` must say `ok: true` **and** `/ops/deploy/status` must answer through port 8000, so an API that stops forwarding `/ops/*` is rolled back;
+   - records the sha in `/var/lib/apprentice/deployed-sha`.
+5. Progress goes to `deploy-status.json` (`running`, then `ok`, `rolled_back` or `failed`). A request for the deployed sha ends as `ok` / `already deployed`.
+6. On failure it checks the old sha out, rebuilds what differs, restarts, and records the failed sha, which is skipped (status `failed`, `skipped: ...`) until a new sha comes or `--force` is given.
 
-A backlog-only or docs-only release moves the checkout and `deployed_sha` but restarts nothing. `apprentice-api` keeps answering `/health` with `runner:"down"` when the runner is down, so a missing Claude credential does not block deploys.
+Other sources, for manual use: `sudo systemctl start apprentice-deploy.service` deploys from `DEPLOY_SOURCE` (`pages`: the sha in `deploy.json`; `ref`: `origin/$DEPLOY_REF`); the optional minute timer runs that same service. A backlog-only or docs-only release moves the checkout and `deployed_sha` but restarts nothing. `apprentice-api` keeps answering `/health` with `runner:"down"` when the runner is down, so a missing Claude credential does not block deploys.
 
 **Security notes on deploy:**
 - `pnpm install` / `npm ci` run the dependencies' install lifecycle scripts as `apprentice`, the same user the services run as. deploy.sh unsets the secrets in its own environment, but a malicious dependency could still read the service processes' environment or `/var/lib/apprentice` data. Review new dependencies before they land on `main`.
-- With the timer on, every release that touches the API's paths restarts `apprentice-api`, and live sessions drop; backlog- or docs-only releases restart nothing. **Freeze releases (`DEPLOY_FREEZE=1`) or disable the timer during the pitch.**
+- Every release that touches the API's paths restarts `apprentice-api`, and live sessions drop; backlog- or docs-only releases restart nothing. **Freeze releases (`DEPLOY_FREEZE=1`) during the pitch.**
+- The webhook can only deploy commits already on `main`, and only with a valid signature; a leaked secret lets someone redeploy an older `main` commit, nothing else. Rotate it as in Manual steps 4.
 
 ## Environment (`/etc/apprentice/env`)
 
@@ -104,6 +118,7 @@ A backlog-only or docs-only release moves the checkout and `deployed_sha` but re
 | `RUNNER_MODEL` | runner | default `claude-sonnet-5-5` |
 | `RUNNER_MODELS` | runner | optional allowlist for a request's `model` (default sonnet-5-5, opus-5-5, haiku-4-5); others get 400 `model_not_allowed` |
 | `RUNNER_CONCURRENCY` | runner | default 2 (about 1 GiB RAM per SDK subprocess) |
+| `DEPLOY_WEBHOOK_SECRET` | ops | HMAC key for `POST /ops/deploy`; the same value is the Actions secret `DEPLOY_WEBHOOK_SECRET` |
 | `DEPLOY_SOURCE` | deploy | `pages` (default): the sha in `deploy.json`; `ref`: `origin/$DEPLOY_REF` |
 | `DEPLOY_REF` | deploy | default `main`; used with `DEPLOY_SOURCE=ref` |
 | `DEPLOY_JSON_URL` | deploy | default `https://qwadratic.github.io/ai-apprentice/deploy.json` |
@@ -118,6 +133,7 @@ A backlog-only or docs-only release moves the checkout and `deployed_sha` but re
 - read `DATABASE_PATH`, `MEDIA_DIR`, `RUNNER_URL` (`http://127.0.0.1:8787`), `RUNNER_TOKEN`, `ALLOWED_ORIGINS`, `ELEVENLABS_API_KEY` from the environment (systemd provides them; `GIT_SHA` is set too);
 - serve `GET /health` → 200 with `{"ok": true, ...}` (deploy rolls back otherwise);
 - handle its own CORS (exact match on `ALLOWED_ORIGINS`, `Vary: Origin`, answer `OPTIONS`);
+- forward `/ops/*` unchanged to `OPS_URL` (`http://127.0.0.1:8788`): method, path, raw body, `Content-Type` and `X-Deploy-Signature`, plus the client IP as `X-Forwarded-For` (copy `opsRequest` from the placeholder). Deploy's health check requires `/ops/deploy/status` through port 8000, so an API without this is rolled back;
 - write only under `/var/lib/apprentice/{db,media}`; log metadata, never prompts, images, transcripts or keys.
 
 ## Runner API (`RUNNER_URL`, bearer `RUNNER_TOKEN`)
@@ -223,5 +239,6 @@ Measured 3 Oct 2026 (oauth mode, `claude-sonnet-5-5`, concurrency 2, 2 vCPU / 7 
 ```bash
 (cd infra/claude-runner && npm ci --include=optional && npm run typecheck)
 (cd infra/placeholder-api && npm ci && npm run typecheck)      # tsc --noEmit
+(cd infra/ops && npm ci && npm run typecheck)                  # tsc --noEmit
 bash -n infra/*.sh infra/deploy/deploy.sh
 ```
