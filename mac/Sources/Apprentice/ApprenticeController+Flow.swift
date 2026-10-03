@@ -239,12 +239,12 @@ extension ApprenticeController {
                     "ocr_snippet": question.snippet
                 ])
                 lastQuestion = nil
-                overlay.present("Noted: \(preview)", mood: .speaking)
+                overlay.present("Noted: \(preview)", mood: .happy)
             } else {
                 let snippet = lastScreen.map { Redactor.snippet(from: $0.text, around: nil) }
                 kb.appendLearned(scenarioId: scenarioId, ruleId: nil, question: nil, answer: text, ocrSnippet: snippet, mode: "learn")
                 log.write("note", ["answer": text, "ocr_snippet": snippet ?? ""])
-                overlay.present("Saved as a note: \(preview)", mood: .speaking)
+                overlay.present("Saved as a note: \(preview)", mood: .happy)
             }
         case .teach:
             // The novice's answer is logged but never written into the expert's knowledge base.

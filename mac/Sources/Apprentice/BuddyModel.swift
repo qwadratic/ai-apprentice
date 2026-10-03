@@ -2,8 +2,9 @@ import Combine
 import CoreGraphics
 import Foundation
 
+/// What Clipa is doing. `happy`: an answer was saved. `pointing`: look where the arm points (toward the cursor).
 enum BuddyMood {
-    case idle, speaking, listening, thinking, warning
+    case idle, speaking, listening, thinking, warning, happy, pointing
 }
 
 /// State shared by all overlay screens. Position is in global AppKit screen coordinates.

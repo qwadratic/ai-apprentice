@@ -130,13 +130,13 @@ final class OverlayController {
         let frame = NSScreen.screens.first { $0.frame.contains(mouse) }?.frame
             ?? NSScreen.main?.frame
             ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
-        let roomOnRight = mouse.x < frame.maxX - 360
-        let roomBelow = mouse.y > frame.minY + 90
+        let roomOnRight = mouse.x < frame.maxX - 380
+        let roomBelow = mouse.y > frame.minY + 100
         let onLeft = !roomOnRight
         if model.bubbleOnLeft != onLeft { model.bubbleOnLeft = onLeft }
-        // Lower right of the pointer by default; flips near the screen edges.
-        let dx: CGFloat = roomOnRight ? 30 : -30
-        let dy: CGFloat = roomBelow ? -34 : 40
+        // Lower right of the pointer by default; flips near the screen edges. Sized for Clipa (ClipaView.height).
+        let dx: CGFloat = roomOnRight ? 44 : -44
+        let dy: CGFloat = roomBelow ? -46 : 50
         return CGPoint(x: mouse.x + dx, y: mouse.y + dy)
     }
 
