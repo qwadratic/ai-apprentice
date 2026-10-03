@@ -69,7 +69,7 @@ test("cancelSpeech and pause never produce 'spoken'", async () => {
   await assert.rejects(voice.speak({ id: "c3", text: "nope" }), /paused/);
 });
 
-test("pause stops scripted input and context; resume continues the script", async () => {
+test("pause stops scripted input and context; events due while paused are dropped, not replayed", async () => {
   const { clock, voice, events } = setup();
   await voice.start({ sessionId: "s", sessionEpochMs: EPOCH });
   clock.advance(2000); // expert started speaking at 1000
@@ -80,12 +80,39 @@ test("pause stops scripted input and context; resume continues the script", asyn
   voice.sendContext("screen update while paused");
   assert.deepEqual(voice.contextUpdates, []);
   await voice.resume();
-  clock.advance(1999);
-  assert.equal(events.some((e) => e.type === "transcript" && e.final), false);
-  clock.advance(1);
-  assert.ok(events.some((e) => e.type === "transcript" && e.final), "final transcript arrives after the remaining 2000 ms");
+  const afterResume = events.length;
+  clock.advance(60_000);
+  const replayed = events.slice(afterResume).filter((e) => e.type === "transcript" || e.type === "user_speaking");
+  assert.deepEqual(replayed, [], "the interim, the end of speech and the final transcript fell due while paused and are gone");
   voice.sendContext("after resume");
   assert.deepEqual(voice.contextUpdates, ["after resume"]);
+});
+
+test("the script keeps wall-clock time across a pause: later steps fire at start() + atMs", async () => {
+  const script = [...userSays("early", 1000, 1000), ...userSays("late", 9000, 1000)];
+  const { clock, voice, events } = setup(script);
+  await voice.start({ sessionId: "s", sessionEpochMs: EPOCH });
+  clock.advance(500);
+  await voice.pause();
+  clock.advance(4500); // wall clock 5000: the first turn (1000-2000) was due while paused
+  await voice.resume();
+  clock.advance(3999); // 8999
+  assert.equal(events.some((e) => e.type === "transcript" && e.text === "late"), false);
+  clock.advance(1); // 9000: the second turn starts on the wall clock, not 9000 ms after resume
+  assert.ok(events.some((e) => e.type === "user_speaking" && e.speaking && e.tsMs === 9000));
+  clock.advance(1000);
+  const late = events.find((e) => e.type === "transcript" && e.final && e.text === "late")!;
+  assert.equal(late.tsMs, 10_000);
+  assert.equal(events.some((e) => e.type === "transcript" && e.text === "early"), false, "the early turn was dropped");
+});
+
+test("scripted transcripts may come from a novice", async () => {
+  const script = [{ atMs: 100, event: { type: "transcript" as const, text: "I would send it now.", final: true, role: "novice" as const } }];
+  const { clock, voice, events } = setup(script);
+  await voice.start({ sessionId: "s", sessionEpochMs: EPOCH });
+  clock.advance(100);
+  const t = events.find((e) => e.type === "transcript")!;
+  assert.ok(t.type === "transcript" && t.role === "novice");
 });
 
 test("unsubscribe stops delivery", async () => {
