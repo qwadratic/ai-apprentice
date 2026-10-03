@@ -8,6 +8,22 @@
 //   GET {base}/agent/elevenlabs/signed-url?role=interviewer
 //   200 application/json  {"signed_url": "wss://..."}
 // {base} is the "API base" field (or ?api=<base>). The signed URL is a secret: never logged here.
+//
+// Session log routes (TASK-3.22, served by the VM; origin-checked, 256 KB body limit):
+//   POST {base}/agent/sessions/{sessionId}/events
+//     body {"conversationId": "<ElevenLabs id, omitted until connected>",
+//           "events": [{"t": <Date.now() ms>, "dir": "sent"|"recv"|"sys"|"err", "type": "CONTEXT", "text": "..."}]}
+//     Sent every 2 s while events are queued; at most 200 events (and about 200 KB) per request.
+//     A failed request keeps the events queued and they are retried on the next tick.
+//     The server appends them as JSONL under /var/lib/apprentice/sessions/. Any 2xx counts as accepted.
+//   POST {base}/agent/sessions/{sessionId}/finish
+//     body {"conversationId": "<id>"}; the server fetches the ElevenLabs transcript, metadata and audio.
+//     Answer: JSON {"transcriptStored": true|false} (anything else is shown as "transcript stored: no").
+// sessionId is crypto.randomUUID(), created on Start session and shown under the Clipa card.
+// Every line of the visible event log is queued, with one rule: signed WebSocket URLs (wss://...),
+// xi-api-key values and sk_ keys are removed from the text before it is logged or queued.
+// Off the record: one SYS event is queued and flushed, then nothing more is queued, the voice session
+// ends and finish is called. It does not delete what was already sent.
 import { Conversation } from 'https://cdn.jsdelivr.net/npm/@elevenlabs/client@1.26.0/+esm';
 
 const $ = (id) => document.getElementById(id);
@@ -16,7 +32,7 @@ const els = {
   apiBase: $('apiBase'), start: $('btnStart'), end: $('btnEnd'), off: $('btnOff'),
   mock: $('btnMock'), askForm: $('askForm'), askText: $('askText'), ask: $('btnAsk'),
   notice: $('notice'), log: $('log'), clear: $('btnClear'),
-  stateLabel: $('stateLabel'), connLine: $('connLine'),
+  stateLabel: $('stateLabel'), connLine: $('connLine'), sessionId: $('sessionId'),
 };
 
 const params = new URLSearchParams(location.search);
@@ -50,7 +66,16 @@ function ts() {
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
 }
 
-function log(kind, tag, text) {
+// Signed URLs and keys never reach the visible log or the server log.
+function scrub(text) {
+  return String(text)
+    .replace(/wss?:\/\/\S+/gi, '[url removed]')
+    .replace(/xi-api-key\S*/gi, '[key removed]')
+    .replace(/sk_[A-Za-z0-9]{16,}/g, '[key removed]');
+}
+
+function log(kind, tag, rawText) {
+  const text = scrub(rawText);
   const li = document.createElement('li');
   li.className = kind;
   const t = document.createElement('time');
@@ -61,6 +86,7 @@ function log(kind, tag, text) {
   li.append(t, g, document.createTextNode(text));
   els.log.append(li);
   els.log.scrollTop = els.log.scrollHeight;
+  enqueue(kind, tag, text);
 }
 const sent = (tag, text) => log('sent', tag, text);
 const recv = (tag, text) => log('recv', tag, text);
@@ -94,6 +120,134 @@ function render() {
     : (starting ? 'Connecting...' : 'Not connected');
 }
 
+// ---- Server log ----------------------------------------------------------
+// One object per session. While `recording` is true every log line is queued and flushed.
+const FLUSH_MS = 2000;
+const MAX_BATCH_EVENTS = 200;
+const MAX_BATCH_CHARS = 200000;   // the server refuses bodies over 256 KB
+const MAX_TEXT_CHARS = 4000;
+const EVENTS_TIMEOUT_MS = 8000;
+const FINISH_TIMEOUT_MS = 30000;   // the server polls ElevenLabs for up to ~15 s before it answers
+const PERMANENT_FAILURES = [400, 403, 404, 413];
+let session = null;               // {id, conversationId, queue, recording, timer, flushing, failedShown, finished}
+
+function apiBase() { return els.apiBase.value.trim().replace(/\/+$/, ''); }
+
+function newSession() {
+  session = {
+    id: crypto.randomUUID(), conversationId: '', queue: [], recording: true,
+    timer: null, flushing: false, chain: null, failedShown: false, finished: false, base: apiBase(), ending: false,
+  };
+  const me = session;
+  me.timer = setInterval(() => { if (!me.flushing && !me.gaveUp && me.queue.length) flush(me); }, FLUSH_MS);
+  els.sessionId.textContent = session.id;
+  return session;
+}
+
+function enqueue(kind, tag, text) {
+  const s = session;
+  if (!s || !s.recording) return;
+  s.queue.push({
+    t: Date.now(), dir: kind, type: tag,
+    text: text.length > MAX_TEXT_CHARS ? `${text.slice(0, MAX_TEXT_CHARS)}...[truncated]` : text,
+  });
+}
+
+function sessionUrl(s, route) {
+  return `${s.base}/agent/sessions/${encodeURIComponent(s.id)}/${route}`;
+}
+
+function nextBatch(s) {
+  const batch = [];
+  let chars = 0;
+  for (const ev of s.queue) {
+    const size = ev.text.length + 80;
+    if (batch.length >= MAX_BATCH_EVENTS || (batch.length && chars + size > MAX_BATCH_CHARS)) break;
+    batch.push(ev);
+    chars += size;
+  }
+  return batch;
+}
+
+// Sends the queue in batches. Returns true when the queue is empty. A failure keeps the events.
+function flush(s) {
+  if (!s) return Promise.resolve(true);
+  s.chain = (s.chain || Promise.resolve()).then(() => doFlush(s));   // one request at a time, in order
+  return s.chain;
+}
+
+async function doFlush(s) {
+  s.flushing = true;
+  try {
+    while (s.queue.length) {
+      const batch = nextBatch(s);
+      const body = { events: batch };
+      if (s.conversationId) body.conversationId = s.conversationId;
+      let res;
+      try {
+        res = await fetch(sessionUrl(s, 'events'), {
+          method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+          signal: AbortSignal.timeout(EVENTS_TIMEOUT_MS),
+        });
+      } catch (e) {
+        res = null;
+      }
+      if (res && PERMANENT_FAILURES.includes(res.status)) {
+        // The server will not accept this session's log (route missing, origin refused, bad body): stop retrying.
+        s.gaveUp = true;
+        clearInterval(s.timer);
+        s.timer = null;
+        if (s === session) err(`Session log upload refused (${res.status}); upload stopped for this session.`);
+        return false;
+      }
+      if (!res || !res.ok) {
+        if (!s.failedShown) {
+          s.failedShown = true;
+          // Shown once. Events stay queued and are retried every tick.
+          if (s === session) err(`Session log upload failed${res ? ` (${res.status})` : ''}. Events stay queued and are retried.`);
+        }
+        return false;
+      }
+      s.failedShown = false;
+      s.queue.splice(0, batch.length);
+    }
+    return true;
+  } finally {
+    s.flushing = false;
+  }
+}
+
+// Flush what is left, ask the server to store the ElevenLabs conversation, stop the timer.
+async function finishSession(s) {
+  if (!s || s.finished) return;
+  s.finished = true;
+  clearInterval(s.timer);
+  s.timer = null;
+  s.recording = false;
+  if (!s.gaveUp) await flush(s);
+  if (!s.conversationId) {
+    // The voice session never connected: there is no ElevenLabs conversation to store.
+    sys(`Session log on the server: ${s.id} (no conversation to store).`);
+    return;
+  }
+  let line;
+  try {
+    const res = await fetch(sessionUrl(s, 'finish'), {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ conversationId: s.conversationId || null }),
+      signal: AbortSignal.timeout(FINISH_TIMEOUT_MS),
+    });
+    if (!res.ok) throw new Error(`finish answered ${res.status}`);
+    let body = null;
+    try { body = await res.json(); } catch { body = null; }
+    const stored = !!(body && (body.transcriptStored || body.transcript_stored));
+    line = ['sys', `Session log saved on the server: ${s.id}, transcript stored: ${stored ? 'yes' : 'no'}`];
+  } catch (e) {
+    line = ['err', `Session log could not be finished on the server (${e && e.message ? e.message : e}). Events not sent: ${s.queue.length}.`];
+  }
+  if (line[0] === 'sys') sys(line[1]); else err(line[1]);
+}
+
 // ---- Session -------------------------------------------------------------
 let starting = false;
 let liveAnnounced = false;
@@ -109,12 +263,12 @@ async function getSessionConfig() {
     sys('Using public agent id from the URL (testing only).');
     return { agentId: publicAgentId };
   }
-  const base = els.apiBase.value.trim().replace(/\/+$/, '');
+  const base = apiBase();
   const url = `${base}/agent/elevenlabs/signed-url?role=interviewer`;
   sys(`GET ${url}`);
   let res;
   try {
-    res = await fetch(url, { headers: { accept: 'application/json' } });
+    res = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(10000) });
   } catch (e) {
     throw new Error(`Cannot reach ${base} (network error or CORS). The signed-URL endpoint may not be deployed yet. Open the page with ?agent=<public agent id> to test without it.`);
   }
@@ -136,18 +290,21 @@ async function startSession() {
   starting = true;
   liveAnnounced = false;
   offRecord = false;
+  const s = newSession();
+  sys(`Session id ${s.id} (the server log is stored under this id).`);
   render();
   try {
     const cfg = await getSessionConfig();
     conversation = await Conversation.startSession({
       ...cfg,
       onConnect: ({ conversationId } = {}) => {
+        if (conversationId) s.conversationId = conversationId;
         recv('CONNECT', `conversation ${conversationId || ''}`.trim());
         announceLive();
       },
       onDisconnect: (d) => {
         recv('DISCONNECT', d && d.reason ? String(d.reason) : '');
-        markDisconnected();
+        markDisconnected(s);
       },
       onStatusChange: ({ status }) => {
         recv('STATUS', status);
@@ -171,29 +328,38 @@ async function startSession() {
         if (ctx) err(typeof ctx === 'string' ? ctx : JSON.stringify(ctx));
       },
     });
+    // The conversation id comes from onConnect; getId() (BaseConversation, SDK 1.26.0) is the fallback.
+    if (!s.conversationId && conversation && typeof conversation.getId === 'function') {
+      try { s.conversationId = conversation.getId() || ''; } catch { /* keep empty */ }
+    }
     // Connected state and the "live" log line come from the callbacks, not from this resolve.
   } catch (e) {
     err(e && e.message ? e.message : String(e));
     notice(e && e.message ? e.message : String(e));
     conversation = null;
     connected = false;
+    await finishSession(s);
   } finally {
     starting = false;
     render();
   }
 }
 
-function markDisconnected() {
+function markDisconnected(s) {
   connected = false;
   thinking = false;
   mode = 'listening';
   conversation = null;
   stopMock();
   render();
+  // A disconnect that we did not cause (network, agent hang-up) also closes the server log.
+  if (s && !s.ending) finishSession(s);
 }
 
 async function endSession(reason) {
   stopMock();
+  const s = session;
+  if (s) s.ending = true;
   const c = conversation;
   conversation = null;
   connected = false;
@@ -203,7 +369,44 @@ async function endSession(reason) {
   }
   sys(reason);
   render();
+  await finishSession(s);
 }
+
+// Off the record: the switch is the last thing that is logged; nothing after it is queued.
+// The microphone and the voice session close first; uploading what was logged before the switch comes after,
+// so a slow or unreachable server can never keep the microphone open.
+async function goOffRecord() {
+  const s = session;
+  if (s && s.recording) {
+    sys('Off the record: capture and upload stopped');
+    s.recording = false;
+  }
+  offRecord = true;
+  await endSession('Off the record: session ended, microphone closed. What was already sent is not deleted or recalled.');
+  render();
+}
+
+// Closing or reloading the tab: close the voice session and send what is queued with keepalive (best effort).
+window.addEventListener('pagehide', () => {
+  const s = session;
+  const c = conversation;
+  conversation = null;
+  if (c) { try { c.endSession(); } catch { /* page is going away */ } }
+  if (!s || s.finished || s.gaveUp) return;
+  s.finished = true;
+  s.recording = false;
+  clearInterval(s.timer);
+  const post = (route, body) => {
+    try {
+      fetch(sessionUrl(s, route), {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), keepalive: true,
+      }).catch(() => {});
+    } catch { /* ignore */ }
+  };
+  const batch = nextBatch(s).filter((_, i) => i < 50);   // keepalive bodies are limited to 64 KB
+  if (batch.length) post('events', { conversationId: s.conversationId || undefined, events: batch });
+  post('finish', { conversationId: s.conversationId || null });
+});
 
 // ---- Sending -------------------------------------------------------------
 function sendContext(text) {
@@ -248,11 +451,7 @@ function toggleMock() {
 // ---- Wiring --------------------------------------------------------------
 els.start.addEventListener('click', startSession);
 els.end.addEventListener('click', () => endSession('Session ended.'));
-els.off.addEventListener('click', async () => {
-  await endSession('Off the record: session ended, microphone closed. Data already sent is not recalled.');
-  offRecord = true;
-  render();
-});
+els.off.addEventListener('click', goOffRecord);
 els.mock.addEventListener('click', toggleMock);
 els.clear.addEventListener('click', () => { els.log.textContent = ''; });
 els.askForm.addEventListener('submit', (ev) => {

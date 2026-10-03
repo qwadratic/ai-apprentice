@@ -23,6 +23,7 @@
     <li>Press <strong>Play mock Learn session</strong>. The agent should stay silent.</li>
     <li>Press <strong>Ask now</strong>. The agent asks the question.</li>
   </ol>
+  <p class="howto-note">Every session is logged on our server: the events in the log below, plus the conversation transcript. <strong>Off the record</strong> stops the log and the voice session. It does not delete what was already sent.</p>
 </aside>
 
 <main class="layout">
@@ -30,6 +31,7 @@
     <clipa-buddy id="clipa" state="idle" size="220"></clipa-buddy>
     <p class="state-line">State: <strong id="stateLabel">idle</strong></p>
     <p class="conn-line" id="connLine">Not connected</p>
+    <p class="session-line">Session: <code id="sessionId" title="Session id: find the server log by it">not started</code></p>
   </section>
 
   <section class="panel" aria-label="Controls">
@@ -68,7 +70,7 @@
 
 <footer>
   Prototype. Synthetic data.
-  Off the record ends the voice session. Screen capture is stream A's part and is not in this page yet.
+  Off the record stops logging and ends the voice session; it does not delete what was already sent. Screen capture is stream A's part and is not in this page yet.
 </footer>
 
 <script src="clipa.js"></script>
