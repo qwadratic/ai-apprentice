@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
-# Idempotent installer. Run from a clone with: sudo infra/install.sh
-# Copies infra/ to /opt/apprentice/infra, builds the runner, installs the
-# systemd units and the sudoers rule, and (re)starts runner and API.
-# The deploy timer is installed but left disabled.
+# Idempotent installer for what needs root. Run from a clone: sudo infra/install.sh
+# Installs the systemd units, the sudoers rule and the deploy script
+# (/opt/apprentice/bin/apprentice-deploy). The services themselves run from the
+# deployed checkout /opt/apprentice/repo, which deploy.sh moves; on the first
+# install that checkout is set to the commit this installer comes from.
+# Then it builds the checkout and (re)starts runner and API. The deploy timer
+# is installed but its enabled/disabled state is left as it is.
 set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "run with sudo" >&2; exit 1; }
 
 SRC="$(cd "$(dirname "$0")" && pwd)"
-DEST=/opt/apprentice/infra
+CLONE_SHA="$(git -C "$SRC" rev-parse HEAD)"
+REPO=/opt/apprentice/repo
+as_app() { sudo -u apprentice -H "$@"; }
 UNITS=(apprentice-runner.service apprentice-api.service apprentice-deploy.service apprentice-deploy.timer)
 
 id apprentice >/dev/null 2>&1 || useradd --system --create-home --home-dir /home/apprentice --shell /bin/bash apprentice
@@ -36,6 +41,7 @@ DATABASE_PATH=/var/lib/apprentice/db/apprentice.sqlite
 MEDIA_DIR=/var/lib/apprentice/media
 RUNNER_MODEL=claude-sonnet-5-5
 RUNNER_CONCURRENCY=2
+DEPLOY_SOURCE=pages
 DEPLOY_REF=main
 DEBUG_ENDPOINTS=
 EOF
@@ -47,21 +53,32 @@ done
 chown root:root /etc/apprentice/env
 chmod 600 /etc/apprentice/env
 
-# Copy infra/ (without build output) and build the runner in place.
-install -d -o root -g root -m 755 "$DEST"
-rsync -a --delete --exclude node_modules --exclude dist "$SRC"/ "$DEST"/
-sha="$(git -C "$SRC" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
-if [ -n "$(git -C "$SRC" status --porcelain -- . 2>/dev/null)" ]; then sha="$sha-dirty"; fi
-echo "$sha" > "$DEST/GIT_SHA"
-chown -R root:root "$DEST"
-chmod 755 "$DEST/start-api.sh" "$DEST/deploy/deploy.sh" "$DEST/install.sh"
-( cd "$DEST/claude-runner" && npm ci --include=optional --no-fund --no-audit --loglevel=error && npm run -s build )
+# Deploy script, units and sudoers (the parts deploy.sh never changes).
+install -d -o root -g root -m 755 /opt/apprentice/bin
+install -m 755 -o root -g root "$SRC/deploy/deploy.sh" /opt/apprentice/bin/apprentice-deploy
+for u in "${UNITS[@]}"; do install -m 644 "$SRC/systemd/$u" /etc/systemd/system/"$u"; done
+visudo -cqf "$SRC/systemd/apprentice-sudoers"
+install -m 440 -o root -g root "$SRC/systemd/apprentice-sudoers" /etc/sudoers.d/apprentice
+if [ -n "$(git -C "$SRC" status --porcelain -- . 2>/dev/null)" ]; then
+  echo "note: infra/ in this clone has uncommitted changes; units and deploy script were installed from them"
+fi
 
-# Units and sudoers.
-for u in "${UNITS[@]}"; do install -m 644 "$DEST/systemd/$u" /etc/systemd/system/"$u"; done
-visudo -cqf "$DEST/systemd/apprentice-sudoers"
-install -m 440 -o root -g root "$DEST/systemd/apprentice-sudoers" /etc/sudoers.d/apprentice
+# The deployed checkout. The first time it runs services, start it at this
+# installer's commit; after that deploy.sh owns it.
+as_app git -C "$REPO" fetch -q origin '+refs/heads/*:refs/remotes/origin/*'
+if [ ! -f "$REPO/infra/start-runner.sh" ]; then
+  as_app git -C "$REPO" cat-file -e "$CLONE_SHA^{commit}" 2>/dev/null ||
+    { echo "commit ${CLONE_SHA:0:12} is not on GitHub yet; push it, then rerun" >&2; exit 1; }
+  as_app git -C "$REPO" checkout -q --detach --force "$CLONE_SHA"
+  echo "$CLONE_SHA" > /var/lib/apprentice/deployed-sha
+  chown apprentice:apprentice /var/lib/apprentice/deployed-sha
+  echo "deployed checkout set to ${CLONE_SHA:0:12}"
+fi
+as_app /opt/apprentice/bin/apprentice-deploy --build-only
+
 systemctl daemon-reload
 systemctl enable --quiet apprentice-runner.service apprentice-api.service
 systemctl restart apprentice-runner.service apprentice-api.service
-echo "installed infra $sha; deploy timer: $(systemctl is-enabled apprentice-deploy.timer 2>/dev/null || true)"
+# Before this layout, infra/ was copied to /opt/apprentice/infra.
+rm -rf /opt/apprentice/infra
+echo "installed from ${CLONE_SHA:0:12}; serving $(as_app git -C "$REPO" rev-parse --short=12 HEAD); deploy timer: $(systemctl is-enabled apprentice-deploy.timer 2>/dev/null || true)"

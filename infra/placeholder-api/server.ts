@@ -27,7 +27,8 @@ const PORT = Number(process.env.PORT || 8000);
 const RUNNER_URL = new URL(process.env.RUNNER_URL || 'http://127.0.0.1:8787');
 const RUNNER_TOKEN = process.env.RUNNER_TOKEN || '';
 const API_TOKEN = process.env.API_TOKEN || '';
-const GIT_SHA = process.env.GIT_SHA || 'unknown';
+const GIT_SHA = process.env.GIT_SHA || 'unknown'; // the code this process runs
+const DEPLOYED_SHA_FILE = process.env.DEPLOYED_SHA_FILE || '/var/lib/apprentice/deployed-sha'; // written by deploy.sh
 const DEBUG = process.env.DEBUG_ENDPOINTS === '1';
 const MAX_BODY = 12 * 1024 * 1024;
 const EL_AGENT_ID = process.env.ELEVENLABS_AGENT_ID_INTERVIEWER || '';
@@ -431,6 +432,16 @@ function runnerRequest(method: string, path: string, body: Buffer | null, rid: s
   });
 }
 
+// The last commit deploy.sh deployed; it can be newer than GIT_SHA when that
+// deploy did not touch the API and so did not restart it.
+async function deployedSha(): Promise<string | null> {
+  try {
+    return (await fsp.readFile(DEPLOYED_SHA_FILE, 'utf8')).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 async function runnerUp(rid: string): Promise<'up' | 'down'> {
   try {
     const r = await runnerRequest('GET', '/health', null, rid);
@@ -457,7 +468,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && route === '/health') {
       status = 200;
-      resBytes = send(res, 200, { ok: true, runner: await runnerUp(rid), git_sha: GIT_SHA });
+      resBytes = send(res, 200, { ok: true, runner: await runnerUp(rid), git_sha: GIT_SHA, deployed_sha: await deployedSha() });
       return;
     }
     if (req.method === 'GET' && route === '/agent/elevenlabs/signed-url') {

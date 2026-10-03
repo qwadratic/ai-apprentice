@@ -7,9 +7,9 @@ Wants=network-online.target
 Type=oneshot
 User=apprentice
 Group=apprentice
-# Only DEPLOY_REF is used; deploy.sh unsets every other variable from this file.
+# deploy.sh reads DEPLOY_SOURCE, DEPLOY_REF and DEPLOY_JSON_URL and unsets the secrets.
 # NoNewPrivileges must stay off: deploy.sh restarts the units through sudo.
 EnvironmentFile=/etc/apprentice/env
-ExecStart=/opt/apprentice/infra/deploy/deploy.sh
+ExecStart=/opt/apprentice/bin/apprentice-deploy
 StandardOutput=journal
 StandardError=journal

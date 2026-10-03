@@ -10,8 +10,9 @@ User=apprentice
 Group=apprentice
 EnvironmentFile=/etc/apprentice/env
 Environment=NODE_ENV=production RUNNER_HOST=127.0.0.1 RUNNER_PORT=8787 RUNNER_CWD=/var/lib/apprentice/runner-cwd
-WorkingDirectory=/opt/apprentice/infra/claude-runner
-ExecStart=/usr/bin/node /opt/apprentice/infra/claude-runner/dist/server.js
+# Code runs from the deployed checkout; deploy.sh builds and restarts it.
+WorkingDirectory=/opt/apprentice/repo
+ExecStart=/opt/apprentice/repo/infra/start-runner.sh
 Restart=always
 RestartSec=3
 NoNewPrivileges=true

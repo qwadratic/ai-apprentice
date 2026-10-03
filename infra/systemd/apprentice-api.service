@@ -10,8 +10,9 @@ User=apprentice
 Group=apprentice
 EnvironmentFile=/etc/apprentice/env
 Environment=NODE_ENV=production HOST=0.0.0.0 PORT=8000 RUNNER_URL=http://127.0.0.1:8787
-WorkingDirectory=/opt/apprentice
-ExecStart=/opt/apprentice/infra/start-api.sh
+# Code runs from the deployed checkout; deploy.sh builds and restarts it.
+WorkingDirectory=/opt/apprentice/repo
+ExecStart=/opt/apprentice/repo/infra/start-api.sh
 Restart=always
 RestartSec=3
 NoNewPrivileges=true
