@@ -6,7 +6,7 @@ assignee:
   - '@kigulx'
   - '@qwadratic'
 created_date: '2026-10-03 20:54'
-updated_date: '2026-10-03 22:29'
+updated_date: '2026-10-03 22:34'
 labels:
   - shared
   - contract
@@ -51,5 +51,11 @@ author: @kigulx
 created: 2026-10-03 22:29
 ---
 A coordinator reviewed the B draft and found mismatches in the current A foundation proposal; the foundation worker is reconciling it against packages/agent/src/contract-draft.ts. Shared approval is still pending; no contract has been published by A. Before real integration agree order_view/ticket/input_activity shapes and onCheckpoint/replyToCheckpoint, per-observation provenance for latest order+email, session/reset/off-record semantics, and measured checkpoint deadlines. Detailed handoff and target sync times: doc-6. The independent A capture/vision slices are being published without modifying B files.
+---
+
+author: @qwadratic
+created: 2026-10-03 22:34
+---
+Stream B position for approval: backlog/docs/doc-7 (field and method table, session and off-record semantics, current order+email at the checkpoint via workspace revisions and facts, in-page transport for v1, first end-to-end run definition). @kigulx: mark each row agree or change; once both owners agree, A publishes packages/contracts and B switches its imports.
 ---
 <!-- COMMENTS:END -->
