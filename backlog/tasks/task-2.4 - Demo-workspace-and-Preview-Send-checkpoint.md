@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@kigulx'
 created_date: '2026-10-03 21:16'
-updated_date: '2026-10-03 21:16'
+updated_date: '2026-10-03 21:37'
 labels:
   - stream-a
   - workspace
@@ -21,7 +21,7 @@ ordinal: 8000
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Assigned worker: demo workspace. Own apps/web/features/demo-workspace and its colocated fixtures/tests. Implement synthetic order, email and ticket contexts; begin with email. Use B requirements from TASK-3.1: two customer_07 orders, another customer, unknown customer and spare customer_12 for a live learned fact. Input-activity heartbeat is scoped to this workspace; it does not claim global keyboard access. Preparation is active; implementation waits for foundation and the agreed checkpoint/facts interfaces. Publication policy: only Backlog changes go to main; implementation remains on task branches. The orchestrator publishes through the Codex GitHub integration. Workers do not push or merge. Branch availability is not completion: Done still requires a future merge. Dependencies may be consumed from an explicitly approved branch revision before that merge. Reserved implementation branch: task-2.4-demo-workspace.
+Assigned worker: demo workspace. Own apps/web/features/demo-workspace and its colocated fixtures/tests. Implement synthetic order, email and ticket contexts; begin with email. Use B requirements from TASK-3.1: two customer_07 orders, another customer, unknown customer and spare customer_12 for a live learned fact. Input-activity heartbeat is scoped to this workspace; it does not claim global keyboard access. Start independent workspace state, synthetic cases, draft versioning, reset, checkpoint state machine and UI components now. TASK-2.1 gates final shared integration. Inject a local checkpoint callback for tests; do not create a competing ScreenBridge or expose hidden scenario answers. Publication policy: only Backlog changes go to main; implementation remains on task branches. The orchestrator publishes using the repository-local Kigulx authentication authorized by the user; the connector previously rejected writes. Workers do not push or merge. Branch availability is not completion: Done still requires a future merge. Dependencies may be consumed from an explicitly approved branch revision before that merge. Reserved implementation branch: task-2.4-demo-workspace.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -42,5 +42,5 @@ Assigned worker: demo workspace. Own apps/web/features/demo-workspace and its co
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Read the current specification and assigned scope; prepare isolated worktree and integration plan. Implement only after the orchestrator supplies the approved foundation/contract revision. Record tests and a branch handoff; do not merge code to main.
+Create the assigned isolated worktree from the published assignment revision. Implement synthetic cases, workspace state, draft revision invalidation and checkpoint behavior with tests, then scoped UI components. Do not edit app shell or root dependencies. Hand off the independent slice; wire the approved ScreenBridge once available.
 <!-- SECTION:PLAN:END -->

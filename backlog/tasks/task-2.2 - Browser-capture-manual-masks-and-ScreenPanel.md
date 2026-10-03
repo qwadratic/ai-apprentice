@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@kigulx'
 created_date: '2026-10-03 21:15'
-updated_date: '2026-10-03 21:16'
+updated_date: '2026-10-03 21:37'
 labels:
   - stream-a
   - screen
@@ -20,7 +20,7 @@ ordinal: 6000
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Assigned worker: capture/privacy. Own packages/screen/capture, packages/screen/privacy and apps/web/features/screen/ScreenPanel plus scoped tests. Provide a single processed frame/stream interface for vision and recording. Preparation is active; production implementation waits for the TASK-2.1 branch revision and TASK-1 contract approval. Do not implement recording/Replay here; that is a later separate subtask. Publication policy: only Backlog changes go to main; implementation remains on task branches. The orchestrator publishes through the Codex GitHub integration. Workers do not push or merge. Branch availability is not completion: Done still requires a future merge. Dependencies may be consumed from an explicitly approved branch revision before that merge. Reserved implementation branch: task-2.2-capture-privacy.
+Assigned worker: capture/privacy. Own packages/screen/capture, packages/screen/privacy and apps/web/features/screen/ScreenPanel plus scoped tests. Provide a single processed frame/stream interface for vision and recording. Start independent capture/privacy implementation now from the published assignment revision. TASK-2.1 is an integration dependency, not a blocker for local canvas, mask and lifecycle logic. Use injected callbacks at the boundary; do not invent or duplicate the shared ScreenBridge. Do not implement recording/Replay here; that is a later separate subtask. Publication policy: only Backlog changes go to main; implementation remains on task branches. The orchestrator publishes using the repository-local Kigulx authentication authorized by the user; the connector previously rejected writes. Workers do not push or merge. Branch availability is not completion: Done still requires a future merge. Dependencies may be consumed from an explicitly approved branch revision before that merge. Reserved implementation branch: task-2.2-capture-privacy.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -40,5 +40,5 @@ Assigned worker: capture/privacy. Own packages/screen/capture, packages/screen/p
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Read the current specification and assigned scope; prepare isolated worktree and integration plan. Implement only after the orchestrator supplies the approved foundation/contract revision. Record tests and a branch handoff; do not merge code to main.
+Create the assigned isolated worktree from the published assignment revision. Implement processed canvas, masks and lifecycle with injected downstream callbacks and focused tests. Do not edit root manifests or shared contracts. Hand off the independently tested slice, then connect it to the approved foundation revision.
 <!-- SECTION:PLAN:END -->

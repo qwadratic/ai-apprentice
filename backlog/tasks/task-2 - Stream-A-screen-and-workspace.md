@@ -1,11 +1,11 @@
 ---
 id: TASK-2
 title: 'Stream A: screen and workspace'
-status: To Do
+status: In Progress
 assignee:
   - '@kigulx'
 created_date: '2026-10-03 20:54'
-updated_date: '2026-10-03 21:10'
+updated_date: '2026-10-03 21:37'
 labels:
   - stream-a
 milestone: m-0
@@ -36,3 +36,9 @@ Parent of stream A tasks (owner @kigulx, codes with Codex); A creates its own ch
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Stream A assignments: TASK-2.1 foundation (orchestrator), TASK-2.2 capture/privacy, TASK-2.3 vision/API, TASK-2.4 workspace, TASK-2.5 later recording/replay. Independent worker slices may start before the shared foundation is ready; production integration still requires the jointly approved ScreenBridge. Only Backlog is published to main; all implementation stays on task branches.
+<!-- SECTION:NOTES:END -->

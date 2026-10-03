@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@kigulx'
 created_date: '2026-10-03 21:16'
-updated_date: '2026-10-03 21:16'
+updated_date: '2026-10-03 21:37'
 labels:
   - stream-a
   - vision
@@ -21,7 +21,7 @@ ordinal: 7000
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Assigned worker: vision/API. Own packages/screen/vision and apps/api/screen with scoped tests. Only processed frames may become visible-fact observations. Export mount(app) for the shared backend; use the TASK-4.2 runner through RUNNER_URL. Own server-side Evidence storage/resolution; coordinate the client interface with capture/recording. Preparation is active; implementation waits for the foundation/contract, and real provider verification also waits for TASK-4.2. Publication policy: only Backlog changes go to main; implementation remains on task branches. The orchestrator publishes through the Codex GitHub integration. Workers do not push or merge. Branch availability is not completion: Done still requires a future merge. Dependencies may be consumed from an explicitly approved branch revision before that merge. Reserved implementation branch: task-2.3-vision-evidence.
+Assigned worker: vision/API. Own packages/screen/vision and apps/api/screen with scoped tests. Only processed frames may become visible-fact observations. Export mount(app) for the shared backend; use the TASK-4.2 runner through RUNNER_URL. Own server-side Evidence storage/resolution; coordinate the client interface with capture/recording. Start independent queue, cancellation, deduplication, runner-client and storage logic now with local fakes. TASK-2.1 gates shared integration; TASK-4.2 gates real provider verification. Do not invent a competing ScreenBridge or runner service. Publication policy: only Backlog changes go to main; implementation remains on task branches. The orchestrator publishes using the repository-local Kigulx authentication authorized by the user; the connector previously rejected writes. Workers do not push or merge. Branch availability is not completion: Done still requires a future merge. Dependencies may be consumed from an explicitly approved branch revision before that merge. Reserved implementation branch: task-2.3-vision-evidence.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -42,5 +42,5 @@ Assigned worker: vision/API. Own packages/screen/vision and apps/api/screen with
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Read the current specification and assigned scope; prepare isolated worktree and integration plan. Implement only after the orchestrator supplies the approved foundation/contract revision. Record tests and a branch handoff; do not merge code to main.
+Create the assigned isolated worktree from the published assignment revision. Implement bounded queue, invalidation, runner client and Evidence storage behind injected interfaces with deterministic fake-based tests. Read doc-5 for runner shapes. Hand off this independent slice; complete shared-schema and real-runner integration only after those dependencies are ready.
 <!-- SECTION:PLAN:END -->
