@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@kigulx'
 created_date: '2026-10-03 20:54'
-updated_date: '2026-10-03 22:22'
+updated_date: '2026-10-03 22:27'
 labels:
   - stream-a
 milestone: m-0
@@ -41,6 +41,8 @@ Parent of stream A tasks (owner @kigulx, codes with Codex); A creates its own ch
 
 <!-- SECTION:NOTES:BEGIN -->
 Stream A assignments: TASK-2.1 foundation (orchestrator), TASK-2.2 capture/privacy, TASK-2.3 vision/API, TASK-2.4 workspace, TASK-2.5 later recording/replay. Independent worker slices may start before the shared foundation is ready; production integration still requires the jointly approved ScreenBridge. Only Backlog is published to main; all implementation stays on task branches.
+
+Coordination schedule and reproduced checks: doc-6 (4 Oct Vienna). Proposed gates: 00:45 compatible contract, 01:30 real integration, 02:30 Learn/checkpoint/off-record, 04:00 full demo, 07:30 rehearsal, 08:30 freeze. B targets require owner agreement. 73 isolated tests passed on Node22.22; real provider/browser/end-to-end remain open. Updated human authorization: reviewed A implementation may now be published to main when it does not overwrite B files. Shared contracts still require both owners approval.
 <!-- SECTION:NOTES:END -->
 
 ## Comments
