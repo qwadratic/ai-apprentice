@@ -1,0 +1,187 @@
+name: release
+
+# Push to main: re-run every check on the merged result; if green and not frozen,
+# fast-forward branch `deploy` to the commit and publish the site to GitHub Pages.
+# The VM pulls `deploy` (TASK-6.2); nothing here talks to the VM.
+#
+# Manual run (workflow_dispatch, must be started from main):
+#   sha     commit on main to release (default: head of main). Rollback = an older sha.
+#   force   allow a non-fast-forward move of `deploy` (needed for rollback to an older sha).
+#   confirm release even though the repository variable DEPLOY_FREEZE is 1.
+on:
+  push:
+    branches: [main]
+    # Backlog-only pushes (task bookkeeping) must not move deploy.
+    paths-ignore:
+      - "backlog/**"
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Commit on main to release (empty = head of main). Older sha = rollback, needs force."
+        type: string
+        required: false
+        default: ""
+      force:
+        description: Allow a non-fast-forward move of the deploy branch (rollback)
+        type: boolean
+        default: false
+      confirm:
+        description: Release even though DEPLOY_FREEZE is 1
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: resolve target commit
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: resolve
+        env:
+          INPUT_SHA: ${{ inputs.sha }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "workflow_dispatch" ] && [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Run this workflow from main (selected: $GITHUB_REF). Only commits on main can be released."
+            exit 1
+          fi
+          target="${INPUT_SHA:-$GITHUB_SHA}"
+          if ! printf '%s' "$target" | grep -Eq '^[0-9a-fA-F]{7,40}$'; then
+            echo "::error::sha input must be 7-40 hex characters"
+            exit 1
+          fi
+          sha=$(git rev-parse --verify "${target}^{commit}")
+          if ! git merge-base --is-ancestor "$sha" origin/main; then
+            echo "::error::$sha is not on main; refusing to release it"
+            exit 1
+          fi
+          echo "Releasing $sha"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+  gate:
+    name: deploy freeze gate
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          FREEZE: ${{ vars.DEPLOY_FREEZE }}
+          EVENT: ${{ github.event_name }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if [ "$FREEZE" != "1" ]; then
+            echo "No freeze."
+            exit 0
+          fi
+          if [ "$EVENT" = "workflow_dispatch" ] && [ "$CONFIRM" = "true" ]; then
+            echo "::warning::DEPLOY_FREEZE=1 overridden by a manual run with confirm."
+            exit 0
+          fi
+          echo "::error::DEPLOY_FREEZE=1: deploy is frozen. Unset the variable, or run this workflow manually with confirm=true."
+          exit 1
+
+  checks-stream-b:
+    needs: prepare
+    uses: ./.github/workflows/stream-b-checks.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+
+  checks-backlog:
+    needs: prepare
+    uses: ./.github/workflows/backlog-check.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+
+  promote:
+    name: fast-forward deploy branch
+    needs: [prepare, gate, checks-stream-b, checks-backlog]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+      - env:
+          SHA: ${{ needs.prepare.outputs.sha }}
+          EVENT: ${{ github.event_name }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          set -euo pipefail
+          if ! git ls-remote --exit-code --heads origin deploy > /dev/null; then
+            echo "Branch deploy does not exist; creating it at $SHA"
+            git push origin "$SHA:refs/heads/deploy"
+            exit 0
+          fi
+          git fetch origin deploy
+          old=$(git rev-parse origin/deploy)
+          if [ "$old" = "$SHA" ]; then
+            echo "deploy is already at $SHA"
+            exit 0
+          fi
+          if git merge-base --is-ancestor "$old" "$SHA"; then
+            echo "Fast-forward deploy $old -> $SHA"
+            git push origin "$SHA:refs/heads/deploy"
+            exit 0
+          fi
+          # Not a fast-forward: $SHA is behind deploy (older commit) or the branches diverged.
+          if [ "$EVENT" = "workflow_dispatch" ] && [ "$FORCE" = "true" ]; then
+            echo "::warning::Non-fast-forward move of deploy $old -> $SHA (force=true)"
+            git push --force-with-lease="refs/heads/deploy:$old" origin "$SHA:refs/heads/deploy"
+            exit 0
+          fi
+          if [ "$EVENT" = "push" ] && git merge-base --is-ancestor "$SHA" "$old"; then
+            echo "::notice::deploy ($old) already contains $SHA; nothing to do."
+            exit 0
+          fi
+          echo "::error::Cannot fast-forward deploy ($old) to $SHA. For a rollback run this workflow manually with force=true."
+          exit 1
+
+  pages-build:
+    name: build site
+    needs: [prepare, gate, checks-stream-b, checks-backlog]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/features/agent/lab/package-lock.json
+      - name: Build the lab page (tsc to dist/)
+        working-directory: apps/web/features/agent/lab
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/web/features/agent/lab/dist
+
+  pages-deploy:
+    name: publish to Pages
+    needs: [pages-build, promote]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
