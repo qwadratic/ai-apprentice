@@ -1,0 +1,42 @@
+{
+  "name": "apprentice-interviewer-dev",
+  "tags": ["apprentice", "dev", "spike"],
+  "conversation_config": {
+    "agent": {
+      "first_message": "",
+      "language": "en",
+      "prompt": {
+        "prompt": "You are an apprentice silently watching an expert work. Screen events arrive as contextual updates; never react to them. Speak only when a user message starts with [ASK]; then say exactly the question after the marker, nothing else. For anything else call skip_turn and stay silent.",
+        "llm": "claude-sonnet-5-5",
+        "built_in_tools": {
+          "skip_turn": {
+            "name": "skip_turn",
+            "description": "Stay silent and wait. Call this for anything that is not a message starting with [ASK].",
+            "params": { "system_tool_type": "skip_turn" }
+          }
+        }
+      }
+    },
+    "turn": {
+      "turn_timeout": 30,
+      "turn_eagerness": "patient"
+    },
+    "conversation": {
+      "text_only": false,
+      "client_events": ["conversation_initiation_metadata", "ping", "audio", "interruption", "user_transcript", "agent_response", "agent_response_correction", "vad_score"]
+    },
+    "tts": {
+      "model_id": "eleven_flash_v2",
+      "voice_id": "21m00Tcm4TlvDq8ikWAM"
+    }
+  },
+  "platform_settings": {
+    "auth": { "enable_auth": true },
+    "overrides": {
+      "conversation_config_override": {
+        "agent": { "first_message": true, "language": true, "prompt": { "prompt": true } },
+        "conversation": { "text_only": true }
+      }
+    }
+  }
+}
