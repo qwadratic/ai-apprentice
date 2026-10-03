@@ -1,11 +1,11 @@
 ---
 id: TASK-3.24
 title: TypeScript everywhere in stream B
-status: In Progress
+status: Done
 assignee:
   - '@qwadratic'
 created_date: '2026-10-03 23:06'
-updated_date: '2026-10-03 23:06'
+updated_date: '2026-10-03 23:28'
 labels:
   - stream-b
   - infra
@@ -24,9 +24,9 @@ Ivan's decision (4 Oct ~01:20): no plain JavaScript in our code. Every stream B 
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 No .js, .mjs or .cjs source files remain under packages/agent, apps/api/agent or apps/web/features/agent (built output excluded)
-- [ ] #2 tsc --noEmit passes with the strict rules for each of the three areas, and CI runs it
-- [ ] #3 ElevenLabs scripts run with node file.ts; the lab page is built by tsc in pages.yml and still passes its Playwright checks
+- [x] #1 No .js, .mjs or .cjs source files remain under packages/agent, apps/api/agent or apps/web/features/agent (built output excluded)
+- [x] #2 tsc --noEmit passes with the strict rules for each of the three areas, and CI runs it
+- [x] #3 ElevenLabs scripts run with node file.ts; the lab page is built by tsc in pages.yml and still passes its Playwright checks
 <!-- AC:END -->
 
 ## Definition of Done
@@ -35,3 +35,9 @@ Ivan's decision (4 Oct ~01:20): no plain JavaScript in our code. Every stream B 
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+All stream B code is strict TypeScript 7: packages/agent (PR #10), ElevenLabs scripts (PR #8), lab page built by tsc (PR #9); CI type-checks all three (PR #11). Infra is TypeScript on PR #5. Stream A's .mjs files are A's call (asked in Hive, doc-8).
+<!-- SECTION:FINAL_SUMMARY:END -->

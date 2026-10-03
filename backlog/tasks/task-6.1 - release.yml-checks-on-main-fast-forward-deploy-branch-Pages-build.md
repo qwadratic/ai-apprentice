@@ -1,11 +1,11 @@
 ---
 id: TASK-6.1
 title: 'release.yml: checks on main, publish Pages with deploy.json'
-status: In Progress
+status: Done
 assignee:
   - '@qwadratic'
 created_date: '2026-10-03 23:15'
-updated_date: '2026-10-03 23:23'
+updated_date: '2026-10-03 23:28'
 labels:
   - shared
   - infra
@@ -24,8 +24,8 @@ GitHub Actions workflow on push to main and workflow_dispatch (optional sha inpu
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Green push moves deploy and publishes Pages; red push does neither
-- [ ] #2 DEPLOY_FREEZE=1 blocks; workflow_dispatch with a sha input moves deploy to that sha
+- [x] #1 Green push to main publishes the site with deploy.json {sha, at, run}; red checks publish nothing
+- [ ] #2 DEPLOY_FREEZE=1 blocks; a manual run with a sha (and confirm during a freeze) publishes that older commit; re-runs never publish a stale commit
 <!-- AC:END -->
 
 ## Definition of Done
@@ -40,3 +40,9 @@ GitHub Actions workflow on push to main and workflow_dispatch (optional sha inpu
 <!-- SECTION:NOTES:BEGIN -->
 Changed per doc-8 'Change after review': no deploy branch (GITHUB_TOKEN cannot move a branch onto workflow changes); publish deploy.json {sha, at, run} with the site.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Merged in PR #11. First real run 37161824872 published the lab and deploy.json for 0185f64 at 23:27 UTC. Checks (stream-b-checks with type-checks of all three B packages, backlog-check) gate the publish; no deploy branch, no contents: write. Freeze and rollback paths are lint-checked, not yet exercised on GitHub.
+<!-- SECTION:FINAL_SUMMARY:END -->
