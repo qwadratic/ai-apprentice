@@ -6,7 +6,7 @@ Instructions for coding agents that do not read CLAUDE.md (Codex and others). CL
 
 - Plans (Russian originals): `backlog/docs/plans/` — `doc-2` the joint plan and call transcript, `doc-3` stream A (screen and workspace), `doc-4` stream B (agent, voice and knowledge).
 - Tasks: Backlog.md in `backlog/`, one Markdown file per task. Install with `npm i -g backlog.md`.
-- Existing code: `mac/` (native macOS companion, Swift, built by CI on macos-15), `sandbox/` (static demo pages).
+- Existing code: `mac/` (native macOS companion, Swift, built by CI on macos-15; frozen bonus, not the product) and `sandbox/` (its static demo pages). The product is the web app described in the plans.
 
 ## Ownership
 

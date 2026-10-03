@@ -1,8 +1,23 @@
 # CLAUDE.md — AI Apprentice (Hack-Nation 7, Challenge 01)
 
-This file is the full handoff for a fresh session. Another Claude session bootstrapped this repo on the evening of Saturday 3 October 2026. That session and the team's own ChatGPT brainstorm are both condensed here. Read this file, then `mac/README.md`, then `mac/Resources/kb/*/demo.md`.
+This file is the handoff for a fresh session. Read "Current plan" first, then `AGENTS.md` (rules shared with the Codex teammate), `backlog/docs/doc-1 - Parallel-work-rules.md`, the plans in `backlog/docs/plans/` (doc-4 is our stream) and `backlog task list --plain`. The sections after "Current plan" are background: the brief, the hackathon rules, the frozen Mac app and the earlier brainstorm.
 
-**First action in a new session:** go through "Open decisions" at the end with Ivan and get answers before writing code.
+**First action in a new session:** read "Current plan", run `backlog task list -s "In Progress" --plain` and `backlog task list -l stream-b -s "To Do" --plain`, then ask Ivan what to take.
+
+## Current plan (3 Oct, ~23:00 Vienna)
+
+Where older sections disagree, this section and the plans in `backlog/docs/plans/` win.
+
+- **Product: a web app.** React frontend; the expert shares a window via `getDisplayMedia`; voice through the ElevenLabs Agents (ElevenAgents) web SDK; a backend API with SQLite and redacted media. Three modes: **Learn** (rare live questions at natural pauses), **Review** (gap questions, teach-back, confirm or correct the Work Map), **Teach** (the tutor on a new case, with a Preview → Send checkpoint in our demo workspace).
+- **Demo scenario: customer_07.** The expert copies essential order data (delivery address and time) into the email body as text instead of attaching the template screenshot, because customer_07 asked to get it as text. The agent asks why, for whom, and whether an extra image is still fine. Process: order table → email → ticket. Tests on new data (doc-4 §6): T1 same customer, image only → ask for text before Send; T2 full text plus image → allow; T3 another customer → do not apply the personal rule; T4 unknown customer → ask, do not guess; T5 rule corrected in Review → apply the latest confirmed version; T6 reason unexplained or conflicting → say it is unknown. Expected results live in fixtures, separate from the map. All data is synthetic. The personal rule is never pre-written into a prompt: at least one fact is learned live from the expert.
+- **Two streams, one repo.** Stream A: @kigulx, codes with Codex (reads `AGENTS.md`): capture, masks, vision, processed recording, replay, demo workspace, the repo skeleton and the root lockfile (plan doc-3). Stream B: @qwadratic (Ivan) with Claude Code: ElevenLabs voice loop, conversation policy (ASK_NOW / DEFER / SKIP, plus WARN in Teach), session and off-record, Work Map, Learn/Review/Teach UX and the app shell, tutor, scenarios, pitch (plan doc-4). Joint plan and call transcript: doc-2. The plans are Russian originals.
+- **The only interface between streams: ScreenBridge v1** (TASK-1). Commands `start({sessionId, sessionEpochMs})`, `pause()`, `resume()`, `stop()`, `resolveEvidence(id)`; types `ScreenObservation`, `ScreenStatus`, `ScreenEvidence`, `ActionCheckpoint` with the reply `{checkpointId, status: clear|warn|unknown, message, evidenceIds}`; every timestamp counts from one `sessionEpochMs`.
+- **Backend:** a separate exe.dev VM (TASK-4): SQLite and media on disk, HTTPS, deploy from `main`, an internal claude-runner on the Claude Agent SDK. It uses the team's Claude subscription token while developing; an Anthropic API key replaces it by env for the public demo. The ElevenLabs key stays on the server; the browser gets a signed URL.
+- **Frontend deploy:** Vercel or GitHub Pages.
+- **Mascot: Clipa.** Teal paperclip, dot eyes, no eyebrows; not "Clippy", no Microsoft artwork, no yellow paper. A web component is in progress on branch `feat/clipa`; it is the agent's face in stream B's app shell.
+- **Mac app (`mac/`): frozen bonus.** The CI-built `.app` goes into a GitHub Release. Its accountant/programmer knowledge bases and the `sandbox/` pages belong to that bonus only.
+- **Tasks:** Backlog.md. TASK-1 contract (shared), TASK-2 stream A parent, TASK-3 stream B parent, TASK-4 VM backend. Rules in doc-1.
+- **Honesty rules from the plans:** the checkpoint works in our demo workspace; never claim to block clicks in arbitrary apps. Off-record stops both channels but does not recall data already sent. Screen masks do not clean speech. Mocks are replaced by real integrations before the demo and never presented as live.
 
 ## The situation
 
@@ -103,7 +118,7 @@ Submit on **app.hack-nation.ai** (login is the Luma email) **and** on the backup
 
 ## What is in this repo now
 
-**`mac/` — native macOS app "Apprentice".** Swift Package, macOS 14+, 26 files, about 2,600 lines. **CI build is green on `macos-15`** (first run: https://github.com/qwadratic/ai-apprentice/actions/runs/37150081512, artifact `Apprentice-macos`). It has never been *run* on a Mac yet. What it does:
+**`mac/` — native macOS app "Apprentice" (frozen bonus since 3 Oct night).** Swift Package, macOS 14+, 26 files, about 2,600 lines. **CI build is green on `macos-15`** (first run: https://github.com/qwadratic/ai-apprentice/actions/runs/37150081512, artifact `Apprentice-macos`). It has never been *run* on a Mac yet. What it does:
 - Menu bar item only, no Dock icon (`LSUIElement`). Menu: show/hide buddy, Off the record, scenario, Learn/Teach mode, open KB, open session log.
 - Click-through transparent overlay on every screen. A buddy follows the cursor with spring smoothing, fades in only to speak, then fades out.
 - ScreenCaptureKit snapshot every ~1.5 s, a difference hash for "meaningful change", and on-device Vision OCR. No network on the default path.
@@ -132,6 +147,8 @@ Submit on **app.hack-nation.ai** (login is the Luma email) **and** on the backup
 - The deployed clickable demo, the videos, the moonshot slide.
 
 ## Decisions already taken, and why
+
+Background from before the plans. Where it conflicts with "Current plan", the plan wins.
 
 **Why Challenge 01.** All five challenges were checked live with downloads and test runs:
 - 03 Databricks (Omnigent works, gene–disease prediction experiment) and 05 Rare Disease Atlas: dropped — the team cannot judge its own results on genes and diseases (Ivan's reasoning, paraphrased).
@@ -199,26 +216,17 @@ Ivan shared the chat "Брейншторм идей для хакатона". Wh
 The chat's tool and data claims were not verified, except where this file says checked. The World Bank side idea (an offline bean or coffee leaf classifier) was dropped with track 04.
 
 
-## Open decisions — ask Ivan first
+## Decisions log (Ivan's answers, 3 Oct night)
 
-1. **Credentials.** Keys go only in the Mac's `config.json` or env, never in git.
-   - ElevenLabs API key, and later an ElevenAgents agent id;
-   - a voice id;
-   - an Anthropic key (a $25 Claude code works) for vision, Work Map and debrief.
-2. **Where work happens.** A cloud session can edit code and run the `macos-15` CI, but cannot run a macOS UI, grant permissions or hear audio. Every real test needs Ivan's Mac. Options: Claude Code on Ivan's Mac for UI iteration and the cloud session for web and LLM parts, or the cloud only plus CI artifacts that Ivan downloads and tests.
-3. **Native Mac vs web, and the "deployed demo" rule.** Hack-Nation wants a clickable link.
-   - Recommended: keep the Mac app as the product, and deploy a web Work Map viewer plus the sandbox pages (GitHub Pages or Vercel). Offer the `.app` as a GitHub Release, and show the full loop in the demo video.
-   - Alternatives: rebuild Capture as a web app (`getDisplayMedia`, as the brief sketches), or both.
-4. **ElevenAgents.** The brief expects ElevenAgents to play interviewer and tutor; today we only use TTS. Options: native WebSocket to ElevenAgents with client tools carrying screen events; an embedded WebView running `@elevenlabs/client` (`sendContextualUpdate` for events); or keep the native rule-driven questions and use ElevenAgents only for the debrief and teach-back conversation. The last is the lowest risk for a live pitch.
-5. **Main demo domain.** Pick one; `support` is out.
-   - `accountant` — the safest: it is literally the judges' "what good looks like".
-   - `programmer` / release engineering — developer judges relate to it, the team can judge the quality itself, and errors are provable by outcome.
-   - From the brainstorm: payout reconciliation and the Excel model have arithmetic proof; prepress is visual but needs domain knowledge.
-   - Whichever is chosen, design the cases with the brainstorm's test rules: provable outcome, an allow counter-test, the with/without-expert baseline, a rule stated live.
-   - Who plays the expert, who plays the novice?
-6. **Character.** Name and look of the paperclip (see above). Replace the current generic buddy in `BuddyView.swift`.
-7. **Ivan's Mac.** macOS version, Apple Silicon or Intel, mic. Has the app been run, and are the permissions granted?
-8. **Scope cut if time burns.** Capture (3 questions, 1 guardrail) → Work Map from one session (one LLM call plus a validator: every step linked to a moment and a quote) → debrief of 3 questions with teach-back → tutor catches one mistake. Two experts, languages and MCP are cut first.
+1. **Credentials.** ElevenLabs key: add it to the cloud environment as `ELEVENLABS_API_KEY` (only new sessions see it) and to the VM's env file. Voice: any good one; Rachel `21m00Tcm4TlvDq8ikWAM` was suggested, the id is not verified yet. No Anthropic API key for now: Claude runs through the team's subscription on a VM; switch to an API key (a $25 code) if the public demo needs it. Never in git.
+2. **Where work happens.** Cloud sessions plus CI; Ivan downloads artifacts and tests on a Mac. Two Macs, both on current macOS; who demos is not decided. Ivan's VMs are reached through `claude remote-control` sessions, not SSH (port 22 is closed from the cloud container).
+3. **Native vs web.** The web app is the product. The Mac app is a frozen bonus distributed through GitHub Releases. Web on Vercel or Pages, API on an exe.dev VM.
+4. **ElevenAgents.** As in plan B: screen context goes in as contextual updates, our own policy decides when the agent asks, one conversation coordinator.
+5. **Domain.** The customer_07 email case. The app stays domain-agnostic: a fixed schema with namespaced extensions, scenarios as data.
+6. **Character.** Clipa (see Current plan).
+7. **Macs.** Settled.
+8. **Scope cut order.** Open, Ivan decides later. Plan B's own fallback: cut visuals and map complexity first; keep one working Learn → Review → Teach and the whole voice loop.
+9. **Later, not tonight.** Demo videos could be hosted in a separate video library (transcription off) on the streaming platform used by Ivan's other project. Its existing library must not be touched; credentials stay with Ivan.
 
 ## How to work here
 
