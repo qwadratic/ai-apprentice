@@ -1,11 +1,11 @@
 ---
 id: TASK-6.1
-title: 'release.yml: checks on main, fast-forward deploy branch, Pages build'
+title: 'release.yml: checks on main, publish Pages with deploy.json'
 status: In Progress
 assignee:
   - '@qwadratic'
 created_date: '2026-10-03 23:15'
-updated_date: '2026-10-03 23:16'
+updated_date: '2026-10-03 23:23'
 labels:
   - shared
   - infra
@@ -34,3 +34,9 @@ GitHub Actions workflow on push to main and workflow_dispatch (optional sha inpu
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Changed per doc-8 'Change after review': no deploy branch (GITHUB_TOKEN cannot move a branch onto workflow changes); publish deploy.json {sha, at, run} with the site.
+<!-- SECTION:NOTES:END -->
