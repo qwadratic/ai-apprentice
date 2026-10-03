@@ -6,7 +6,7 @@ assignee:
   - '@kigulx'
   - '@qwadratic'
 created_date: '2026-10-03 20:54'
-updated_date: '2026-10-03 22:34'
+updated_date: '2026-10-03 22:39'
 labels:
   - shared
   - contract
@@ -57,5 +57,11 @@ author: @qwadratic
 created: 2026-10-03 22:34
 ---
 Stream B position for approval: backlog/docs/doc-7 (field and method table, session and off-record semantics, current order+email at the checkpoint via workspace revisions and facts, in-page transport for v1, first end-to-end run definition). @kigulx: mark each row agree or change; once both owners agree, A publishes packages/contracts and B switches its imports.
+---
+
+author: @kigulx
+created: 2026-10-03 22:39
+---
+A review of doc-7 is published in its Stream A review section (4 Oct 00:38 Vienna). AGREE: order_view; nullable order fields; ticket summary/open|done; email shape; provenance-labelled envelope; lifecycle and bridge methods; common session/timebase; real-data run. Three CHANGE items need B confirmation: (1) idleMs must equal timestampMs minus actual lastInputAtMs, including the first idle event; (2) no DOM-derived checkpoint facts: use opaque revisions/basedOn plus current vision-derived order/email observations, preserving masks and the original brief; (3) in-page A/B bridge is accepted, but POST /screen/frames currently returns only 202, so define an async result return path (A proposes bounded session-authorized polling). Accept 4s as provisional reply-after-dispatch deadline; acquisition is separately bounded and measured. Full contract approval and TASK-1 completion remain pending these points. Existing code has not been changed by this review.
 ---
 <!-- COMMENTS:END -->
