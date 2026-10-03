@@ -4,6 +4,7 @@ title: 'Tutor voice agent: prompt, map delivery, lookup_guardrail tool'
 status: To Do
 assignee: []
 created_date: '2026-10-03 21:11'
+updated_date: '2026-10-03 22:17'
 labels:
   - stream-b
   - tutor
@@ -41,3 +42,13 @@ Estimate: about 1.5 h of agent time. Card key: B-tutor-agent.
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+author: @qwadratic
+created: 2026-10-03 22:17
+---
+Coordinator decision: provisioning of the tutor agent (apprentice-tutor-dev) moved here from TASK-3.2. Reuse apps/api/agent/elevenlabs/provision.mjs (idempotent by name). Note from the spike: MCP is disabled at workspace level (can_use_mcp_servers=false), so lookup_guardrail should be a client tool or a webhook tool.
+---
+<!-- COMMENTS:END -->

@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-10-03 21:10'
+updated_date: '2026-10-03 22:17'
 labels:
   - stream-b
   - voice
@@ -44,3 +45,13 @@ Estimate: about 2 h of agent time. Card key: B-voice-slice.
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+author: @qwadratic
+created: 2026-10-03 22:17
+---
+Coordinator decision: for now the signed URL route is GET {api}/agent/elevenlabs/signed-url?role=interviewer returning {signed_url}, served by the VM placeholder API (infra/, origin check + rate limit, no token). The agent lab page (TASK-3.21) already calls it. When apps/api/agent takes over, keep this route or change both together.
+---
+<!-- COMMENTS:END -->
