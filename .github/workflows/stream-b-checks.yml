@@ -4,7 +4,7 @@ name: stream-b-checks
 # Pushes to main are covered by release.yml, so the push trigger ignores main and deploy.
 on:
   push:
-    branches-ignore: [main, deploy]
+    branches-ignore: [main]
     paths:
       - "packages/agent/**"
       - "fixtures/agent/**"
