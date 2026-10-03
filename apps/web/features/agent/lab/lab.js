@@ -1,13 +1,20 @@
 // Agent lab: a no-build page that drives one ElevenAgents session from the browser.
 // Prototype for stream B (TASK-3.21). It gets folded into the app shell later (TASK-3.8, TASK-3.9).
 //
-// Secrets: the page never holds an API key. The backend (VM API) mints a signed URL;
-// ?agent=<id> is for a PUBLIC test agent only.
+// Secrets: the page never holds an API key. The backend (VM API) mints a signed URL.
+// There is no way to point the page at another agent: ?agent= is not supported.
+//
+// Disclosure: the server stores the session events, the conversation transcript and the audio recording.
+// Off the record stops the log and the voice session; it does not delete what was already sent.
+//
+// Limits (public page): the voice session auto-ends after 10 minutes, and after 2 minutes with the tab hidden.
+// ?api=<base> is honoured only for https://apprentice.exe.xyz and http://localhost / http://127.0.0.1 (any port);
+// anything else is ignored. Test-only flags ?testAutoEndMs= and ?testHiddenMs= work on localhost only.
 //
 // Backend route (decided by the coordinator, served by the VM):
 //   GET {base}/agent/elevenlabs/signed-url?role=interviewer
 //   200 application/json  {"signed_url": "wss://..."}
-// {base} is the "API base" field (or ?api=<base>). The signed URL is a secret: never logged here.
+// {base} is the "API base" field (or an allowed ?api=<base>). The signed URL is a secret: never logged here.
 //
 // Session log routes (TASK-3.22, served by the VM; origin-checked, 256 KB body limit):
 //   POST {base}/agent/sessions/{sessionId}/events
@@ -17,7 +24,7 @@
 //     A failed request keeps the events queued and they are retried on the next tick.
 //     The server appends them as JSONL under /var/lib/apprentice/sessions/. Any 2xx counts as accepted.
 //   POST {base}/agent/sessions/{sessionId}/finish
-//     body {"conversationId": "<id>"}; the server fetches the ElevenLabs transcript, metadata and audio.
+//     body {"conversationId": "<id>"}; the server fetches the ElevenLabs transcript, metadata and audio recording.
 //     Answer: JSON {"transcriptStored": true|false} (anything else is shown as "transcript stored: no").
 // sessionId is crypto.randomUUID(), created on Start session and shown under the Clipa card.
 // Every line of the visible event log is queued, with one rule: signed WebSocket URLs (wss://...),
@@ -35,9 +42,34 @@ const els = {
   stateLabel: $('stateLabel'), connLine: $('connLine'), sessionId: $('sessionId'),
 };
 
+// ---- Public-page guards ----------------------------------------------------
+const ALLOWED_PROD_API = 'https://apprentice.exe.xyz';
+const IS_LOCAL = ['localhost', '127.0.0.1'].includes(location.hostname);
+
+// Allowed API bases: the production VM, or a local server over plain http.
+function allowedApiBase(value) {
+  let u;
+  try { u = new URL(String(value).trim()); } catch { return false; }
+  if (u.username || u.password) return false;
+  if (u.origin === ALLOWED_PROD_API) return true;
+  return u.protocol === 'http:' && (u.hostname === 'localhost' || u.hostname === '127.0.0.1');
+}
+
 const params = new URLSearchParams(location.search);
-if (params.get('api')) els.apiBase.value = params.get('api');
-const publicAgentId = params.get('agent');
+const startupMessages = [];
+if (params.get('api')) {
+  if (allowedApiBase(params.get('api'))) els.apiBase.value = params.get('api');
+  else startupMessages.push('Ignored the ?api= parameter: only https://apprentice.exe.xyz and localhost are allowed.');
+}
+
+const MAX_SESSION_MS = 10 * 60 * 1000;     // the voice session auto-ends after 10 minutes
+const MAX_HIDDEN_MS = 2 * 60 * 1000;       // ... or after 2 minutes with the tab hidden
+const testMs = (name, fallback) => {
+  const v = Number(params.get(name));
+  return IS_LOCAL && Number.isFinite(v) && v > 0 ? v : fallback;   // test-only, ignored off localhost
+};
+const SESSION_LIMIT_MS = testMs('testAutoEndMs', MAX_SESSION_MS);
+const HIDDEN_LIMIT_MS = testMs('testHiddenMs', MAX_HIDDEN_MS);
 
 // ---- Mock Learn timeline -------------------------------------------------
 // Mock observations of the customer_07 case, sent as contextual updates every 3 s.
@@ -59,6 +91,10 @@ let mode = 'listening';     // 'speaking' | 'listening'
 let thinking = false;
 let offRecord = false;
 let mockTimer = null;
+let limitTimer = null;      // auto-end after SESSION_LIMIT_MS
+let tickTimer = null;       // countdown label
+let hiddenTimer = null;     // auto-end when the tab stays hidden
+let deadline = 0;
 
 function ts() {
   const d = new Date();
@@ -116,9 +152,47 @@ function render() {
   els.off.disabled = !connected;
   els.ask.disabled = !connected;
   els.connLine.textContent = connected
-    ? (publicAgentId ? 'Connected (public agent, testing)' : 'Connected')
+    ? `Connected${deadline ? ` · auto-ends in ${countdown()}` : ''}`
     : (starting ? 'Connecting...' : 'Not connected');
 }
+
+function countdown() {
+  const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+  return `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+}
+
+// ---- Auto-end limits -------------------------------------------------------
+function startLimits() {
+  stopLimits();
+  deadline = Date.now() + SESSION_LIMIT_MS;
+  const limitText = SESSION_LIMIT_MS >= 60000 ? `${SESSION_LIMIT_MS / 60000} minutes` : `${SESSION_LIMIT_MS / 1000} seconds`;
+  sys(`Voice session auto-ends after ${limitText}, or after 2 minutes with this tab hidden.`);
+  limitTimer = setTimeout(() => {
+    if (connected) endSession('Session auto-ended: the 10 minute limit was reached.');
+  }, SESSION_LIMIT_MS);
+  tickTimer = setInterval(() => { if (connected) render(); }, 1000);
+  if (document.hidden) armHidden();
+}
+
+function stopLimits() {
+  clearTimeout(limitTimer); limitTimer = null;
+  clearInterval(tickTimer); tickTimer = null;
+  clearTimeout(hiddenTimer); hiddenTimer = null;
+  deadline = 0;
+}
+
+function armHidden() {
+  if (hiddenTimer || !connected) return;
+  hiddenTimer = setTimeout(() => {
+    hiddenTimer = null;
+    if (connected) endSession('Session auto-ended: this tab was hidden for more than 2 minutes.');
+  }, HIDDEN_LIMIT_MS);
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) armHidden();
+  else { clearTimeout(hiddenTimer); hiddenTimer = null; }
+});
 
 // ---- Server log ----------------------------------------------------------
 // One object per session. While `recording` is true every log line is queued and flushed.
@@ -255,25 +329,25 @@ let liveAnnounced = false;
 function announceLive() {
   if (liveAnnounced) return;
   liveAnnounced = true;
-  sys('Session started. Microphone is live.');
+  sys('Session started. Microphone is live. Events, transcript and audio recording are stored on our server.');
+  startLimits();
 }
 
 async function getSessionConfig() {
-  if (publicAgentId) {
-    sys('Using public agent id from the URL (testing only).');
-    return { agentId: publicAgentId };
-  }
   const base = apiBase();
+  if (!allowedApiBase(base)) {
+    throw new Error('This API base is not allowed. Use https://apprentice.exe.xyz (or a local http://localhost server).');
+  }
   const url = `${base}/agent/elevenlabs/signed-url?role=interviewer`;
   sys(`GET ${url}`);
   let res;
   try {
     res = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(10000) });
   } catch (e) {
-    throw new Error(`Cannot reach ${base} (network error or CORS). The signed-URL endpoint may not be deployed yet. Open the page with ?agent=<public agent id> to test without it.`);
+    throw new Error(`Cannot reach ${base} (network error or CORS). The signed-URL endpoint may not be deployed yet.`);
   }
   if (!res.ok) {
-    throw new Error(`${url} answered ${res.status}. The signed-URL endpoint is missing or refused the request. Open the page with ?agent=<public agent id> to test without it.`);
+    throw new Error(`${url} answered ${res.status}. The signed-URL endpoint is missing or refused the request.`);
   }
   let body;
   try { body = await res.json(); } catch { body = null; }
@@ -287,6 +361,12 @@ async function getSessionConfig() {
 async function startSession() {
   if (connected || starting) return;
   notice('');
+  if (!allowedApiBase(apiBase())) {
+    const msg = 'This API base is not allowed. Use https://apprentice.exe.xyz (or a local http://localhost server).';
+    sys(msg);
+    notice(msg);
+    return;   // nothing is queued or uploaded for a refused base
+  }
   starting = true;
   liveAnnounced = false;
   offRecord = false;
@@ -351,6 +431,7 @@ function markDisconnected(s) {
   mode = 'listening';
   conversation = null;
   stopMock();
+  stopLimits();
   render();
   // A disconnect that we did not cause (network, agent hang-up) also closes the server log.
   if (s && !s.ending) finishSession(s);
@@ -358,6 +439,7 @@ function markDisconnected(s) {
 
 async function endSession(reason) {
   stopMock();
+  stopLimits();
   const s = session;
   if (s) s.ending = true;
   const c = conversation;
@@ -462,3 +544,4 @@ els.askForm.addEventListener('submit', (ev) => {
 
 render();
 sys('Ready. Start a session to talk to the agent.');
+startupMessages.forEach((m) => sys(m));

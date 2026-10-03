@@ -26,7 +26,8 @@ Run from this directory.
 ## Config notes
 
 - `tts.model_id` stays `eleven_flash_v2` (low latency). Expressive Mode (V3 conversational TTS) is deferred until a human has listened to it; flash keeps latency low.
-- `platform_settings.overrides` enables per-session overrides for `first_message`, `language`, `prompt.prompt`, `conversation.text_only` and `tts.voice_id`. Everything else (llm, tts model, knowledge base) is not overridable and stays false. Applied to the live agent on 3 Oct 2026 (PATCH 200; read-back shows `tts.voice_id: true`).
+- `platform_settings.overrides` allows only `conversation.text_only` (used by `textonly-test.mjs`). The `prompt`, `first_message`, `language` and `tts.voice_id` overrides are disabled (TASK-3.21 hardening): the signed-URL route is reachable from a public page, and anyone who could mint a signed URL could otherwise run the agent with their own prompt. Everything else (llm, tts model, knowledge base) is not overridable either. **Status: the hardened config is in this file but has not been applied to the live agent yet.** Run `node provision.mjs` once and check in the read-back that `overrides` shows `prompt: false`, `first_message: false`.
+- `conversation.max_duration_seconds` is set to 600 (the field exists in the ElevenAgents conversation config; the platform default is also 600 s). The read-back of `provision.mjs` prints it. The lab page additionally ends the session itself after 10 minutes.
 - The tutor agent is not provisioned here. It moves to TASK-3.13 (coordinator decision).
 - The browser never sees the API key. The web page asks the API for a signed URL: `GET {api}/agent/elevenlabs/signed-url` returns `{ "signed_url": "wss://..." }`. For now the VM placeholder API serves this route. Treat the signed URL as a secret and never log it.
 
@@ -48,7 +49,7 @@ Run from this directory.
 - `skip_turn` must be given as `built_in_tools.skip_turn = {name, description, params: {system_tool_type: "skip_turn"}}`.
 - LLM id `claude-sonnet-5-5` is accepted. `turn_timeout: 30` is accepted.
 - The server fills `soft_timeout_config.timeout_seconds = -1` (off) and `silence_end_call_timeout = -1`. `turn_model` is `turn_v3`.
-- Overrides default to false for `tts.voice_id`, `tts.model_id`, `llm` and `knowledge_base`. Enable `tts.voice_id` (done) before using a per-session voice.
+- Overrides default to false for `tts.voice_id`, `tts.model_id`, `llm` and `knowledge_base`. A per-session voice would need the `tts.voice_id` override enabled again (currently off).
 - TTS in config: `eleven_flash_v2` with voice `21m00Tcm4TlvDq8ikWAM` (Rachel). Accepted by the API, never listened to.
 
 ### Protocol events
