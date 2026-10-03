@@ -118,13 +118,17 @@ The placeholder exposes the runner publicly as `POST /runner/v1/*` behind `Autho
 
 ## Measurements
 
-Filled in from real runs; see "Report" in the TASK-4 notes for the raw output.
+Measured 3 Oct 2026 (oauth mode, `claude-sonnet-5-5`, concurrency 2, 2 vCPU / 7 GiB).
 
-- Proxy: largest POST that passes: _pending public check_. Recommended upload chunk for A's recording: **≤ 5 MB**.
-- SSE through the proxy: _pending public check_ (locally: events at +0, +1.0, +2.0, +3.0, +4.0 s).
-- Free disk: 19 GB of 25 GB on `/` (3 Oct 2026).
-- Runner latency p50 (3 calls each): _pending credential_.
-- Sustained vision (1 frame / 2 s for 60 s): _pending credential_.
+- Proxy (exe.dev, checked from outside): SSE events arrive one per second, not buffered; CORS preflight correct; `:8787` not reachable. Largest authenticated POST through the proxy: _not yet measured from outside_ — run `check.sh` with `BASE=https://apprentice.exe.xyz` (it posts 6, 8, 10 and 11.9 MB). Through port 8000 directly all four pass and 13 MB gets 413. Recommended upload chunk for A's recording: **≤ 5 MB**.
+- Free disk: 19 GB of 25 GB on `/`.
+- `/v1/complete` with schema, 3 calls through :8000: 2353 / 2781 / 2890 ms, **p50 2.8 s**.
+- `/v1/vision` (one 640×160 PNG) with schema, 3 calls: 2974 / 2469 / 2613 ms, **p50 2.6 s**.
+- Sustained vision, 1 frame every 2 s for 60 s (30 calls, direct to the runner): 30 × 200, **p50 2.76 s, p95 3.77 s, max 3.96 s**, 0 failures; runner cgroup **peak memory 287 MiB**.
+- Burst of 16 simultaneous vision calls: 12 × 200 (2 running + 10 queued), 4 × 429.
+- Timeout (test override 1.5 s): 504 `timeout` after ~3.5 s (abort takes ~2 s), no SDK subprocess left.
+- Unknown model: 502 `sdk_error` / `is_error`.
+- After all runs: `customer_07` appears 0 times in journald, `~apprentice/.claude` and the runner cwd.
 
 ## Fast checks
 
