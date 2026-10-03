@@ -1,12 +1,13 @@
 // Step 4: text-only conversation test with the global WebSocket (Node 22).
-// Phase A: 45 s of contextual_update every 3 s -> expect zero agent replies.
+// Phase A: 60 s (PHASE_A_MS) of contextual_update every 3 s -> expect zero agent replies.
 // Phase B: one non-[ASK] user_message -> expect silence (skip_turn).
 // Phase C: [ASK] user_messages -> expect the exact question, measure latency.
 // Usage: ELEVENLABS_AGENT_ID_INTERVIEWER=... node textonly-test.mjs [--quick]
 import { getSignedUrl } from './signed-url.mjs';
 
 const QUICK = process.argv.includes('--quick');
-const PHASE_A_MS = QUICK ? 9000 : 45000;
+// Phase A duration: PHASE_A_MS env wins; otherwise 9 s with --quick and 60 s by default.
+const PHASE_A_MS = Number(process.env.PHASE_A_MS) || (QUICK ? 9000 : 60000);
 const QUESTION = 'Why did you type the delivery address instead of attaching the screenshot?';
 const ASK_TRIES = 5;
 const t0 = Date.now();
@@ -32,7 +33,12 @@ const emptyCheck = {};
 const silentTurns = [];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const send = (o) => ws.send(JSON.stringify(o));
+// Never send on a closed or closing socket.
+const send = (o) => {
+  if (ws.readyState !== WebSocket.OPEN) return false;
+  ws.send(JSON.stringify(o));
+  return true;
+};
 
 ws.addEventListener('message', (ev) => {
   let m;
@@ -63,9 +69,11 @@ ws.addEventListener('message', (ev) => {
       const p = m.text_response_part;
       if (p.type === 'delta' && p.text) partsByPhase[phase] = (partsByPhase[phase] ?? 0) + 1;
       if (p.type === 'start') emptyCheck[p.response_id] = { phase, text: '' };
-      if (p.type === 'delta') emptyCheck[p.response_id].text += p.text;
-      if (p.type === 'stop' && !emptyCheck[p.response_id].text) {
-        silentTurns.push(emptyCheck[p.response_id].phase);
+      const entry = emptyCheck[p.response_id];
+      if (!entry) break; // delta or stop without a start: nothing to track
+      if (p.type === 'delta') entry.text += p.text ?? '';
+      if (p.type === 'stop' && !entry.text) {
+        silentTurns.push(entry.phase);
         console.log(ts(), `silent LLM turn (empty response) in phase ${phase}`);
       }
       break;
@@ -120,7 +128,7 @@ const events = [
 ];
 let i = 0;
 const endA = Date.now() + PHASE_A_MS;
-while (Date.now() < endA) {
+while (Date.now() < endA && ws.readyState === WebSocket.OPEN) {
   send({ type: 'contextual_update', text: events[i++ % events.length] });
   await sleep(3000);
 }
@@ -133,11 +141,15 @@ console.log(ts(), `phase B done: ${agentReplies.filter((r) => r.phase === 'B').l
 
 phase = 'C';
 for (let n = 1; n <= ASK_TRIES; n++) {
+  if (ws.readyState !== WebSocket.OPEN) {
+    console.log(ts(), 'socket closed before ASK try', n);
+    break;
+  }
   const before = agentReplies.length;
   askSentAt = Date.now();
   send({ type: 'user_message', text: `[ASK] ${QUESTION}` });
   const deadline = Date.now() + 15000;
-  while (agentReplies.length === before && Date.now() < deadline) await sleep(50);
+  while (agentReplies.length === before && Date.now() < deadline && ws.readyState === WebSocket.OPEN) await sleep(50);
   if (agentReplies.length > before) {
     const r = agentReplies[before];
     askResults.push({ try: n, ms: r.t - askSentAt, verbatim: r.text.trim() === QUESTION, text: r.text });

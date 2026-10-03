@@ -1,5 +1,6 @@
 // Step 3: mint a signed URL for the interviewer agent. Prints only status and host, never the URL.
 // Exported getSignedUrl() is reused by textonly-test.mjs.
+import { pathToFileURL } from 'node:url';
 import { api, agentId } from './lib.mjs';
 
 export async function getSignedUrl(id = agentId()) {
@@ -8,7 +9,7 @@ export async function getSignedUrl(id = agentId()) {
   return { ok: true, status: r.status, url: r.json.signed_url };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const r = await getSignedUrl();
   if (!r.ok) {
     console.log('signed-url failed', r.status, r.error);

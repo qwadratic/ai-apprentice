@@ -35,7 +35,8 @@
     "overrides": {
       "conversation_config_override": {
         "agent": { "first_message": true, "language": true, "prompt": { "prompt": true } },
-        "conversation": { "text_only": true }
+        "conversation": { "text_only": true },
+        "tts": { "voice_id": true }
       }
     }
   }
