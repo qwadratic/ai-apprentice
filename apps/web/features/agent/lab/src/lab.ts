@@ -1,4 +1,4 @@
-// Agent lab: a no-build page that drives one ElevenAgents session from the browser.
+// Agent lab: a page (TypeScript, compiled by tsc into dist/ with no bundler) that drives one ElevenAgents session from the browser.
 // Prototype for stream B (TASK-3.21). It gets folded into the app shell later (TASK-3.8, TASK-3.9).
 //
 // Secrets: the page never holds an API key. The backend (VM API) mints a signed URL.
@@ -33,14 +33,36 @@
 // Off the record: one SYS event is queued and flushed, then nothing more is queued, the voice session
 // ends and finish is called. It does not delete what was already sent.
 import { Conversation } from 'https://cdn.jsdelivr.net/npm/@elevenlabs/client@1.26.0/+esm';
+import type { Mode } from '@elevenlabs/client';
 
-const $ = (id) => document.getElementById(id);
-const clipa = $('clipa');
+// ---- Small typed helpers ---------------------------------------------------
+type LogKind = 'sent' | 'recv' | 'sys' | 'err';
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null;
+}
+
+// Message of anything that was thrown or passed as an error.
+function errMsg(e: unknown): string {
+  if (isRecord(e) && typeof e['message'] === 'string' && e['message']) return e['message'];
+  return String(e);
+}
+
+// Looks an element up by id and checks its type; the page markup is ours, so a miss is a build error.
+function byId<T extends HTMLElement>(id: string, type: new () => T): T {
+  const el = document.getElementById(id);
+  if (!(el instanceof type)) throw new Error(`index.html: #${id} is missing or has the wrong type`);
+  return el;
+}
+
+const clipa = byId('clipa', HTMLElement);
 const els = {
-  apiBase: $('apiBase'), start: $('btnStart'), end: $('btnEnd'), off: $('btnOff'),
-  mock: $('btnMock'), askForm: $('askForm'), askText: $('askText'), ask: $('btnAsk'),
-  notice: $('notice'), log: $('log'), clear: $('btnClear'),
-  stateLabel: $('stateLabel'), connLine: $('connLine'), sessionId: $('sessionId'),
+  apiBase: byId('apiBase', HTMLInputElement), start: byId('btnStart', HTMLButtonElement),
+  end: byId('btnEnd', HTMLButtonElement), off: byId('btnOff', HTMLButtonElement),
+  mock: byId('btnMock', HTMLButtonElement), askForm: byId('askForm', HTMLFormElement),
+  askText: byId('askText', HTMLInputElement), ask: byId('btnAsk', HTMLButtonElement),
+  notice: byId('notice', HTMLElement), log: byId('log', HTMLOListElement), clear: byId('btnClear', HTMLButtonElement),
+  stateLabel: byId('stateLabel', HTMLElement), connLine: byId('connLine', HTMLElement), sessionId: byId('sessionId', HTMLElement),
 };
 
 // ---- Public-page guards ----------------------------------------------------
@@ -48,8 +70,8 @@ const ALLOWED_PROD_API = 'https://apprentice.exe.xyz';
 const IS_LOCAL = ['localhost', '127.0.0.1'].includes(location.hostname);
 
 // Allowed API bases: the production VM, or a local server over plain http.
-function allowedApiBase(value) {
-  let u;
+function allowedApiBase(value: unknown): boolean {
+  let u: URL;
   try { u = new URL(String(value).trim()); } catch { return false; }
   if (u.username || u.password) return false;
   if (u.origin === ALLOWED_PROD_API) return true;
@@ -58,15 +80,16 @@ function allowedApiBase(value) {
 }
 
 const params = new URLSearchParams(location.search);
-const startupMessages = [];
-if (params.get('api')) {
-  if (allowedApiBase(params.get('api'))) els.apiBase.value = params.get('api');
+const startupMessages: string[] = [];
+const apiParam = params.get('api');
+if (apiParam) {
+  if (allowedApiBase(apiParam)) els.apiBase.value = apiParam;
   else startupMessages.push('Ignored the ?api= parameter: only https://apprentice.exe.xyz and localhost are allowed.');
 }
 
 const MAX_SESSION_MS = 10 * 60 * 1000;     // the voice session auto-ends after 10 minutes
 const MAX_HIDDEN_MS = 2 * 60 * 1000;       // ... or after 2 minutes with the tab hidden
-const testMs = (name, fallback) => {
+const testMs = (name: string, fallback: number): number => {
   const v = Number(params.get(name));
   return IS_LOCAL && Number.isFinite(v) && v > 0 ? v : fallback;   // test-only, ignored off localhost
 };
@@ -87,32 +110,32 @@ const MOCK_TIMELINE = [
 const MOCK_INTERVAL_MS = 3000;
 
 // ---- State ---------------------------------------------------------------
-let conversation = null;
+let conversation: Conversation | null = null;
 let connected = false;
-let mode = 'listening';     // 'speaking' | 'listening'
+let mode: Mode = 'listening';     // 'speaking' | 'listening'
 let thinking = false;
 let offRecord = false;
-let mockTimer = null;
-let limitTimer = null;      // auto-end after SESSION_LIMIT_MS
-let tickTimer = null;       // countdown label
-let hiddenTimer = null;     // auto-end when the tab stays hidden
+let mockTimer: number | null = null;
+let limitTimer: number | null = null;      // auto-end after SESSION_LIMIT_MS
+let tickTimer: number | null = null;       // countdown label
+let hiddenTimer: number | null = null;     // auto-end when the tab stays hidden
 let deadline = 0;
 
-function ts() {
+function ts(): string {
   const d = new Date();
-  const p = (n, w = 2) => String(n).padStart(w, '0');
+  const p = (n: number, w = 2): string => String(n).padStart(w, '0');
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
 }
 
 // Signed URLs and keys never reach the visible log or the server log.
-function scrub(text) {
+function scrub(text: unknown): string {
   return String(text)
     .replace(/wss?:\/\/\S+/gi, '[url removed]')
     .replace(/xi-api-key\S*/gi, '[key removed]')
     .replace(/sk_[A-Za-z0-9]{16,}/g, '[key removed]');
 }
 
-function log(kind, tag, rawText) {
+function log(kind: LogKind, tag: string, rawText: unknown): void {
   const text = scrub(rawText);
   const li = document.createElement('li');
   li.className = kind;
@@ -126,19 +149,19 @@ function log(kind, tag, rawText) {
   els.log.scrollTop = els.log.scrollHeight;
   enqueue(kind, tag, text);
 }
-const sent = (tag, text) => log('sent', tag, text);
-const recv = (tag, text) => log('recv', tag, text);
-const sys = (text) => log('sys', 'SYS', text);
-const err = (text) => log('err', 'ERR', text);
+const sent = (tag: string, text: string): void => log('sent', tag, text);
+const recv = (tag: string, text: string): void => log('recv', tag, text);
+const sys = (text: string): void => log('sys', 'SYS', text);
+const err = (text: string): void => log('err', 'ERR', text);
 
-function notice(text, info = false) {
+function notice(text: string, info = false): void {
   els.notice.hidden = !text;
   els.notice.textContent = text || '';
   els.notice.classList.toggle('info', info);
 }
 
 // Clipa: idle before connect, listening while connected, speaking, thinking after Ask now, off.
-function render() {
+function render(): void {
   let state = 'idle';
   if (connected) state = mode === 'speaking' ? 'speaking' : (thinking ? 'thinking' : 'listening');
   if (offRecord) {
@@ -158,13 +181,13 @@ function render() {
     : (starting ? 'Connecting...' : 'Not connected');
 }
 
-function countdown() {
+function countdown(): string {
   const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
   return `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
 }
 
 // ---- Auto-end limits -------------------------------------------------------
-function startLimits() {
+function startLimits(): void {
   stopLimits();
   deadline = Date.now() + SESSION_LIMIT_MS;
   const limitText = SESSION_LIMIT_MS >= 60000 ? `${SESSION_LIMIT_MS / 60000} minutes` : `${SESSION_LIMIT_MS / 1000} seconds`;
@@ -176,14 +199,14 @@ function startLimits() {
   if (document.hidden) armHidden();
 }
 
-function stopLimits() {
-  clearTimeout(limitTimer); limitTimer = null;
-  clearInterval(tickTimer); tickTimer = null;
-  clearTimeout(hiddenTimer); hiddenTimer = null;
+function stopLimits(): void {
+  clearTimeout(limitTimer ?? undefined); limitTimer = null;
+  clearInterval(tickTimer ?? undefined); tickTimer = null;
+  clearTimeout(hiddenTimer ?? undefined); hiddenTimer = null;
   deadline = 0;
 }
 
-function armHidden() {
+function armHidden(): void {
   if (hiddenTimer || !connected) return;
   hiddenTimer = setTimeout(() => {
     hiddenTimer = null;
@@ -193,7 +216,7 @@ function armHidden() {
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) armHidden();
-  else { clearTimeout(hiddenTimer); hiddenTimer = null; }
+  else { clearTimeout(hiddenTimer ?? undefined); hiddenTimer = null; }
 });
 
 // ---- Server log ----------------------------------------------------------
@@ -205,22 +228,29 @@ const MAX_TEXT_CHARS = 4000;
 const EVENTS_TIMEOUT_MS = 8000;
 const FINISH_TIMEOUT_MS = 30000;   // the server polls ElevenLabs for up to ~15 s before it answers
 const PERMANENT_FAILURES = [400, 403, 404, 413];
-let session = null;               // {id, conversationId, queue, recording, timer, flushing, failedShown, finished}
+interface LogEvent { t: number; dir: LogKind; type: string; text: string }
+interface Session {
+  id: string; conversationId: string; queue: LogEvent[]; recording: boolean;
+  timer: number | null; flushing: boolean; chain: Promise<boolean> | null;
+  failedShown: boolean; finished: boolean; base: string; ending: boolean; gaveUp: boolean;
+}
+let session: Session | null = null;
 
-function apiBase() { return els.apiBase.value.trim().replace(/\/+$/, ''); }
+function apiBase(): string { return els.apiBase.value.trim().replace(/\/+$/, ''); }
 
-function newSession() {
-  session = {
+function newSession(): Session {
+  const created: Session = {
     id: crypto.randomUUID(), conversationId: '', queue: [], recording: true,
-    timer: null, flushing: false, chain: null, failedShown: false, finished: false, base: apiBase(), ending: false,
+    timer: null, flushing: false, chain: null, failedShown: false, finished: false, base: apiBase(), ending: false, gaveUp: false,
   };
-  const me = session;
+  session = created;
+  const me = created;
   me.timer = setInterval(() => { if (!me.flushing && !me.gaveUp && me.queue.length) flush(me); }, FLUSH_MS);
-  els.sessionId.textContent = session.id;
-  return session;
+  els.sessionId.textContent = created.id;
+  return created;
 }
 
-function enqueue(kind, tag, text) {
+function enqueue(kind: LogKind, tag: string, text: string): void {
   const s = session;
   if (!s || !s.recording) return;
   s.queue.push({
@@ -229,12 +259,12 @@ function enqueue(kind, tag, text) {
   });
 }
 
-function sessionUrl(s, route) {
+function sessionUrl(s: Session, route: string): string {
   return `${s.base}/agent/sessions/${encodeURIComponent(s.id)}/${route}`;
 }
 
-function nextBatch(s) {
-  const batch = [];
+function nextBatch(s: Session): LogEvent[] {
+  const batch: LogEvent[] = [];
   let chars = 0;
   for (const ev of s.queue) {
     const size = ev.text.length + 80;
@@ -246,32 +276,32 @@ function nextBatch(s) {
 }
 
 // Sends the queue in batches. Returns true when the queue is empty. A failure keeps the events.
-function flush(s) {
+function flush(s: Session | null): Promise<boolean> {
   if (!s) return Promise.resolve(true);
   s.chain = (s.chain || Promise.resolve()).then(() => doFlush(s));   // one request at a time, in order
   return s.chain;
 }
 
-async function doFlush(s) {
+async function doFlush(s: Session): Promise<boolean> {
   s.flushing = true;
   try {
     while (s.queue.length) {
       const batch = nextBatch(s);
-      const body = { events: batch };
+      const body: { events: LogEvent[]; conversationId?: string } = { events: batch };
       if (s.conversationId) body.conversationId = s.conversationId;
-      let res;
+      let res: Response | null;
       try {
         res = await fetch(sessionUrl(s, 'events'), {
           method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
           signal: AbortSignal.timeout(EVENTS_TIMEOUT_MS),
         });
-      } catch (e) {
+      } catch {
         res = null;
       }
       if (res && PERMANENT_FAILURES.includes(res.status)) {
         // The server will not accept this session's log (route missing, origin refused, bad body): stop retrying.
         s.gaveUp = true;
-        clearInterval(s.timer);
+        clearInterval(s.timer ?? undefined);
         s.timer = null;
         if (s === session) err(`Session log upload refused (${res.status}); upload stopped for this session.`);
         return false;
@@ -294,10 +324,10 @@ async function doFlush(s) {
 }
 
 // Flush what is left, ask the server to store the ElevenLabs conversation, stop the timer.
-async function finishSession(s) {
+async function finishSession(s: Session | null): Promise<void> {
   if (!s || s.finished) return;
   s.finished = true;
-  clearInterval(s.timer);
+  clearInterval(s.timer ?? undefined);
   s.timer = null;
   s.recording = false;
   if (!s.gaveUp) await flush(s);
@@ -306,7 +336,7 @@ async function finishSession(s) {
     sys(`Session log on the server: ${s.id} (no conversation to store).`);
     return;
   }
-  let line;
+  let line: ['sys' | 'err', string];
   try {
     const res = await fetch(sessionUrl(s, 'finish'), {
       method: 'POST', headers: { 'content-type': 'application/json' },
@@ -314,12 +344,12 @@ async function finishSession(s) {
       signal: AbortSignal.timeout(FINISH_TIMEOUT_MS),
     });
     if (!res.ok) throw new Error(`finish answered ${res.status}`);
-    let body = null;
+    let body: unknown = null;
     try { body = await res.json(); } catch { body = null; }
-    const stored = !!(body && (body.transcriptStored || body.transcript_stored));
+    const stored = isRecord(body) && !!(body['transcriptStored'] || body['transcript_stored']);
     line = ['sys', `Session log saved on the server: ${s.id}, transcript stored: ${stored ? 'yes' : 'no'}`];
   } catch (e) {
-    line = ['err', `Session log could not be finished on the server (${e && e.message ? e.message : e}). Events not sent: ${s.queue.length}.`];
+    line = ['err', `Session log could not be finished on the server (${errMsg(e)}). Events not sent: ${s.queue.length}.`];
   }
   if (line[0] === 'sys') sys(line[1]); else err(line[1]);
 }
@@ -328,39 +358,39 @@ async function finishSession(s) {
 let starting = false;
 let liveAnnounced = false;
 
-function announceLive() {
+function announceLive(): void {
   if (liveAnnounced) return;
   liveAnnounced = true;
   sys('Session started. Microphone is live. Events, transcript and audio recording are stored on our server.');
   startLimits();
 }
 
-async function getSessionConfig() {
+async function getSessionConfig(): Promise<{ signedUrl: string }> {
   const base = apiBase();
   if (!allowedApiBase(base)) {
     throw new Error('This API base is not allowed. Use https://apprentice.exe.xyz (or a local http://localhost server).');
   }
   const url = `${base}/agent/elevenlabs/signed-url?role=interviewer`;
   sys(`GET ${url}`);
-  let res;
+  let res: Response;
   try {
     res = await fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(10000) });
-  } catch (e) {
+  } catch {
     throw new Error(`Cannot reach ${base} (network error or CORS). The signed-URL endpoint may not be deployed yet.`);
   }
   if (!res.ok) {
     throw new Error(`${url} answered ${res.status}. The signed-URL endpoint is missing or refused the request.`);
   }
-  let body;
+  let body: unknown;
   try { body = await res.json(); } catch { body = null; }
-  if (!body || typeof body.signed_url !== 'string') {
+  if (!isRecord(body) || typeof body['signed_url'] !== 'string') {
     throw new Error('The endpoint answered, but not with JSON {"signed_url": "..."}.');
   }
   sys('Signed URL received (not logged).');
-  return { signedUrl: body.signed_url };
+  return { signedUrl: body['signed_url'] };
 }
 
-async function startSession() {
+async function startSession(): Promise<void> {
   if (connected || starting) return;
   notice('');
   if (!allowedApiBase(apiBase())) {
@@ -379,13 +409,13 @@ async function startSession() {
     const cfg = await getSessionConfig();
     conversation = await Conversation.startSession({
       ...cfg,
-      onConnect: ({ conversationId } = {}) => {
+      onConnect: ({ conversationId } = { conversationId: '' }) => {
         if (conversationId) s.conversationId = conversationId;
         recv('CONNECT', `conversation ${conversationId || ''}`.trim());
         announceLive();
       },
       onDisconnect: (d) => {
-        recv('DISCONNECT', d && d.reason ? String(d.reason) : '');
+        recv('DISCONNECT', d?.reason ? String(d.reason) : '');
         markDisconnected(s);
       },
       onStatusChange: ({ status }) => {
@@ -416,8 +446,8 @@ async function startSession() {
     }
     // Connected state and the "live" log line come from the callbacks, not from this resolve.
   } catch (e) {
-    err(e && e.message ? e.message : String(e));
-    notice(e && e.message ? e.message : String(e));
+    err(errMsg(e));
+    notice(errMsg(e));
     conversation = null;
     connected = false;
     await finishSession(s);
@@ -427,7 +457,7 @@ async function startSession() {
   }
 }
 
-function markDisconnected(s) {
+function markDisconnected(s: Session): void {
   connected = false;
   thinking = false;
   mode = 'listening';
@@ -439,7 +469,7 @@ function markDisconnected(s) {
   if (s && !s.ending) finishSession(s);
 }
 
-async function endSession(reason) {
+async function endSession(reason: string): Promise<void> {
   stopMock();
   stopLimits();
   const s = session;
@@ -449,7 +479,7 @@ async function endSession(reason) {
   connected = false;
   thinking = false;
   if (c) {
-    try { await c.endSession(); } catch (e) { err(`endSession: ${e && e.message ? e.message : e}`); }
+    try { await c.endSession(); } catch (e) { err(`endSession: ${errMsg(e)}`); }
   }
   sys(reason);
   render();
@@ -459,7 +489,7 @@ async function endSession(reason) {
 // Off the record: the switch is the last thing that is logged; nothing after it is queued.
 // The microphone and the voice session close first; uploading what was logged before the switch comes after,
 // so a slow or unreachable server can never keep the microphone open.
-async function goOffRecord() {
+async function goOffRecord(): Promise<void> {
   const s = session;
   if (s && s.recording) {
     sys('Off the record: capture and upload stopped');
@@ -479,8 +509,8 @@ window.addEventListener('pagehide', () => {
   if (!s || s.finished || s.gaveUp) return;
   s.finished = true;
   s.recording = false;
-  clearInterval(s.timer);
-  const post = (route, body) => {
+  clearInterval(s.timer ?? undefined);
+  const post = (route: string, body: unknown): void => {
     try {
       fetch(sessionUrl(s, route), {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), keepalive: true,
@@ -493,7 +523,7 @@ window.addEventListener('pagehide', () => {
 });
 
 // ---- Sending -------------------------------------------------------------
-function sendContext(text) {
+function sendContext(text: string): boolean {
   if (!conversation || !connected) {
     sys(`Not sent (no session): ${text}`);
     return false;
@@ -503,7 +533,7 @@ function sendContext(text) {
   return true;
 }
 
-function askNow(question) {
+function askNow(question: string): void {
   if (!conversation || !connected) return;
   const text = `[ASK] ${question}`;
   conversation.sendUserMessage(text);
@@ -512,19 +542,19 @@ function askNow(question) {
   render();
 }
 
-function stopMock() {
+function stopMock(): void {
   if (mockTimer) { clearInterval(mockTimer); mockTimer = null; }
   els.mock.textContent = 'Play mock Learn session';
 }
 
-function toggleMock() {
+function toggleMock(): void {
   if (mockTimer) { stopMock(); sys('Mock playback stopped.'); return; }
   if (!connected && els.notice.hidden) notice('No session: the mock events will only appear in the log. Start a session to send them.', true);
   let i = 0;
   sys(`Mock Learn playback: ${MOCK_TIMELINE.length} events, one every ${MOCK_INTERVAL_MS / 1000} s (synthetic).`);
   els.mock.textContent = 'Stop mock playback';
   const step = () => {
-    sendContext(MOCK_TIMELINE[i]);
+    sendContext(MOCK_TIMELINE[i] ?? '');
     i += 1;
     if (i >= MOCK_TIMELINE.length) { stopMock(); sys('Mock playback finished.'); }
   };
