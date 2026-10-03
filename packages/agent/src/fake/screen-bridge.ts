@@ -8,8 +8,11 @@
 // Lifecycle (matches A's ScreenCapture):
 // - start() ends paused with reason "mask-review"; capturing begins only after
 //   confirmMasks() (or a resume() once the masks are confirmed);
-// - resume() can be refused (masks unconfirmed, or a reason set with blockResume());
-//   it then resolves {state: "paused", reason} and is not an error.
+// - start(), pause(), resume() and confirmMasks() resolve to void; onStatus is authoritative.
+//   resume() can be refused (masks unconfirmed, or a reason set with blockResume()); the call
+//   still resolves and the status stays paused with the reason;
+// - pause() while already paused never downgrades "off_record" (until resume() or stop());
+// - checkpoint ids are `${sessionId}:cp-N`, unique across sessions.
 //
 // Time model:
 // - observation.timestampMs = clock.now() - sessionEpochMs at emission (wall clock);
@@ -32,7 +35,6 @@ import type {
   InputActivityFacts,
   PauseReason,
   ScreenBridge,
-  ScreenBridgeResult,
   ScreenObservation,
   ScreenStatus,
   ScreenStatusReason,
@@ -109,7 +111,7 @@ export class FakeScreenBridge implements ScreenBridge {
     this.clock = clock;
   }
 
-  async start(opts: { sessionId: string; sessionEpochMs: number }): Promise<ScreenBridgeResult> {
+  async start(opts: { sessionId: string; sessionEpochMs: number }): Promise<void> {
     if (this.state !== "idle" && this.state !== "stopped") throw new Error(`start(): bridge is ${this.state}`);
     this.sessionId = opts.sessionId;
     this.sessionEpochMs = opts.sessionEpochMs;
@@ -127,31 +129,36 @@ export class FakeScreenBridge implements ScreenBridge {
     this.state = "paused";
     this.pauseReason = "mask-review";
     this.emitStatus("paused", "mask-review");
-    return { state: "paused", reason: "mask-review" };
   }
 
-  /** Output is closed synchronously; whatever was scheduled is gone and never emitted later. */
+  /**
+   * Output is closed synchronously; whatever was scheduled is gone and never emitted later.
+   * Pausing while already paused only ever escalates to "off_record" (the off-the-record
+   * button); any other reason leaves the current one, so off_record stays until resume()
+   * or stop().
+   */
   async pause(reason: PauseReason = "user-paused"): Promise<void> {
     if (this.state === "capturing") {
       this.cancelTimer();
       this.state = "paused";
       this.pauseReason = reason;
       this.emitStatus("paused", reason);
-    } else if (this.state === "paused" && this.pauseReason !== reason) {
+    } else if (this.state === "paused" && reason === "off_record" && this.pauseReason !== "off_record") {
       this.pauseReason = reason;
       this.emitStatus("paused", reason);
     }
   }
 
-  async resume(): Promise<ScreenBridgeResult> {
-    if (this.state !== "paused") return { state: this.state === "idle" ? "stopped" : this.state };
+  /** A refused resume (masks unconfirmed, blockResume()) resolves normally; the status carries the reason. */
+  async resume(): Promise<void> {
+    if (this.state !== "paused") return;
     const refusal: ScreenStatusReason | null = !this.masksConfirmed ? "mask-review" : this.blockedResume;
     if (refusal) {
       if (this.pauseReason !== refusal) {
         this.pauseReason = refusal;
         this.emitStatus("paused", refusal);
       }
-      return { state: "paused", reason: refusal };
+      return;
     }
     const now = this.clock.now();
     if (this.captureStartMs === null) {
@@ -169,20 +176,17 @@ export class FakeScreenBridge implements ScreenBridge {
     this.pauseReason = undefined;
     this.emitStatus("capturing");
     this.scheduleNext();
-    return { state: "capturing" };
   }
 
   /**
    * Masks reviewed and confirmed: clears the review flag and resumes only if the current
    * pause reason is "mask-review". It never lifts any other pause: an off-the-record pause
-   * (or a user pause, or a refused resume) stays in force and is reported back.
+   * (or a user pause, or a refused resume) stays in force; read the outcome from onStatus.
    */
-  async confirmMasks(): Promise<ScreenBridgeResult> {
+  async confirmMasks(): Promise<void> {
     if (this.state === "idle" || this.state === "stopped") throw new Error(`confirmMasks(): bridge is ${this.state}`);
     this.masksConfirmed = true;
-    if (this.state === "paused" && this.pauseReason === "mask-review") return this.resume();
-    if (this.state === "paused") return { state: "paused", reason: this.pauseReason };
-    return { state: this.state };
+    if (this.state === "paused" && this.pauseReason === "mask-review") await this.resume();
   }
 
   async stop(): Promise<void> {
@@ -240,22 +244,21 @@ export class FakeScreenBridge implements ScreenBridge {
    */
   raiseCheckpoint(): ActionCheckpoint {
     if (this.state !== "capturing") throw new Error(`raiseCheckpoint(): bridge is ${this.state}`);
-    const latest = {} as Record<"order_view" | "email_draft", ScreenObservation>;
-    for (const kind of ["order_view", "email_draft"] as const) {
+    const latest = (kind: "order_view" | "email_draft"): { id: string; revision: string } => {
       const o = this.emitted.filter((x) => x.kind === kind).at(-1);
       if (!o) throw new Error(`raiseCheckpoint(): no ${kind} observation emitted yet`);
       if (o.sourceRevision === null) throw new Error(`raiseCheckpoint(): ${kind} observation ${o.id} has no sourceRevision`);
-      latest[kind] = o;
-    }
-    const order = latest.order_view;
-    const email = latest.email_draft;
+      return { id: o.id, revision: o.sourceRevision };
+    };
+    const order = latest("order_view");
+    const email = latest("email_draft");
     const checkpoint: ActionCheckpoint = {
       schemaVersion: SCHEMA_VERSION,
-      id: `cp-${++this.checkpointCount}`,
+      id: `${this.sessionId}:cp-${++this.checkpointCount}`,
       sessionId: this.sessionId,
       timestampMs: this.clock.now() - this.sessionEpochMs,
       observationIds: [order.id, email.id],
-      revisions: { order: order.sourceRevision!, email: email.sourceRevision! },
+      revisions: { order: order.revision, email: email.revision },
       action: "send",
     };
     this.raised.set(checkpoint.id, structuredClone(checkpoint));

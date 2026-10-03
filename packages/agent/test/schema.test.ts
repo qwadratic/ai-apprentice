@@ -23,6 +23,7 @@ import type {
   Utterance,
   WorkStep,
 } from "../src/schema.ts";
+import { must } from "./helpers.ts";
 
 const scope: EntityScope = { kind: "customer", refs: ["customer_07"] };
 
@@ -137,7 +138,7 @@ test("scope: customer scope needs refs, 'any' does not", () => {
 
 test("map rejects steps that reference a missing guardrail and bad versions", () => {
   const r = validateMapVersion(map({ guardrails: [] }));
-  assert.ok(!r.ok && r.errors[0]!.includes("unknown guardrail g1"));
+  assert.ok(!r.ok && must(r.errors[0]).includes("unknown guardrail g1"));
   assert.equal(validateMapVersion(map({ version: 0 })).ok, false);
   assert.equal(validateMapVersion(map({ reason: "magic" as never })).ok, false);
 });
@@ -182,9 +183,9 @@ test("store: utterances upsert and sort, returned objects are copies", async () 
   await store.saveUtterance(utterance({ id: "u1", startMs: 4000 })); // final replaces interim
   const list = await store.listUtterances("s1");
   assert.deepEqual(list.map((u) => u.id), ["u1", "u2"]);
-  assert.equal(list[0]!.final, true);
-  list[0]!.text = "mutated";
-  assert.equal((await store.listUtterances("s1"))[0]!.text, "Customer 07 asked for text.");
+  assert.equal(must(list[0]).final, true);
+  must(list[0]).text = "mutated";
+  assert.equal(must((await store.listUtterances("s1"))[0]).text, "Customer 07 asked for text.");
   assert.deepEqual(await store.listUtterances("other"), []);
 });
 
@@ -218,13 +219,13 @@ test("store: map versions are append-only with consecutive numbers per workMapId
   });
   await store.saveMapVersion(corrected);
   await assert.rejects(store.saveMapVersion(corrected), /expected 3/);
-  assert.equal((await store.getLatestMap("wm-customer07"))!.version, 2);
-  assert.equal((await store.getMapVersion("wm-customer07", 1))!.guardrails[0]!.exceptions.length, 1);
+  assert.equal(must((await store.getLatestMap("wm-customer07"))).version, 2);
+  assert.equal(must(must((await store.getMapVersion("wm-customer07", 1))).guardrails[0]).exceptions.length, 1);
   assert.deepEqual((await store.listMapVersions("wm-customer07")).map((m) => m.reason), ["live", "review_corrected"]);
   assert.equal(await store.getMapVersion("wm-customer07", 9), null);
   // numbering is per map, not per session: another map starts at 1 even for the same session
   await store.saveMapVersion(map({ id: "other-1", workMapId: "wm-other" }));
-  assert.equal((await store.getLatestMap("wm-other"))!.version, 1);
+  assert.equal(must((await store.getLatestMap("wm-other"))).version, 1);
 });
 
 test("store: a new session (Teach, reset) finds the confirmed map through workMapId; sessionId is only metadata", async () => {
@@ -234,8 +235,8 @@ test("store: a new session (Teach, reset) finds the confirmed map through workMa
   // a Teach session with a different id looks the map up by workMapId, never by its own session id
   assert.equal(await store.getLatestMap("teach-1"), null, "a session id is not a map id");
   const found = await store.getLatestConfirmedMap("wm-customer07");
-  assert.equal(found!.version, 2);
-  assert.equal(found!.sessionId, "review-1", "the producing session is kept as metadata");
+  assert.equal(must(found).version, 2);
+  assert.equal(must(found).sessionId, "review-1", "the producing session is kept as metadata");
 });
 
 test("store: getLatestConfirmedMap returns the newest review_* version, never a later live draft", async () => {
@@ -249,11 +250,11 @@ test("store: getLatestConfirmedMap returns the newest review_* version, never a 
   );
   await store.saveMapVersion(map({ id: "m4", version: 4, reason: "live" }));
   const confirmed = await store.getLatestConfirmedMap("wm-customer07");
-  assert.equal(confirmed!.version, 3, "T5: the latest confirmed version wins, not the newest draft");
-  assert.deepEqual(confirmed!.guardrails[0]!.exceptions, []);
-  assert.equal((await store.getLatestMap("wm-customer07"))!.version, 4);
-  confirmed!.steps.length = 0;
-  assert.equal((await store.getLatestConfirmedMap("wm-customer07"))!.steps.length, 1, "returns copies");
+  assert.equal(must(confirmed).version, 3, "T5: the latest confirmed version wins, not the newest draft");
+  assert.deepEqual(must(must(confirmed).guardrails[0]).exceptions, []);
+  assert.equal(must((await store.getLatestMap("wm-customer07"))).version, 4);
+  must(confirmed).steps.length = 0;
+  assert.equal(must((await store.getLatestConfirmedMap("wm-customer07"))).steps.length, 1, "returns copies");
 });
 
 test("store: sessions round-trip", async () => {
@@ -261,7 +262,7 @@ test("store: sessions round-trip", async () => {
   assert.equal(await store.getSession("s1"), null);
   await store.saveSession(session());
   await store.saveSession(session({ offRecord: true }));
-  assert.equal((await store.getSession("s1"))!.offRecord, true);
+  assert.equal(must((await store.getSession("s1"))).offRecord, true);
 });
 
 function turn(over: Partial<TranscriptTurn> = {}): TranscriptTurn {
@@ -278,8 +279,8 @@ test("attributeMarkerTurns: user turns that start with [ASK] are the agent's que
     out.map((t) => [t.speaker, t.source]),
     [["agent", "harness"], ["agent", "transcript"], ["expert", "transcript"]],
   );
-  assert.equal(out[0]!.text, "Why did you type the address?", "marker stripped");
-  assert.equal(out[2]!.text, "Because the customer asked for text.");
+  assert.equal(must(out[0]).text, "Why did you type the address?", "marker stripped");
+  assert.equal(must(out[2]).text, "Because the customer asked for text.");
   assert.ok(!out.some((t) => t.speaker === "expert" && t.text.includes("Why did you type")), "the question never becomes an expert answer");
 });
 
@@ -297,12 +298,12 @@ test("attributeMarkerTurns: marker rules, user role for Teach, copy semantics", 
     out.map((t) => [t.speaker, t.source]),
     [["agent", "harness"], ["novice", "transcript"], ["novice", "transcript"], ["agent", "transcript"]],
   );
-  assert.equal(out[0]!.text, "leading spaces are fine");
-  assert.equal(out[0]!.endMs, null);
-  assert.equal(out[0]!.final, true);
-  assert.equal(out[3]!.text, "[ASK] an agent turn is already the agent", "agent turns are left untouched");
+  assert.equal(must(out[0]).text, "leading spaces are fine");
+  assert.equal(must(out[0]).endMs, null);
+  assert.equal(must(out[0]).final, true);
+  assert.equal(must(out[3]).text, "[ASK] an agent turn is already the agent", "agent turns are left untouched");
   assert.deepEqual(attributeMarkerTurns([]), []);
   // the result maps straight onto a valid Utterance
-  const u = { id: "u9", sessionId: "s1", ...attributeMarkerTurns([turn({ text: "[ASK] Why?" })])[0]! };
+  const u = { id: "u9", sessionId: "s1", ...must(attributeMarkerTurns([turn({ text: "[ASK] Why?" })])[0]) };
   assert.equal(validateUtterance(u).ok, true);
 });

@@ -150,7 +150,7 @@ export class FakeVoiceAdapter implements VoiceAdapter {
     if (this.state !== "paused") return;
     // Whatever fell due while paused is dropped, not replayed.
     const now = this.clock.now();
-    while (this.script[this.index] && this.startedAtMs + this.script[this.index]!.atMs < now) this.index++;
+    for (let step = this.script[this.index]; step && this.startedAtMs + step.atMs < now; step = this.script[this.index]) this.index++;
     this.state = "active";
     this.emit({ type: "status", state: "connected" });
     this.emit({ type: "mode", mode: "listening" });
