@@ -1,0 +1,19 @@
+{
+  "name": "@apprentice/agent-elevenlabs",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ElevenLabs spike scripts (account check, agent provisioning, signed URL, text-only protocol test). Run with node file.ts on Node 22.",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p .",
+    "check-account": "node check-account.ts",
+    "provision": "node provision.ts",
+    "provision:dry": "node provision.ts --dry",
+    "signed-url": "node signed-url.ts",
+    "textonly-test": "node textonly-test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "^7.0.2"
+  }
+}
