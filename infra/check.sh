@@ -31,6 +31,13 @@ pre="$(curl -si -X OPTIONS "$BASE/health" -H "Origin: $ORIGIN" -H 'Access-Contro
 st="$(echo "$pre" | head -1 | tr -d '\r')"; acao="$(echo "$pre" | grep -i '^access-control-allow-origin' | tr -d '\r')"
 if echo "$st" | grep -q ' 204' && echo "$acao" | grep -qF "$ORIGIN"; then ok "allowed preflight: $st; $acao"; else ko "allowed preflight: $st; ${acao:-no ACAO}"; fi
 
+c="$(code "$BASE/agent/elevenlabs/signed-url" -H 'Origin: https://evil.example')"; [ "$c" = 403 ] && ok "signed-url foreign origin -> 403" || ko "signed-url foreign origin -> $c"
+r="$(curl -s -w ' %{http_code}' "$BASE/agent/elevenlabs/signed-url" -H "Origin: $ORIGIN")"; c="${r##* }"; b="${r% *}"
+case "$c" in
+  200) echo "$b" | jq -e '.signed_url|startswith("wss://")' >/dev/null 2>&1 && ok "signed-url allowed origin -> 200 (url not printed)" || ko "signed-url 200 without a wss:// signed_url";;
+  503) ok "signed-url allowed origin -> 503 $b";;
+  *) ko "signed-url allowed origin -> $c";;
+esac
 c="$(head -c 13000000 /dev/zero | curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/runner/v1/complete" "${AUTH[@]}" --data-binary @-)"
 [ "$c" = 413 ] && ok "13 MB -> 413" || ko "13 MB -> $c"
 

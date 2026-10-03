@@ -73,7 +73,8 @@ The token goes only into the environment of that one command and is never printe
 
 | Variable | Used by | Notes |
 |---|---|---|
-| `ELEVENLABS_API_KEY` | real API (B) | never sent to the browser |
+| `ELEVENLABS_API_KEY` | real API (B), placeholder signed-URL route | never sent to the browser |
+| `ELEVENLABS_AGENT_ID_INTERVIEWER` | placeholder signed-URL route | interviewer agent id from stream B's ElevenLabs spike; empty → 503 |
 | `CLAUDE_CODE_OAUTH_TOKEN` | runner | private development only (`claude setup-token`) |
 | `ANTHROPIC_API_KEY` | runner | required for anything judges can reach; exactly one of the two |
 | `RUNNER_TOKEN` | runner, API | `openssl rand -hex 32` |
@@ -125,6 +126,20 @@ Success: `200 {ok: true, json, ms}` when `schema` was given (the SDK's `structur
 Every call: `tools: []`, `permissionMode: "dontAsk"`, `settingSources: []`, `persistSession: false`, `cwd: /var/lib/apprentice/runner-cwd`, `maxTurns: 3`, `maxBudgetUsd: 0.5`, a short custom system prompt (the request's `system` is appended), `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`. The subprocess environment excludes `RUNNER_TOKEN`, `API_TOKEN` and `ELEVENLABS_API_KEY`. The runner refuses to start unless exactly one Claude credential is set and logs its mode at start. At boot it spawns and discards one warm subprocess (`startup()`), because per-request options differ.
 
 The placeholder exposes the runner publicly as `POST /runner/v1/*` behind `Authorization: Bearer $API_TOKEN` for testing only.
+
+## ElevenLabs signed URL (placeholder, for stream B's web page)
+
+`GET /agent/elevenlabs/signed-url` → `200 {"signed_url": "wss://..."}`. The server calls `GET https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=$ELEVENLABS_AGENT_ID_INTERVIEWER` with `xi-api-key: $ELEVENLABS_API_KEY`; the key never reaches the browser. No token: the browser cannot hold one.
+
+| Status | Body | Meaning |
+|---|---|---|
+| 403 | `{ok:false, error:"origin_not_allowed"}` | `Origin` missing or not in `ALLOWED_ORIGINS` |
+| 503 | `{ok:false, error:"elevenlabs_not_configured", missing:[...]}` | agent id or key empty in `/etc/apprentice/env` |
+| 429 | `{ok:false, error:"rate_limited"}` + `Retry-After: 60` | over 6/min per client IP (last `X-Forwarded-For` entry, set by exe.dev) or 60/hour overall |
+| 502 | `{ok:false, error:"elevenlabs_error", upstream_status}` / `"elevenlabs_unreachable"` | ElevenLabs refused or timed out (10 s) |
+
+Logs carry status, duration and the upstream status only, never the URL or the key. The limits are in memory and reset when the service restarts. When `apps/api` replaces the placeholder, it must serve the same route itself.
+
 
 ## Measurements
 

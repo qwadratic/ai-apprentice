@@ -23,6 +23,7 @@ if [ ! -f /etc/apprentice/env ]; then
   cat > /etc/apprentice/env <<EOF
 # Secrets for apprentice services. root:root 0600. Edit with: sudoedit /etc/apprentice/env
 ELEVENLABS_API_KEY=
+ELEVENLABS_AGENT_ID_INTERVIEWER=
 # Exactly ONE of the next two. The OAuth token is for private development only.
 CLAUDE_CODE_OAUTH_TOKEN=
 ANTHROPIC_API_KEY=
@@ -37,6 +38,7 @@ DEPLOY_REF=main
 DEBUG_ENDPOINTS=
 EOF
 fi
+grep -q '^ELEVENLABS_AGENT_ID_INTERVIEWER=' /etc/apprentice/env || echo 'ELEVENLABS_AGENT_ID_INTERVIEWER=' >> /etc/apprentice/env
 chown root:root /etc/apprentice/env
 chmod 600 /etc/apprentice/env
 

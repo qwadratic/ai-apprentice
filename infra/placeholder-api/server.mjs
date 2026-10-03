@@ -12,6 +12,8 @@ const API_TOKEN = process.env.API_TOKEN || '';
 const GIT_SHA = process.env.GIT_SHA || 'unknown';
 const DEBUG = process.env.DEBUG_ENDPOINTS === '1';
 const MAX_BODY = 12 * 1024 * 1024;
+const EL_AGENT_ID = process.env.ELEVENLABS_AGENT_ID_INTERVIEWER || '';
+const EL_KEY = process.env.ELEVENLABS_API_KEY || '';
 const ALLOWED = new Set(
   (process.env.ALLOWED_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean),
 );
@@ -66,6 +68,37 @@ function readBody(req) {
   });
 }
 
+// Signed-URL rate limits: 6 per minute per client IP, 60 per hour overall.
+const perIp = new Map(); // ip -> timestamps (ms) within the last minute
+let globalHits = []; // timestamps within the last hour
+function clientIp(req) {
+  // exe.dev appends the client IP as seen by its proxy as the last entry.
+  const xff = String(req.headers['x-forwarded-for'] || '').split(',').map((s) => s.trim()).filter(Boolean);
+  return xff.length ? xff[xff.length - 1] : req.socket.remoteAddress || 'unknown';
+}
+function rateLimited(ip) {
+  const now = Date.now();
+  globalHits = globalHits.filter((t) => now - t < 3_600_000);
+  const mine = (perIp.get(ip) || []).filter((t) => now - t < 60_000);
+  if (mine.length >= 6 || globalHits.length >= 60) {
+    perIp.set(ip, mine);
+    return true;
+  }
+  mine.push(now);
+  perIp.set(ip, mine);
+  globalHits.push(now);
+  if (perIp.size > 10_000) for (const [k, v] of perIp) if (!v.length || now - v[v.length - 1] >= 60_000) perIp.delete(k);
+  return false;
+}
+
+async function elevenLabsSignedUrl() {
+  const url = `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${encodeURIComponent(EL_AGENT_ID)}`;
+  const r = await fetch(url, { headers: { 'xi-api-key': EL_KEY }, signal: AbortSignal.timeout(10_000) });
+  if (!r.ok) return { status: r.status };
+  const j = await r.json();
+  return { status: r.status, signed_url: typeof j.signed_url === 'string' ? j.signed_url : undefined };
+}
+
 function runnerRequest(method, path, body, rid) {
   return new Promise((resolve, reject) => {
     const headers = { 'x-request-id': rid };
@@ -117,6 +150,41 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && route === '/health') {
       status = 200;
       resBytes = send(res, 200, { ok: true, runner: await runnerUp(rid), git_sha: GIT_SHA });
+      return;
+    }
+    if (req.method === 'GET' && route === '/agent/elevenlabs/signed-url') {
+      // Browser route: no token, but only for allowed origins. Never log the URL or key.
+      const origin = req.headers.origin;
+      if (!origin || !ALLOWED.has(origin)) {
+        status = 403;
+        resBytes = send(res, 403, { ok: false, error: 'origin_not_allowed' });
+        return;
+      }
+      if (!EL_AGENT_ID || !EL_KEY) {
+        status = 503;
+        resBytes = send(res, 503, { ok: false, error: 'elevenlabs_not_configured', missing: [!EL_AGENT_ID && 'ELEVENLABS_AGENT_ID_INTERVIEWER', !EL_KEY && 'ELEVENLABS_API_KEY'].filter(Boolean) });
+        return;
+      }
+      if (rateLimited(clientIp(req))) {
+        status = 429;
+        res.setHeader('Retry-After', '60');
+        resBytes = send(res, 429, { ok: false, error: 'rate_limited' });
+        return;
+      }
+      try {
+        const r = await elevenLabsSignedUrl();
+        meta.upstream = r.status;
+        if (r.signed_url) {
+          status = 200;
+          resBytes = send(res, 200, { signed_url: r.signed_url });
+        } else {
+          status = 502;
+          resBytes = send(res, 502, { ok: false, error: 'elevenlabs_error', upstream_status: r.status });
+        }
+      } catch {
+        status = 502;
+        resBytes = send(res, 502, { ok: false, error: 'elevenlabs_unreachable' });
+      }
       return;
     }
     if (DEBUG && req.method === 'GET' && route === '/debug/sse') {
