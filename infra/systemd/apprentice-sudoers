@@ -1,0 +1,2 @@
+# Installed to /etc/sudoers.d/apprentice by infra/install.sh.
+apprentice ALL=(root) NOPASSWD: /usr/bin/systemctl restart apprentice-runner.service, /usr/bin/systemctl restart apprentice-api.service

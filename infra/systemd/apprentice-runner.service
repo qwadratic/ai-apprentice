@@ -1,0 +1,23 @@
+[Unit]
+Description=Apprentice Claude runner (127.0.0.1:8787)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=apprentice
+Group=apprentice
+EnvironmentFile=/etc/apprentice/env
+Environment=NODE_ENV=production RUNNER_HOST=127.0.0.1 RUNNER_PORT=8787 RUNNER_CWD=/var/lib/apprentice/runner-cwd
+WorkingDirectory=/opt/apprentice/infra/claude-runner
+ExecStart=/usr/bin/node /opt/apprentice/infra/claude-runner/dist/server.js
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

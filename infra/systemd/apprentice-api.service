@@ -1,0 +1,23 @@
+[Unit]
+Description=Apprentice public API (0.0.0.0:8000)
+After=network-online.target apprentice-runner.service
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=apprentice
+Group=apprentice
+EnvironmentFile=/etc/apprentice/env
+Environment=NODE_ENV=production HOST=0.0.0.0 PORT=8000 RUNNER_URL=http://127.0.0.1:8787
+WorkingDirectory=/opt/apprentice
+ExecStart=/opt/apprentice/infra/start-api.sh
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
