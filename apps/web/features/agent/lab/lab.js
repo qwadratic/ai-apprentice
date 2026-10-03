@@ -8,7 +8,8 @@
 // Off the record stops the log and the voice session; it does not delete what was already sent.
 //
 // Limits (public page): the voice session auto-ends after 10 minutes, and after 2 minutes with the tab hidden.
-// ?api=<base> is honoured only for https://apprentice.exe.xyz and http://localhost / http://127.0.0.1 (any port);
+// ?api=<base> is honoured only for https://apprentice.exe.xyz, and for http://localhost / http://127.0.0.1 (any port)
+// when the page itself is served from localhost;
 // anything else is ignored. Test-only flags ?testAutoEndMs= and ?testHiddenMs= work on localhost only.
 //
 // Backend route (decided by the coordinator, served by the VM):
@@ -52,7 +53,8 @@ function allowedApiBase(value) {
   try { u = new URL(String(value).trim()); } catch { return false; }
   if (u.username || u.password) return false;
   if (u.origin === ALLOWED_PROD_API) return true;
-  return u.protocol === 'http:' && (u.hostname === 'localhost' || u.hostname === '127.0.0.1');
+  // A local API is allowed only when the page itself is served locally (development).
+  return IS_LOCAL && u.protocol === 'http:' && (u.hostname === 'localhost' || u.hostname === '127.0.0.1');
 }
 
 const params = new URLSearchParams(location.search);
@@ -543,5 +545,5 @@ els.askForm.addEventListener('submit', (ev) => {
 });
 
 render();
-sys('Ready. Start a session to talk to the agent.');
+sys('Ready. Start a session.');
 startupMessages.forEach((m) => sys(m));
