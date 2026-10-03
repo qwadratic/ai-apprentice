@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@qwadratic'
 created_date: '2026-10-03 22:04'
-updated_date: '2026-10-03 22:22'
+updated_date: '2026-10-03 23:10'
 labels:
   - stream-b
   - ux
@@ -42,5 +42,5 @@ Fast clickable preview of stream B before A's skeleton exists: a static page wit
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-PR #3 merged. Waiting for GitHub Pages (Settings -> Pages -> Source: GitHub Actions) and the VM signed-url route with ELEVENLABS_AGENT_ID_INTERVIEWER set, then a live voice check on the deployed page.
+PR #6 merged (auto-end 10 min, hidden-tab end, audio disclosure, harness label, ?api allowlist, ?agent removed). Live agent patched by the coordinator with Ivan's approval at ~01:35: prompt, first_message, language and voice overrides false, text_only true, max_duration_seconds 600, auth enabled; signed-url still 200 from the Pages origin.
 <!-- SECTION:NOTES:END -->
