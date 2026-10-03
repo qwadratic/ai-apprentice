@@ -1,0 +1,203 @@
+name: release
+
+# Push to main: re-run every check on the merged result; if green and not frozen, build the
+# site and publish it to GitHub Pages together with deploy.json:
+#   {"sha": "<40-hex target commit>", "at": "<UTC ISO time>", "run": "<this run's url>"}
+# Site and pointer are one Pages artifact, so they always move together. The VM (TASK-6.2)
+# polls <pages-url>/deploy.json, checks the sha is an ancestor of origin/main and deploys it.
+# Nothing here pushes to git (no deploy branch) and nothing talks to the VM, so the workflow
+# needs no contents: write.
+#
+# Stale re-runs: a non-manual run only publishes while its commit is still the newest
+# releasable state of main. Re-running an old run must not roll the site back.
+# "Newest" ignores backlog/**: those pushes do not start this workflow (paths-ignore), so
+# a code push followed at once by a backlog bookkeeping push still publishes the code push.
+#
+# Manual run (workflow_dispatch, must be started from main):
+#   sha      commit on main to release (default: head of main). Rollback = an older sha;
+#            it must be an ancestor of main. Skips the stale check.
+#   confirm  release even though the repository variable DEPLOY_FREEZE is 1.
+#
+# Freeze: DEPLOY_FREEZE=1 blocks publishing (site and deploy.json) for pushes, and for manual
+# runs unless confirm=true. A rollback should be combined with the freeze: set DEPLOY_FREEZE=1
+# first (so the next push to main does not publish a newer commit over the rollback), then run
+# the rollback manually with confirm=true. Unset the variable to resume.
+on:
+  push:
+    branches: [main]
+    # Backlog-only pushes (task bookkeeping) must not publish.
+    paths-ignore:
+      - "backlog/**"
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: "Commit on main to release (empty = head of main). An older sha is a rollback."
+        type: string
+        required: false
+        default: ""
+      confirm:
+        description: Release even though DEPLOY_FREEZE is 1
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: resolve target commit
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+      publish: ${{ steps.resolve.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: resolve
+        env:
+          INPUT_SHA: ${{ inputs.sha }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "workflow_dispatch" ] && [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Run this workflow from main (selected: $GITHUB_REF). Only commits on main can be released."
+            exit 1
+          fi
+          target="${INPUT_SHA:-$GITHUB_SHA}"
+          if ! printf '%s' "$target" | grep -Eq '^[0-9a-fA-F]{7,40}$'; then
+            echo "::error::sha input must be 7-40 hex characters"
+            exit 1
+          fi
+          git fetch --quiet origin main
+          sha=$(git rev-parse --verify "${target}^{commit}")
+          if ! git merge-base --is-ancestor "$sha" origin/main; then
+            echo "::error::$sha is not on main; refusing to release it"
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT" != "workflow_dispatch" ]; then
+            head=$(git rev-parse origin/main)
+            # Stale = main has moved on with changes outside backlog/ (those start their own run).
+            if [ "$sha" != "$head" ] && ! git diff --quiet "$sha" "$head" -- . ':(exclude)backlog'; then
+              echo "::notice::Skipping: $sha is no longer the head of main ($head); a newer run publishes that. Use a manual run to release an older commit."
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          echo "Releasing $sha"
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+
+  gate:
+    name: deploy freeze gate
+    needs: prepare
+    if: needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          FREEZE: ${{ vars.DEPLOY_FREEZE }}
+          EVENT: ${{ github.event_name }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if [ "$FREEZE" != "1" ]; then
+            echo "No freeze."
+            exit 0
+          fi
+          if [ "$EVENT" = "workflow_dispatch" ] && [ "$CONFIRM" = "true" ]; then
+            echo "::warning::DEPLOY_FREEZE=1 overridden by a manual run with confirm."
+            exit 0
+          fi
+          echo "::error::DEPLOY_FREEZE=1: deploy is frozen. Unset the variable, or run this workflow manually with confirm=true."
+          exit 1
+
+  checks-stream-b:
+    needs: prepare
+    if: needs.prepare.outputs.publish == 'true'
+    uses: ./.github/workflows/stream-b-checks.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+
+  checks-backlog:
+    needs: prepare
+    if: needs.prepare.outputs.publish == 'true'
+    uses: ./.github/workflows/backlog-check.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+
+  pages-build:
+    name: build site and deploy.json
+    needs: [prepare, gate, checks-stream-b, checks-backlog]
+    if: needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: read # configure-pages
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+      - name: Still the newest releasable commit (repeated here because re-runs reuse prepare's output)
+        env:
+          SHA: ${{ needs.prepare.outputs.sha }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "workflow_dispatch" ]; then exit 0; fi
+          git fetch --quiet origin main
+          head=$(git rev-parse origin/main)
+          if [ "$SHA" != "$head" ] && ! git diff --quiet "$SHA" "$head" -- . ':(exclude)backlog'; then
+            echo "::error::$SHA is no longer the head of main ($head). A re-run must not publish an older commit; use a manual run (with the freeze) for a rollback."
+            exit 1
+          fi
+      - name: Lab lockfile exists at this commit
+        env:
+          SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          if [ ! -f apps/web/features/agent/lab/package-lock.json ]; then
+            echo "::error::apps/web/features/agent/lab/package-lock.json is missing at $SHA. This commit predates the lab lockfile and cannot be built; pick a newer sha."
+            exit 1
+          fi
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/features/agent/lab/package-lock.json
+      - name: Build the lab page (tsc to dist/)
+        working-directory: apps/web/features/agent/lab
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build
+      - name: Write deploy.json next to the site
+        env:
+          SHA: ${{ needs.prepare.outputs.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          out=apps/web/features/agent/lab/dist/deploy.json
+          jq -n --arg sha "$SHA" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg run "$RUN_URL" \
+            '{sha: $sha, at: $at, run: $run}' > "$out"
+          cat "$out"
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/web/features/agent/lab/dist
+
+  pages-deploy:
+    name: publish to Pages
+    needs: pages-build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

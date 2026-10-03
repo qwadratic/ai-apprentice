@@ -8,12 +8,23 @@ on:
   pull_request:
     paths:
       - "backlog/**"
+  workflow_call:
+    inputs:
+      ref:
+        description: "Commit to check (default is the triggering commit)"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
 
 jobs:
   unique-task-ids:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Task IDs are unique
         run: |

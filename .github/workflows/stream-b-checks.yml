@@ -1,32 +1,71 @@
 name: stream-b-checks
 
+# Runs on PRs (path-filtered), and is reused by release.yml on main via workflow_call.
+# Pushes to main are covered by release.yml, so the push trigger ignores main and deploy.
 on:
   push:
+    branches-ignore: [main]
     paths:
       - "packages/agent/**"
       - "fixtures/agent/**"
       - "apps/api/agent/**"
+      - "apps/web/features/agent/**"
       - ".github/workflows/stream-b-checks.yml"
   pull_request:
     paths:
       - "packages/agent/**"
       - "fixtures/agent/**"
       - "apps/api/agent/**"
+      - "apps/web/features/agent/**"
       - ".github/workflows/stream-b-checks.yml"
+  workflow_call:
+    inputs:
+      ref:
+        description: "Commit to check (default is the triggering commit)"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
 
 jobs:
   agent:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Agent package tests
-        run: cd packages/agent && npm test
-      - name: Syntax-check ElevenLabs scripts
+
+      - name: Type-check every package that has a lockfile
         run: |
-          for f in apps/api/agent/elevenlabs/*.mjs; do
-            [ -e "$f" ] && node --check "$f"
+          set -euo pipefail
+          for dir in packages/agent apps/api/agent/elevenlabs apps/web/features/agent/lab; do
+            if [ -f "$dir/package-lock.json" ]; then
+              echo "::group::typecheck $dir"
+              (cd "$dir" && npm ci && npm run typecheck)
+              echo "::endgroup::"
+            else
+              echo "::notice::skipping $dir (no package-lock.json yet)"
+            fi
           done
-          true
+
+      - name: Agent package tests
+        run: |
+          set -euo pipefail
+          cd packages/agent
+          if [ -f package-lock.json ]; then npm ci; fi
+          npm test
+
+      - name: Agent lab build
+        run: |
+          set -euo pipefail
+          cd apps/web/features/agent/lab
+          if [ -f package-lock.json ]; then
+            npm ci
+            npm run build
+          else
+            echo "::notice::skipping lab build (no package-lock.json yet)"
+          fi
