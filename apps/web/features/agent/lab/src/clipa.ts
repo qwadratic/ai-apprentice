@@ -34,8 +34,8 @@
 
   // One paint layer of the wire. Layers are stacked outline, body, shade, highlight, so the arm's
   // joint never shows a seam. `bulb` is the radius of the soft ends in this layer (0: none).
-  const wire = (cls, color, width, dx, dy, bulb) => {
-    const end = (x, y) => (bulb ? `<circle cx="${x}" cy="${y}" r="${bulb}" fill="currentColor" stroke="none"/>` : '');
+  const wire = (cls: string, color: string, width: number, dx: number, dy: number, bulb: number): string => {
+    const end = (x: number, y: number): string => (bulb ? `<circle cx="${x}" cy="${y}" r="${bulb}" fill="currentColor" stroke="none"/>` : '');
     return `
       <g class="${cls}" color="${color}" transform="translate(${dx} ${dy})" fill="none" stroke="currentColor" stroke-width="${width}" stroke-linecap="round" stroke-linejoin="round">
         <path d="${BODY}"/>
@@ -43,7 +43,7 @@
       </g>`;
   };
 
-  const eye = (x) => `
+  const eye = (x: number): string => `
           <g transform="translate(${x} 47)">
             <g class="blink"><circle class="eye-dot" r="4.3" fill="${INK}"/><circle class="glint" cx="1.4" cy="-1.5" r="1.25" fill="#ffffff" opacity="0"/></g>
             <path class="eye-arc" d="M-4.6 1.9Q0-3.7 4.6 1.9" fill="none" stroke="${INK}" stroke-width="2.8" stroke-linecap="round" opacity="0"/>
@@ -205,43 +205,48 @@ g, path, circle, ellipse, rect { transform-box: view-box; transform-origin: 0 0;
   [data-s="listening"] .r1, [data-s="warning"] .r1 { opacity: 0.5; transform: scale(1.02); }
 }`;
 
-  const isOn = (value) => value !== null && value !== 'false';
+  const isOn = (value: string | null): boolean => value !== null && value !== 'false';
 
   class ClipaBuddy extends HTMLElement {
-    static get observedAttributes() { return ['state', 'size', 'point', 'off']; }
+    static get observedAttributes(): string[] { return ['state', 'size', 'point', 'off']; }
+
+    private _root: HTMLElement;
+    private _label: string | null;
 
     constructor() {
       super();
       const shadow = this.attachShadow({ mode: 'open' });
       shadow.innerHTML = `<style>${CSS}</style>${MARKUP}`;
-      this._root = shadow.querySelector('.root');
+      const root = shadow.querySelector<HTMLElement>('.root');
+      if (!root) throw new Error('clipa-buddy: markup has no .root element');
+      this._root = root;
       this._label = null;
     }
 
-    connectedCallback() {
+    connectedCallback(): void {
       if (!this.hasAttribute('role')) this.setAttribute('role', 'img');
       this._render();
     }
 
-    attributeChangedCallback() { this._render(); }
+    attributeChangedCallback(): void { this._render(); }
 
-    get state() { return this.getAttribute('state') || 'idle'; }
-    set state(value) { this.setAttribute('state', String(value)); }
-    get size() { return this.getAttribute('size'); }
-    set size(value) { if (value === null || value === undefined || value === '') this.removeAttribute('size'); else this.setAttribute('size', String(value)); }
-    get point() { return this.getAttribute('point') || 'up-left'; }
-    set point(value) { this.setAttribute('point', String(value)); }
-    get off() { return isOn(this.getAttribute('off')); }
-    set off(value) { if (value) this.setAttribute('off', ''); else this.removeAttribute('off'); }
+    get state(): string { return this.getAttribute('state') || 'idle'; }
+    set state(value: unknown) { this.setAttribute('state', String(value)); }
+    get size(): string | null { return this.getAttribute('size'); }
+    set size(value: unknown) { if (value === null || value === undefined || value === '') this.removeAttribute('size'); else this.setAttribute('size', String(value)); }
+    get point(): string { return this.getAttribute('point') || 'up-left'; }
+    set point(value: unknown) { this.setAttribute('point', String(value)); }
+    get off(): boolean { return isOn(this.getAttribute('off')); }
+    set off(value: unknown) { if (value) this.setAttribute('off', ''); else this.removeAttribute('off'); }
 
-    _render() {
+    private _render(): void {
       const root = this._root;
       const raw = this.getAttribute('state');
-      const state = STATES.includes(raw) ? raw : 'idle';
+      const state = raw !== null && STATES.includes(raw) ? raw : 'idle';
       const off = isOn(this.getAttribute('off'));
       root.dataset.s = off ? 'off' : state;
       const point = this.getAttribute('point');
-      root.dataset.p = POINTS.includes(point) ? point : 'up-left';
+      root.dataset.p = point !== null && POINTS.includes(point) ? point : 'up-left';
 
       const size = (this.getAttribute('size') || '').trim();
       if (size) root.style.setProperty('--s', /^\d+(\.\d+)?$/.test(size) ? `${size}px` : size);

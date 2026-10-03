@@ -22,10 +22,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/features/agent/lab/package-lock.json
+      - name: Build the lab page (tsc to dist/)
+        working-directory: apps/web/features/agent/lab
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: apps/web/features/agent/lab
+          path: apps/web/features/agent/lab/dist
 
   deploy:
     needs: build
