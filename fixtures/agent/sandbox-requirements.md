@@ -14,14 +14,14 @@ The order screen shows the delivery address and window in plain visible text, la
 
 ## Facts the observations must carry
 
-Per observation: `schemaVersion: 1`, `id`, `sessionId`, `sequence`, `timestampMs` (from `sessionEpochMs`), `frameId`, `kind`, `facts`, `entityRef` (customer id or `null`), `evidenceIds`.
+Per observation: `schemaVersion: 1`, `id`, `sessionId`, `sequence`, `timestampMs` (wall-clock offset from `sessionEpochMs`, paused time stays a gap), `source` (`vision` or `workspace`), `frameId` (`null` only when `source` is `workspace`), `sourceRevision` (opaque workspace revision at frame capture, or `null`), `kind`, `facts`, `entityRef` (customer id or `null`), `evidenceIds`. Heartbeats are `source: workspace`; everything else is `source: vision`.
 
 | kind | facts |
 | --- | --- |
-| `order_view` | `customerRef` (`customer_07` ... or `null`), `orderId`, `deliveryAddress`, `deliveryWindow` |
+| `order_view` | `customerRef` (`customer_07` ... ), `orderId`, `deliveryAddress`, `deliveryWindow`; each is `null` when unreadable, masked or unknown |
 | `email_draft` | `recipientRef` (or `null`), `subject`, `bodyText`, `attachments[]` = `{kind: image\|pdf\|other, ocrText?}`, `previewState` = `editing\|preview\|sent` |
-| `ticket` | `ticketId`, `orderId`, `customerRef`, `status` = `open\|done`, `note` |
-| `input_activity` | `surface` = `order\|email\|ticket`, `typing` (bool), `idleMs` |
+| `ticket` | `ticketId`, `orderId`, `customerRef`, `status` = `open\|done`, `summary` |
+| `input_activity` | `surface` = `order\|email\|ticket`, `typing` (bool), `idleMs`, `lastInputAtMs` (session-relative time of the last actual input) |
 
 A new observation is expected whenever one of these changes (order opened, attachment added or removed, body text changed, preview state changed). An unrecognised customer is `null`, not a guess. Fixture example: `fixtures/agent/learn-customer07.json`.
 
@@ -31,7 +31,7 @@ Screen capture cannot see keystrokes, so the workspace emits `input_activity` it
 
 - every 2 s while the person types in any workspace field (`typing: true`, `idleMs: 0`);
 - one heartbeat when typing stops (`typing: false`, `idleMs` growing), then again every 2 s while idle up to about 10 s, then stop;
-- `evidenceIds: []` (a heartbeat is not a screen moment); `entityRef: null`.
+- `source: workspace`, `frameId: null`, `sourceRevision: null`, `evidenceIds: []` (a heartbeat is not a screen moment); `entityRef: null`.
 
 The agent uses it only to stay quiet while the expert types and to detect a pause.
 
@@ -49,10 +49,10 @@ Customer names, e-mail addresses and addresses are invented. No real people or c
 
 ## Preview -> Send checkpoint
 
-- **Preview** switches the email to `previewState: "preview"`, emits an observation, then sends an `ActionCheckpoint` `{schemaVersion: 1, id, sessionId, timestampMs, observationIds, action: "send"}`.
+- **Preview** switches the email to `previewState: "preview"`, emits an observation, then sends an `ActionCheckpoint` `{schemaVersion: 1, id, sessionId, timestampMs, observationIds, revisions: {order, email}, facts: {order, email}, action: "send"}`. `revisions` are opaque strings that change on every edit; `facts` are the workspace's own snapshot at Preview.
 - `observationIds` must include the latest `order_view` observation and the latest `email_draft` observation (more are fine).
-- The workspace waits for the agent's reply `{checkpointId, status: clear|warn|unknown, message, evidenceIds}` and shows the message in the preview panel. `warn` and `unknown` do not disable **Send**: the human decides.
-- Timeout (suggest 8 s) or error: show "check did not complete" and never display it as a pass.
+- The workspace waits for the agent's reply `{checkpointId, status: clear|warn|unknown, message, evidenceIds, basedOn: {order, email}}` and shows the message in the preview panel only if `basedOn` equals the current revisions (checked again on Send). `warn` and `unknown` do not disable **Send**: the human decides.
+- Timeout (provisional 4 s after dispatch, per doc-7) or error: show "check did not complete" and never display it as a pass.
 - **Send** sets `previewState: "sent"` and emits an observation. The checkpoint belongs to this workspace only; do not describe it as blocking clicks in other apps.
 
 ## Reset and rehearsal
@@ -63,7 +63,7 @@ Customer names, e-mail addresses and addresses are invented. No real people or c
 
 ## Pause, evidence and replay
 
-- `pause()` stops capture and heartbeats and drops anything unsent; `resume()` continues with consistent timestamps.
+- `start()` ends paused with reason `mask-review`; `pause()` stops capture and heartbeats and drops anything unsent; `resume()` continues with wall-clock timestamps, can be refused (resolves `{state: paused, reason}`), and never replays what happened while paused.
 - `resolveEvidence(id)` returns `{assetRef, startMs, endMs}` of the processed (masked) frame or clip; the email replacement moment (attach, remove, type) should be a `clip` evidence so the Review and Teach UIs can replay it.
 
 ## Open questions for stream A

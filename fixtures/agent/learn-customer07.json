@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "scenario": "learn-customer07",
-  "description": "Synthetic Learn session. The expert opens order ORD-2041 for customer_07, attaches the template screenshot to the email, removes it and types the essential delivery data as text, then opens Preview. All data is invented. Timestamps (atMs) are offsets from sessionEpochMs.",
+  "description": "Synthetic Learn session. The expert opens order ORD-2041 for customer_07, attaches the template screenshot to the email, removes it and types the essential delivery data as text, then opens Preview. All data is invented. Timestamps (atMs) are offsets from the moment capturing begins, after mask review.",
   "sessionId": "sess-mock-learn-01",
   "durationMs": 26000,
   "evidence": [
@@ -46,7 +46,9 @@
       "id": "obs-001",
       "atMs": 0,
       "kind": "order_view",
+      "source": "vision",
       "frameId": "f-0001",
+      "sourceRevision": "rev-order-1",
       "entityRef": "customer_07",
       "evidenceIds": [
         "ev-f-0001"
@@ -62,20 +64,25 @@
       "id": "obs-002",
       "atMs": 2000,
       "kind": "input_activity",
-      "frameId": "f-0002",
+      "source": "workspace",
+      "frameId": null,
+      "sourceRevision": null,
       "entityRef": null,
       "evidenceIds": [],
       "facts": {
         "surface": "order",
         "typing": false,
-        "idleMs": 2000
+        "idleMs": 2000,
+        "lastInputAtMs": 0
       }
     },
     {
       "id": "obs-003",
       "atMs": 5000,
       "kind": "email_draft",
+      "source": "vision",
       "frameId": "f-0003",
+      "sourceRevision": "rev-email-1",
       "entityRef": "customer_07",
       "evidenceIds": [
         "ev-f-0003"
@@ -92,7 +99,9 @@
       "id": "obs-004",
       "atMs": 8000,
       "kind": "email_draft",
+      "source": "vision",
       "frameId": "f-0004",
+      "sourceRevision": "rev-email-2",
       "entityRef": "customer_07",
       "evidenceIds": [
         "ev-f-0004"
@@ -114,7 +123,9 @@
       "id": "obs-005",
       "atMs": 11000,
       "kind": "email_draft",
+      "source": "vision",
       "frameId": "f-0005",
+      "sourceRevision": "rev-email-3",
       "entityRef": "customer_07",
       "evidenceIds": [
         "ev-clip-template-replaced"
@@ -131,20 +142,25 @@
       "id": "obs-006",
       "atMs": 13000,
       "kind": "input_activity",
-      "frameId": "f-0006",
+      "source": "workspace",
+      "frameId": null,
+      "sourceRevision": null,
       "entityRef": null,
       "evidenceIds": [],
       "facts": {
         "surface": "email",
         "typing": true,
-        "idleMs": 0
+        "idleMs": 0,
+        "lastInputAtMs": 13000
       }
     },
     {
       "id": "obs-007",
       "atMs": 14000,
       "kind": "email_draft",
+      "source": "vision",
       "frameId": "f-0007",
+      "sourceRevision": "rev-email-4",
       "entityRef": "customer_07",
       "evidenceIds": [
         "ev-clip-template-replaced"
@@ -161,59 +177,73 @@
       "id": "obs-008",
       "atMs": 15000,
       "kind": "input_activity",
-      "frameId": "f-0008",
+      "source": "workspace",
+      "frameId": null,
+      "sourceRevision": null,
       "entityRef": null,
       "evidenceIds": [],
       "facts": {
         "surface": "email",
         "typing": true,
-        "idleMs": 0
+        "idleMs": 0,
+        "lastInputAtMs": 15000
       }
     },
     {
       "id": "obs-009",
       "atMs": 17000,
       "kind": "input_activity",
-      "frameId": "f-0009",
+      "source": "workspace",
+      "frameId": null,
+      "sourceRevision": null,
       "entityRef": null,
       "evidenceIds": [],
       "facts": {
         "surface": "email",
         "typing": true,
-        "idleMs": 0
+        "idleMs": 0,
+        "lastInputAtMs": 17000
       }
     },
     {
       "id": "obs-010",
       "atMs": 19000,
       "kind": "input_activity",
-      "frameId": "f-0010",
+      "source": "workspace",
+      "frameId": null,
+      "sourceRevision": null,
       "entityRef": null,
       "evidenceIds": [],
       "facts": {
         "surface": "email",
         "typing": true,
-        "idleMs": 0
+        "idleMs": 0,
+        "lastInputAtMs": 19000
       }
     },
     {
       "id": "obs-010b",
       "atMs": 19500,
       "kind": "input_activity",
-      "frameId": "f-0010b",
+      "source": "workspace",
+      "frameId": null,
+      "sourceRevision": null,
       "entityRef": null,
       "evidenceIds": [],
       "facts": {
         "surface": "email",
         "typing": false,
-        "idleMs": 0
+        "idleMs": 0,
+        "lastInputAtMs": 19500
       }
     },
     {
       "id": "obs-011",
       "atMs": 20000,
       "kind": "email_draft",
+      "source": "vision",
       "frameId": "f-0011",
+      "sourceRevision": "rev-email-5",
       "entityRef": "customer_07",
       "evidenceIds": [
         "ev-clip-template-replaced"
@@ -230,33 +260,41 @@
       "id": "obs-012",
       "atMs": 22000,
       "kind": "input_activity",
-      "frameId": "f-0012",
+      "source": "workspace",
+      "frameId": null,
+      "sourceRevision": null,
       "entityRef": null,
       "evidenceIds": [],
       "facts": {
         "surface": "email",
         "typing": false,
-        "idleMs": 2000
+        "idleMs": 2000,
+        "lastInputAtMs": 20000
       }
     },
     {
       "id": "obs-013",
       "atMs": 24000,
       "kind": "input_activity",
-      "frameId": "f-0013",
+      "source": "workspace",
+      "frameId": null,
+      "sourceRevision": null,
       "entityRef": null,
       "evidenceIds": [],
       "facts": {
         "surface": "email",
         "typing": false,
-        "idleMs": 4000
+        "idleMs": 4000,
+        "lastInputAtMs": 20000
       }
     },
     {
       "id": "obs-014",
       "atMs": 25000,
       "kind": "email_draft",
+      "source": "vision",
       "frameId": "f-0014",
+      "sourceRevision": "rev-email-6",
       "entityRef": "customer_07",
       "evidenceIds": [
         "ev-f-0014"
