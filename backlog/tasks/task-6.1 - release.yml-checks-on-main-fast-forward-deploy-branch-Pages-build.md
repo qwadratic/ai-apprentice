@@ -1,9 +1,11 @@
 ---
 id: TASK-6.1
 title: 'release.yml: checks on main, fast-forward deploy branch, Pages build'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@qwadratic'
 created_date: '2026-10-03 23:15'
+updated_date: '2026-10-03 23:16'
 labels:
   - shared
   - infra
