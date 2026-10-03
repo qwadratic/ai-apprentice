@@ -1,0 +1,30 @@
+name: backlog-check
+
+on:
+  push:
+    paths:
+      - "backlog/**"
+      - ".github/workflows/backlog-check.yml"
+  pull_request:
+    paths:
+      - "backlog/**"
+
+jobs:
+  unique-task-ids:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Task IDs are unique
+        run: |
+          shopt -s nullglob
+          files=(backlog/tasks/*.md backlog/completed/*.md)
+          if [ ${#files[@]} -eq 0 ]; then echo "No tasks yet."; exit 0; fi
+          dups=$(grep -h -m1 -i '^id:' "${files[@]}" | tr -d "\"' " | tr '[:lower:]' '[:upper:]' | sort | uniq -d)
+          if [ -n "$dups" ]; then
+            echo "Duplicate task IDs (two branches created the same number):"
+            echo "$dups"
+            echo "Repair on main with: backlog doctor --fix"
+            exit 1
+          fi
+          echo "All ${#files[@]} task IDs are unique."
