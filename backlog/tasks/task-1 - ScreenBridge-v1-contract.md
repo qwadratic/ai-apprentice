@@ -6,7 +6,7 @@ assignee:
   - '@kigulx'
   - '@qwadratic'
 created_date: '2026-10-03 20:54'
-updated_date: '2026-10-03 21:10'
+updated_date: '2026-10-03 22:22'
 labels:
   - shared
   - contract
@@ -37,3 +37,13 @@ The only interface between stream A (screen) and stream B (agent), versioned as 
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+author: @qwadratic
+created: 2026-10-03 22:22
+---
+Stream B's proposal is on main: packages/agent/src/contract-draft.ts (ScreenBridge v1 draft, schemaVersion 1, facts for order, email draft, ticket and the input_activity heartbeat, plus onObservation/onStatus/onCheckpoint/replyToCheckpoint) and fixtures/agent/sandbox-requirements.md (screens, data, customer_07 x2, another customer, unknown customer, customer_12 x2 for the live new-fact test, Preview -> Send, heartbeat cadence, reset). @kigulx please review and say what to change; types move to packages/contracts with your skeleton. Dependencies stream B will need in the root lockfile: zod 4, @elevenlabs/react ^1.16, @elevenlabs/client ^1.26, react.
+---
+<!-- COMMENTS:END -->

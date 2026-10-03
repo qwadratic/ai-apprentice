@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@qwadratic'
 created_date: '2026-10-03 22:04'
-updated_date: '2026-10-03 22:04'
+updated_date: '2026-10-03 22:22'
 labels:
   - stream-b
   - ux
@@ -38,3 +38,9 @@ Fast clickable preview of stream B before A's skeleton exists: a static page wit
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+PR #3 merged. Waiting for GitHub Pages (Settings -> Pages -> Source: GitHub Actions) and the VM signed-url route with ELEVENLABS_AGENT_ID_INTERVIEWER set, then a live voice check on the deployed page.
+<!-- SECTION:NOTES:END -->

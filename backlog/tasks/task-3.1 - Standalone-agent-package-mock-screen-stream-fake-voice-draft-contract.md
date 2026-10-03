@@ -1,11 +1,11 @@
 ---
 id: TASK-3.1
 title: 'Standalone agent package: mock screen stream, fake voice, draft contract'
-status: In Progress
+status: Done
 assignee:
   - '@qwadratic'
 created_date: '2026-10-03 21:10'
-updated_date: '2026-10-03 22:04'
+updated_date: '2026-10-03 22:22'
 labels:
   - stream-b
   - contract
@@ -42,3 +42,9 @@ Estimate: about 2 h of agent time. Card key: B-mocks-contract.
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Merged in PR #1. packages/agent (dependency-free, Node 22 native TS): ScreenBridge v1 draft, Work Map schema with validators and an in-memory store, FakeScreenBridge on a fake clock, scripted FakeVoiceAdapter; browser-safe entry, Node loader at ./node. fixtures/agent: customer_07 Learn session and sandbox requirements for stream A. stream-b-checks CI: 30/30 tests green. Dependency request and links posted on TASK-1 and TASK-2. Known gaps are listed in packages/agent/README.md.
+<!-- SECTION:FINAL_SUMMARY:END -->

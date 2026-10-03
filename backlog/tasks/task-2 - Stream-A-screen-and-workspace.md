@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@kigulx'
 created_date: '2026-10-03 20:54'
-updated_date: '2026-10-03 21:37'
+updated_date: '2026-10-03 22:22'
 labels:
   - stream-a
 milestone: m-0
@@ -42,3 +42,13 @@ Parent of stream A tasks (owner @kigulx, codes with Codex); A creates its own ch
 <!-- SECTION:NOTES:BEGIN -->
 Stream A assignments: TASK-2.1 foundation (orchestrator), TASK-2.2 capture/privacy, TASK-2.3 vision/API, TASK-2.4 workspace, TASK-2.5 later recording/replay. Independent worker slices may start before the shared foundation is ready; production integration still requires the jointly approved ScreenBridge. Only Backlog is published to main; all implementation stays on task branches.
 <!-- SECTION:NOTES:END -->
+
+## Comments
+
+<!-- COMMENTS:BEGIN -->
+author: @qwadratic
+created: 2026-10-03 22:22
+---
+Stream B's requirements for the demo workspace: fixtures/agent/sandbox-requirements.md on main. Contract draft: packages/agent/src/contract-draft.ts. Details on TASK-1.
+---
+<!-- COMMENTS:END -->

@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@qwadratic'
 created_date: '2026-10-03 21:10'
-updated_date: '2026-10-03 22:04'
+updated_date: '2026-10-03 22:22'
 labels:
   - stream-b
   - voice
@@ -42,3 +42,9 @@ Estimate: about 2 h of agent time. Card key: B-elevenlabs-spike.
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+PR #2 merged: scripts and live findings in apps/api/agent/elevenlabs/README.md. Dev agent apprentice-interviewer-dev exists (id kept out of git). Open: real-voice silence test by a human; agent-minute balance and Creator code (dashboard); Expressive Mode voice choice. Tutor agent moved to TASK-3.13.
+<!-- SECTION:NOTES:END -->
