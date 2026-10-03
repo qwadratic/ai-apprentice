@@ -1,2 +1,2 @@
 # Installed to /etc/sudoers.d/apprentice by infra/install.sh; used by deploy.sh.
-apprentice ALL=(root) NOPASSWD: /usr/bin/systemctl restart apprentice-runner.service, /usr/bin/systemctl restart apprentice-api.service
+apprentice ALL=(root) NOPASSWD: /usr/bin/systemctl restart apprentice-runner.service, /usr/bin/systemctl restart apprentice-api.service, /usr/bin/systemctl restart apprentice-ops.service

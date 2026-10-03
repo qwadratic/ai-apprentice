@@ -1,5 +1,5 @@
 [Unit]
-Description=Apprentice deploy from DEPLOY_SOURCE (pages or ref): manual, or the optional timer
+Description=Apprentice deploy of the sha requested through POST /ops/deploy
 After=network-online.target
 Wants=network-online.target
 
@@ -7,9 +7,9 @@ Wants=network-online.target
 Type=oneshot
 User=apprentice
 Group=apprentice
-# deploy.sh reads DEPLOY_SOURCE, DEPLOY_REF and DEPLOY_JSON_URL and unsets the secrets.
+# deploy.sh unsets the secrets before running install or build scripts.
 # NoNewPrivileges must stay off: deploy.sh restarts the units through sudo.
 EnvironmentFile=/etc/apprentice/env
-ExecStart=/opt/apprentice/bin/apprentice-deploy
+ExecStart=/opt/apprentice/bin/apprentice-deploy --request
 StandardOutput=journal
 StandardError=journal

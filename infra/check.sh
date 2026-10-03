@@ -58,6 +58,44 @@ r="$(curl -s "$BASE/agent/sessions/$SID" "${AUTH[@]}")"
 echo "$r" | jq -e '.ok and (.events|length)==2 and .events[0].conversationId=="conv_check"' >/dev/null && ok "session get returns 2 events" || ko "session get $r"
 c="$(code -X DELETE "$BASE/agent/sessions/$SID" "${AUTH[@]}")"; [ "$c" = 200 ] && ok "check session deleted" || ko "check session delete -> $c"
 
+# ---- deploy webhook (infra/ops behind /ops/*)
+r="$(curl -s -w ' %{http_code}' "$BASE/ops/deploy/status")"; c="${r##* }"; b="${r% *}"
+if [ "$c" = 200 ] && echo "$b" | jq -e 'has("deployed_sha") and has("last")' >/dev/null 2>&1; then
+  ok "ops status is public: $(echo "$b" | jq -c '{deployed_sha: ((.deployed_sha // "")[0:12]), last: (.last.state // null)}')"
+else ko "ops status -> $c"; fi
+UNSIGNED='{"sha":"0000000000000000000000000000000000000000","ts":0}'
+c="$(code -X POST "$BASE/ops/deploy" -H 'Content-Type: application/json' -d "$UNSIGNED")"
+[ "$c" = 401 ] && ok "ops deploy without signature -> 401" || ko "ops deploy without signature -> $c"
+c="$(code -X POST "$BASE/ops/deploy" -H 'Content-Type: application/json' -H "X-Deploy-Signature: sha256=$(printf '0%.0s' $(seq 64))" -d "$UNSIGNED")"
+[ "$c" = 401 ] && ok "ops deploy with a wrong signature -> 401" || ko "ops deploy with a wrong signature -> $c"
+# Signed request for the deployed sha: needs the secret (DEPLOY_WEBHOOK_SECRET, or
+# sudo on the VM) and node. Expect 202 and then "already deployed", or 422 when
+# the deployed sha is not on origin/main (a branch deployed by hand).
+WS="${DEPLOY_WEBHOOK_SECRET:-}"
+if [ -z "$WS" ] && [[ "$BASE" == http://127.0.0.1* ]]; then WS="$(sudo grep ^DEPLOY_WEBHOOK_SECRET= /etc/apprentice/env 2>/dev/null | cut -d= -f2)"; fi
+DSHA="$(echo "$b" | jq -r '.deployed_sha // empty' 2>/dev/null)"
+if [ -n "$WS" ] && [ -n "$DSHA" ] && command -v node >/dev/null; then
+  body="$(jq -cn --arg sha "$DSHA" --argjson ts "$(date +%s)" '{sha: $sha, ts: $ts}')"
+  sig="$(BODY="$body" WS="$WS" node -e 'process.stdout.write(require("crypto").createHmac("sha256", process.env.WS).update(process.env.BODY).digest("hex"))')"
+  r="$(curl -s -w ' %{http_code}' -X POST "$BASE/ops/deploy" -H 'Content-Type: application/json' -H "X-Deploy-Signature: sha256=$sig" --data-raw "$body")"; c="${r##* }"
+  if [ "$c" = 202 ]; then
+    state=""
+    for _ in $(seq 30); do
+      state="$(curl -s "$BASE/ops/deploy/status" | jq -r --arg s "$DSHA" 'if .last.sha == $s then .last.state else "" end')"
+      case "$state" in ok|failed|rolled_back) break ;; esac
+      sleep 2
+    done
+    [ "$state" = ok ] && ok "signed redeploy of ${DSHA:0:12} -> 202, then ok ($(curl -s "$BASE/ops/deploy/status" | jq -r .last.message))" || ko "signed redeploy ended as '$state'"
+  elif [ "$c" = 422 ]; then
+    ok "signed request accepted by HMAC; ${DSHA:0:12} is not on origin/main -> 422"
+  else ko "signed request -> $r"; fi
+  c="$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/ops/deploy" -H 'Content-Type: application/json' -H "X-Deploy-Signature: sha256=$sig" --data-raw "$body")"
+  [ "$c" = 409 ] && ok "replayed signature -> 409" || ko "replayed signature -> $c"
+else
+  echo "SKIP  signed webhook test (needs DEPLOY_WEBHOOK_SECRET and node)"
+fi
+unset WS
+
 c="$(head -c 13000000 /dev/zero | curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/runner/v1/complete" "${AUTH[@]}" --data-binary @-)"
 [ "$c" = 413 ] && ok "13 MB -> 413" || ko "13 MB -> $c"
 
@@ -70,11 +108,13 @@ for mb in 6 8 10 11.9; do
   case "$r" in 400*) ok "${mb} MB POST passes (runner 400 on purpose) $r";; *) ko "${mb} MB POST -> $r";; esac
 done
 
+if [ "$(code "$BASE/debug/sse" -m 2)" = 404 ]; then echo "SKIP  /debug/sse (DEBUG_ENDPOINTS off)"; else
 echo "-- /debug/sse arrival times (expect ~1 s apart)"
 start="$(now_ms)"
 curl -sN -m 15 "$BASE/debug/sse" | while IFS= read -r line; do
   case "$line" in data:*) printf '   +%5d ms %s\n' "$(( $(now_ms) - start ))" "$line";; esac
 done
+fi
 
 SCHEMA_PROMPT='{"prompt":"Customer_07 asks for order data as text in the email body. Return the customer id and the requested format.","schema":{"type":"object","properties":{"customer":{"type":"string"},"format":{"type":"string"}},"required":["customer","format"],"additionalProperties":false}}'
 IM="$(command -v magick || command -v convert)" || { echo "ImageMagick not found (brew install imagemagick)" >&2; exit 2; }
