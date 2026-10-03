@@ -1,9 +1,11 @@
 ---
 id: TASK-3.2
 title: 'ElevenLabs integration spike: key, credits, agent config, silence behaviour'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@qwadratic'
 created_date: '2026-10-03 21:10'
+updated_date: '2026-10-03 22:04'
 labels:
   - stream-b
   - voice

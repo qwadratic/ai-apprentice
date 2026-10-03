@@ -1,9 +1,11 @@
 ---
 id: TASK-3.1
 title: 'Standalone agent package: mock screen stream, fake voice, draft contract'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@qwadratic'
 created_date: '2026-10-03 21:10'
+updated_date: '2026-10-03 22:04'
 labels:
   - stream-b
   - contract
