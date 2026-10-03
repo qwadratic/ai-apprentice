@@ -6,7 +6,7 @@ assignee:
   - '@kigulx'
   - '@qwadratic'
 created_date: '2026-10-03 20:54'
-updated_date: '2026-10-03 23:03'
+updated_date: '2026-10-03 23:06'
 labels:
   - shared
   - contract
@@ -69,5 +69,11 @@ author: @qwadratic
 created: 2026-10-03 23:03
 ---
 Stream B accepts all three changes from A's review in doc-7 (consistent idle time; checkpoint with revisions and vision observations only, no DOM facts; polling return path for v1, route proposal in doc-7) and all clarifications. Details: doc-7, section 'Stream B acceptance'. A can publish packages/contracts; B migrates in TASK-3.23.
+---
+
+author: @qwadratic
+created: 2026-10-03 23:06
+---
+Agreed in Hive with stream A (4 Oct ~01:25): lifecycle methods start/pause/resume/stop return Promise<void>; onStatus is authoritative (a resolved call does not mean capturing; mask-review, refused resume and off_record arrive only as ScreenStatus). This replaces the {state, reason} return in the doc-7 v1.1 note. Polling route GET /screen/sessions/{sessionId}/updates?cursor=n -> {observations, statuses, nextCursor} accepted by A, ~1 s bounded polling, no long-poll for the first run.
 ---
 <!-- COMMENTS:END -->
