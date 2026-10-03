@@ -177,7 +177,7 @@ test("off the record: pause('off_record') reports the reason and emits nothing m
   assert.equal(seen.length, n);
 });
 
-test("a refused resume resolves with the reason and is not an error; the session keeps its epoch", async () => {
+test("a refused resume is reported through onStatus, is not an error, and the session keeps its epoch", async () => {
   const { clock, bridge, seen, statuses } = await setup();
   clock.advance(3000);
   await bridge.pause("off_record");

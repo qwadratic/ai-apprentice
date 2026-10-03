@@ -65,7 +65,7 @@ Customer names, e-mail addresses and addresses are invented. No real people or c
 
 ## Pause, evidence and replay
 
-- `start()` ends paused with reason `mask-review`; `pause()` stops capture and heartbeats and drops anything unsent; `resume()` continues with wall-clock timestamps, can be refused (resolves `{state: paused, reason}`), and never replays what happened while paused.
+- `start()`, `pause()`, `resume()` and `stop()` return `Promise<void>`; `onStatus` is authoritative (agreed in TASK-1). After `start()` the status is paused with reason `mask-review`; `pause()` stops capture and heartbeats and drops anything unsent; `resume()` continues with wall-clock timestamps and never replays what happened while paused. A refused resume is not an error: it shows up only as a `ScreenStatus` with `state: paused` and the reason. Off the record stays shown until the user explicitly resumes; resuming while masks are unconfirmed then shows `mask-review`.
 - `resolveEvidence(id)` returns `{assetRef, startMs, endMs}` of the processed (masked) frame or clip; the email replacement moment (attach, remove, type) should be a `clip` evidence so the Review and Teach UIs can replay it.
 
 ## Open questions for stream A
