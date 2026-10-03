@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Apprentice — offline workspace preview</title>
+<link rel="stylesheet" href="/workspace.css">
+<style>body{margin:0;padding:24px;background:#e7eee8;font:16px system-ui,sans-serif;color:#193d36}.preview-tools{max-width:1440px;margin:0 auto 16px;display:flex;gap:16px;align-items:center;flex-wrap:wrap}.preview-tools select{padding:8px;font:inherit}.preview-tools small{color:#50675f}</style>
+<div class="preview-tools"><strong>Offline mock preview</strong><label>Check response <select id="mock"><option value="clear">Clear</option><option value="warn">Warning</option><option value="unknown">Unknown</option><option value="error">Technical error</option><option value="timeout">Timeout</option><option value="absent">No agent</option></select></label><button type="button" id="offrecord">Pause workspace (off record)</button><small id="activity">Workspace activity: no input yet</small></div>
+<main id="workspace"></main>
+<script type="module">
+  import { createWorkspace } from '/workspace.js';
+  import { mountDemoWorkspace } from '/ui.js';
+  import { createMockCheckpoint } from '/mock.js';
+  let events = 0;
+  const workspace = createWorkspace({ sessionId: 'offline-preview', checkpoint: createMockCheckpoint('clear', 1000), timeoutMs: 2000,
+    onInputActivity(activity) { document.querySelector('#activity').textContent = `Workspace activity ${++events}: ${activity.surface}, ${activity.typing ? 'typing' : 'idle'}, ${activity.idleMs} ms`; }
+  });
+  mountDemoWorkspace(document.querySelector('#workspace'), workspace);
+  document.querySelector('#mock').addEventListener('change', event => {
+    workspace.setCheckpoint(event.target.value === 'absent' ? undefined : createMockCheckpoint(event.target.value, 1000));
+  });
+  document.querySelector('#offrecord').addEventListener('click', event => {
+    const paused = !workspace.getState().offRecord;
+    workspace.setOffRecord(paused);
+    event.target.textContent = paused ? 'Resume workspace' : 'Pause workspace (off record)';
+  });
+  window.addEventListener('pagehide', () => workspace.dispose(), { once: true });
+</script>
+</html>

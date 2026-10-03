@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@kigulx'
 created_date: '2026-10-03 21:16'
-updated_date: '2026-10-03 22:29'
+updated_date: '2026-10-03 23:39'
 labels:
   - stream-a
   - workspace
@@ -44,3 +44,9 @@ Assigned worker: demo workspace. Own apps/web/features/demo-workspace and its co
 <!-- SECTION:PLAN:BEGIN -->
 Create the assigned isolated worktree from the published assignment revision. Implement synthetic cases, workspace state, draft revision invalidation and checkpoint behavior with tests, then scoped UI components. Do not edit app shell or root dependencies. Hand off the independent slice; wire the approved ScreenBridge once available.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Publication slice prepared from worker commits 9a19f4c and aa927c6 on current main f315f54. Coordinator reproduced all 30 Node 22.22 tests and strict TypeScript checking. This PR publishes the independent synthetic workspace only; real ScreenBridge observations, correlated checkpoint replies and shell integration remain In Progress. Follow-up assigned to the existing demo worker on GPT-5.6 Sol.
+<!-- SECTION:NOTES:END -->
