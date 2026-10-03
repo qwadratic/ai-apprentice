@@ -23,6 +23,7 @@
     },
     "conversation": {
       "text_only": false,
+      "max_duration_seconds": 600,
       "client_events": ["conversation_initiation_metadata", "ping", "audio", "interruption", "user_transcript", "agent_response", "agent_response_correction", "vad_score"]
     },
     "tts": {
@@ -34,9 +35,9 @@
     "auth": { "enable_auth": true },
     "overrides": {
       "conversation_config_override": {
-        "agent": { "first_message": true, "language": true, "prompt": { "prompt": true } },
+        "agent": { "first_message": false, "language": false, "prompt": { "prompt": false } },
         "conversation": { "text_only": true },
-        "tts": { "voice_id": true }
+        "tts": { "voice_id": false }
       }
     }
   }

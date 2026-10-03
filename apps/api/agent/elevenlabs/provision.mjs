@@ -47,6 +47,7 @@ console.log('readback:', JSON.stringify({
   language: cc.agent?.language,
   turn: cc.turn,
   text_only: cc.conversation?.text_only,
+  max_duration_seconds: cc.conversation?.max_duration_seconds,
   tools: Object.keys(cc.agent?.prompt?.built_in_tools ?? {}).filter((k) => cc.agent.prompt.built_in_tools[k]),
   tts: cc.tts?.model_id,
   auth: back.json.platform_settings?.auth,

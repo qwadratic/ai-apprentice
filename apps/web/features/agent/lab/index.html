@@ -12,18 +12,18 @@
 <body>
 <header class="top">
   <h1>AI Apprentice <span class="dot">·</span> agent lab</h1>
-  <p class="sub">Talk to the voice agent, replay a mock customer_07 session and watch every event.</p>
+  <p class="sub">Open a voice session with the agent, replay a mock customer_07 session and watch every event. The agent stays silent unless the operator test harness sends it a question.</p>
 </header>
 
 <aside class="howto" aria-label="How to try">
   <h2>How to try</h2>
   <ol>
     <li>Allow the microphone when the browser asks.</li>
-    <li>Press <strong>Start session</strong>.</li>
+    <li>Press <strong>Start session</strong>. The server then stores events, transcript and audio recording. The session auto-ends after 10 minutes.</li>
     <li>Press <strong>Play mock Learn session</strong>. The agent should stay silent.</li>
-    <li>Press <strong>Ask now</strong>. The agent asks the question.</li>
+    <li>Press <strong>Ask now</strong> (operator test harness). The agent speaks the question.</li>
   </ol>
-  <p class="howto-note">Every session is logged on our server: the events in the log below, plus the conversation transcript. <strong>Off the record</strong> stops the log and the voice session. It does not delete what was already sent.</p>
+  <p class="howto-note">Every session is stored on our server: events, transcript and audio recording (the events are the log below). <strong>Off the record</strong> stops the log and the voice session. It does not delete what was already sent.</p>
 </aside>
 
 <main class="layout">
@@ -46,6 +46,7 @@
       <button id="btnOff" class="danger" type="button" disabled>Off the record</button>
     </div>
 
+    <p class="disclosure">Starting a session records events, transcript and audio recording on our server. Auto-ends after 10 minutes.</p>
     <div class="row">
       <button id="btnMock" type="button">Play mock Learn session</button>
     </div>
@@ -53,6 +54,7 @@
     <form id="askForm" class="ask">
       <label class="field">
         <span>Ask now (sent as "[ASK] ...")</span>
+        <small class="hint">Test harness: the operator types the question; in the product the question policy (TASK-3.4) chooses it.</small>
         <input id="askText" type="text" value="Why did you paste the delivery address as text instead of attaching the screenshot?" autocomplete="off">
       </label>
       <button id="btnAsk" type="submit" disabled>Ask now</button>
@@ -69,7 +71,7 @@
 </main>
 
 <footer>
-  Prototype. Synthetic data.
+  Prototype. Synthetic data. The server stores events, transcript and audio recording of every session.
   Off the record stops logging and ends the voice session; it does not delete what was already sent. Screen capture is stream A's part and is not in this page yet.
 </footer>
 
