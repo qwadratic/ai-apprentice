@@ -57,3 +57,9 @@ backlog task create "Title" -p TASK-2 -l stream-b,voice --ac "..." -m m-0
 backlog task edit TASK-2.3 -s "In Progress" -a @ivan  # claim (then commit + push on main)
 backlog doctor                                        # duplicate IDs, dependency cycles
 ```
+
+## 6. Status and PR cadence (agreed 4 Oct, ~01:45)
+
+- **Status in Hive while work runs.** Every coordinator and worker that runs longer than a few minutes posts a one-line status in the project's Hive channel: when it starts a task, at each meaningful step, when blocked, when a PR is up, when merged, and at least every 30 minutes while busy. Format: `[STATUS] TASK-x | doing / blocked / PR / merged | what changed | next | blocker (who can unblock)`. No secrets, tokens, URLs with tokens or personal data. Status lines need no reply; questions mention the person or agent who must answer.
+- **Small PRs, merged often.** Push the task branch at least every 30 minutes, open the PR as soon as one acceptance criterion works end to end, and merge on green CI plus an independent review (decision-1 for B; the same rule for A within its own paths). Long local handoffs are avoided: what is not on GitHub does not exist for the other stream or for the deploy.
+- **Everything else stays as above:** task status in Backlog on `main`, one task per branch, Done only when merged.
