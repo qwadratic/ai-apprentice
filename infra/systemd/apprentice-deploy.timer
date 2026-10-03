@@ -1,0 +1,11 @@
+[Unit]
+Description=Run apprentice deploy every minute (installed disabled; see infra/README.md)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=10s
+Unit=apprentice-deploy.service
+
+[Install]
+WantedBy=timers.target

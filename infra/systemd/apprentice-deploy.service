@@ -1,0 +1,15 @@
+[Unit]
+Description=Apprentice deploy (pull DEPLOY_REF, install, build, restart, roll back on failure)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=apprentice
+Group=apprentice
+# deploy.sh reads DEPLOY_SOURCE, DEPLOY_REF and DEPLOY_JSON_URL and unsets the secrets.
+# NoNewPrivileges must stay off: deploy.sh restarts the units through sudo.
+EnvironmentFile=/etc/apprentice/env
+ExecStart=/opt/apprentice/bin/apprentice-deploy
+StandardOutput=journal
+StandardError=journal

@@ -1,0 +1,29 @@
+[Unit]
+Description=Apprentice Claude runner (127.0.0.1:8787)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=apprentice
+Group=apprentice
+EnvironmentFile=/etc/apprentice/env
+Environment=NODE_ENV=production RUNNER_HOST=127.0.0.1 RUNNER_PORT=8787 RUNNER_CWD=/var/lib/apprentice/runner-cwd
+# Code runs from the deployed checkout; deploy.sh builds and restarts it.
+WorkingDirectory=/opt/apprentice/repo
+ExecStart=/opt/apprentice/repo/infra/start-runner.sh
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+# Read-only system; the SDK writes only its cwd and ~apprentice (config, caches).
+ProtectSystem=strict
+ReadWritePaths=/var/lib/apprentice/runner-cwd /home/apprentice
+# ~1 GiB per SDK subprocess at RUNNER_CONCURRENCY=2, plus the server.
+MemoryMax=2560M
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
