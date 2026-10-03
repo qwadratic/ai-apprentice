@@ -5,7 +5,12 @@
   "type": "module",
   "description": "Stream B: ScreenBridge v1 draft, agent schema, in-memory knowledge store and fakes (mock screen bridge, fake voice).",
   "scripts": {
-    "test": "node --test"
+    "typecheck": "tsc --noEmit -p .",
+    "test": "node --test \"test/*.test.ts\""
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "~7.0.2"
   },
   "exports": {
     ".": "./src/index.ts",

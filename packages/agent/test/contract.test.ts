@@ -14,6 +14,7 @@ import {
 } from "../src/contract-draft.ts";
 import type { ActionCheckpoint, ScreenObservation } from "../src/contract-draft.ts";
 import { loadLearnCustomer07 } from "../src/fake/fixture-node.ts";
+import { must } from "./helpers.ts";
 
 function obs(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -190,8 +191,8 @@ test("checkpoint must include the latest order and latest email observation", ()
     (f, i) =>
       ({ schemaVersion: SCHEMA_VERSION, id: f.id, sessionId: "s", sequence: i + 1, timestampMs: f.atMs, source: f.source, frameId: f.frameId, sourceRevision: f.sourceRevision, kind: f.kind, facts: f.facts, entityRef: f.entityRef, evidenceIds: f.evidenceIds }) as ScreenObservation,
   );
-  const lastOrder = all.filter((o) => o.kind === "order_view").at(-1)!;
-  const lastEmail = all.filter((o) => o.kind === "email_draft").at(-1)!;
+  const lastOrder = must(all.filter((o) => o.kind === "order_view").at(-1));
+  const lastEmail = must(all.filter((o) => o.kind === "email_draft").at(-1));
   const base: ActionCheckpoint = {
     schemaVersion: 1,
     id: "cp",
@@ -202,9 +203,9 @@ test("checkpoint must include the latest order and latest email observation", ()
     action: "send",
   };
   assert.equal(checkpointCoversLatest({ ...base, observationIds: [lastOrder.id, lastEmail.id] }, all).ok, true);
-  const staleEmail = all.filter((o) => o.kind === "email_draft")[0]!;
+  const staleEmail = must(all.filter((o) => o.kind === "email_draft")[0]);
   const r = checkpointCoversLatest({ ...base, observationIds: [lastOrder.id, staleEmail.id] }, all);
-  assert.ok(!r.ok && r.errors[0]!.includes("email_draft"));
+  assert.ok(!r.ok && must(r.errors[0]).includes("email_draft"));
   assert.equal(checkpointCoversLatest({ ...base, observationIds: [] }, all).ok, false);
 });
 
@@ -258,18 +259,18 @@ test("fixture heartbeats: none before the first input, first typing:false about 
   const f = loadLearnCustomer07();
   type Hb = { surface: string; typing: boolean; idleMs: number; lastInputAtMs: number };
   const beats = f.observations.filter((o) => o.kind === "input_activity");
-  const facts = (o: (typeof beats)[number]) => o.facts as unknown as Hb;
+  const facts = (o: (typeof beats)[number]) => o.facts as Hb;
   assert.ok(beats.length > 0);
   const firstInput = Math.min(...beats.map((o) => facts(o).lastInputAtMs));
-  assert.ok(beats[0]!.atMs >= firstInput, "no heartbeat before the first input");
-  assert.equal(beats[0]!.atMs, facts(beats[0]!).lastInputAtMs, "the first heartbeat is emitted right on input");
+  assert.ok(must(beats[0]).atMs >= firstInput, "no heartbeat before the first input");
+  assert.equal(must(beats[0]).atMs, facts(must(beats[0])).lastInputAtMs, "the first heartbeat is emitted right on input");
   let previous: (typeof beats)[number] | null = null;
   for (const b of beats) {
     const h = facts(b);
     if (!h.typing) {
       const prev = previous && facts(previous);
-      if (prev && prev.lastInputAtMs === h.lastInputAtMs && !prev.typing) {
-        assert.equal(b.atMs - previous!.atMs, 2000, `${b.id}: idle heartbeats every 2 s`);
+      if (previous && prev && prev.lastInputAtMs === h.lastInputAtMs && !prev.typing) {
+        assert.equal(b.atMs - previous.atMs, 2000, `${b.id}: idle heartbeats every 2 s`);
         assert.ok(prev.idleMs < 10_000, `${b.id}: no idle heartbeat after the first one at or after 10000 ms`);
       } else {
         assert.ok(Math.abs(h.idleMs - 2000) <= 500, `${b.id}: first typing:false is about 2000 ms after the last input, not ${h.idleMs}`);
@@ -283,17 +284,17 @@ test("factsFromCheckpoint reads order and email facts from the referenced vision
   const f = loadLearnCustomer07();
   const all = f.observations.map(
     (o, i) =>
-      ({ schemaVersion: SCHEMA_VERSION, sessionId: "s", sequence: i + 1, timestampMs: o.atMs, ...o }) as unknown as ScreenObservation,
+      ({ schemaVersion: SCHEMA_VERSION, sessionId: "s", sequence: i + 1, timestampMs: o.atMs, ...o }) as ScreenObservation,
   );
-  const order = all.filter((o) => o.kind === "order_view").at(-1)!;
-  const email = all.filter((o) => o.kind === "email_draft").at(-1)!;
+  const order = must(all.filter((o) => o.kind === "order_view").at(-1));
+  const email = must(all.filter((o) => o.kind === "email_draft").at(-1));
   const cp: ActionCheckpoint = {
     schemaVersion: 1,
     id: "cp",
     sessionId: "s",
     timestampMs: 27000,
     observationIds: [order.id, email.id],
-    revisions: { order: order.sourceRevision!, email: email.sourceRevision! },
+    revisions: { order: must(order.sourceRevision), email: must(email.sourceRevision) },
     action: "send",
   };
   const ok = factsFromCheckpoint(cp, all);

@@ -1,9 +1,10 @@
 ---
 id: TASK-6.2
-title: 'VM: deploy from the deploy branch with the timer on'
+title: 'VM: deploy the SHA from deploy.json with the timer on'
 status: To Do
 assignee: []
 created_date: '2026-10-03 23:15'
+updated_date: '2026-10-03 23:23'
 labels:
   - shared
   - infra
@@ -33,3 +34,9 @@ After PR #5 merges: run sudo infra/install.sh once, set DEPLOY_REF=deploy in /et
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Per doc-8 'Change after review': the VM reads https://qwadratic.github.io/ai-apprentice/deploy.json, verifies the SHA is an ancestor of origin/main, deploys it; service code runs from the deployed checkout.
+<!-- SECTION:NOTES:END -->

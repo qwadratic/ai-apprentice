@@ -44,3 +44,12 @@ Proposal from stream B's coordinator for both streams. Goal: any merged PR, from
 - A: confirm or change this document; root `tsconfig.base.json` and workspace in the foundation PR; convert A's `.mjs`; server entry in `apps/api` that mounts both routers; the polling route.
 - B: `release.yml` and the Pages build (TASK-6.1); move the B routes from `infra/placeholder-api` into `apps/api/agent` once A's server entry exists.
 - TASK-4 owner: switch the VM to `DEPLOY_REF=deploy`, enable the timer, run `sudo infra/install.sh` once after PR #5 merges. After that no agent needs to stay on the VM.
+
+## Change after review (4 Oct, ~02:00): no deploy branch, a release pointer on Pages
+
+GitHub refuses a `GITHUB_TOKEN` push that moves a branch onto commits changing `.github/workflows/*`, so step 2's "fast-forward branch `deploy`" would fail on exactly the commits that change CI. Replacement:
+
+- `release.yml` runs the checks on `main`; if green and not frozen, it publishes the site to Pages together with `deploy.json`: `{"sha": "<40-hex>", "at": "<ISO time>", "run": "<run url>"}`. One artifact, so the site and the backend pointer always move together. A re-run of an older run publishes only when it is a manual run (rollback); otherwise it skips if its SHA is not the current head of `main`.
+- The VM deploy reads `https://qwadratic.github.io/ai-apprentice/deploy.json` every minute, checks that the SHA is 40 hex characters and an ancestor of `origin/main`, then checks it out and deploys it (same build, health check, rollback and failed-SHA skip as before). `DEPLOY_REF` stays as a fallback for manual use.
+- Service code (runner, placeholder API, later `apps/api`) runs from the deployed checkout, so it updates automatically; only systemd units, sudoers and `install.sh` stay manual, and deploy names the changed `infra/` paths when they need `sudo infra/install.sh`.
+- Freeze: `DEPLOY_FREEZE=1` stops publishing (both the site and `deploy.json`). Rollback: manual run with a SHA, together with the freeze so the next push does not move forward again.

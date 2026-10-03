@@ -176,16 +176,6 @@ export interface ScreenStatus {
   reason?: ScreenStatusReason;
 }
 
-/**
- * What start(), resume() and confirmMasks() resolve to: the state after the call.
- * start() normally resolves {state: "paused", reason: "mask-review"}; a refused resume
- * resolves {state: "paused", reason} and is not an error.
- */
-export interface ScreenBridgeResult {
-  state: ScreenState;
-  reason?: ScreenStatusReason;
-}
-
 /** Reasons a caller may give to pause(). */
 export const PAUSE_REASONS = ["off_record", "user-paused"] as const;
 export type PauseReason = (typeof PAUSE_REASONS)[number];
@@ -252,26 +242,36 @@ export interface CheckpointReply {
 
 export type Unsubscribe = () => void;
 
+/**
+ * Lifecycle methods return Promise<void>. onStatus is authoritative: a resolved call does
+ * not mean the screen is capturing. Mask review, a refused resume and the off-the-record
+ * pause arrive only as a ScreenStatus (state "paused" with a reason); a refusal is not an error.
+ */
 export interface ScreenBridge {
-  /** Begin capturing. All timestampMs are relative to sessionEpochMs (epoch ms). */
-  start(opts: { sessionId: string; sessionEpochMs: number }): Promise<ScreenBridgeResult>;
+  /**
+   * Begin a session. All timestampMs are relative to sessionEpochMs (epoch ms). Status goes
+   * to "paused" with reason "mask-review"; capturing begins only once the masks are confirmed.
+   */
+  start(opts: { sessionId: string; sessionEpochMs: number }): Promise<void>;
   /**
    * Stop emitting observations and capturing. Anything not yet emitted must never be emitted.
    * Resolves after output is closed; status then carries `reason` (default "user-paused";
-   * the off-the-record button passes "off_record").
+   * the off-the-record button passes "off_record"). Pausing while already paused never
+   * downgrades "off_record": it stays until resume() or stop().
    */
   pause(reason?: PauseReason): Promise<void>;
   /**
    * Continue after pause(). Observations that would have occurred while paused are dropped,
-   * never replayed. Can be refused (mask review, geometry change, muted source): then it
-   * resolves {state: "paused", reason}; that is not an error.
+   * never replayed. Can be refused (mask review, geometry change, muted source): the call
+   * still resolves and status reports paused with the reason.
    */
-  resume(): Promise<ScreenBridgeResult>;
+  resume(): Promise<void>;
   /**
-   * Confirms the privacy masks after start() or a mask edit and resumes capturing.
-   * Optional because the real bridge confirms through A's mask-review UI.
+   * Confirms the privacy masks after start() or a mask edit; capturing resumes only if the
+   * pause reason is "mask-review". It never lifts an off-the-record pause. Optional because
+   * the real bridge confirms through A's mask-review UI.
    */
-  confirmMasks?(): Promise<ScreenBridgeResult>;
+  confirmMasks?(): Promise<void>;
   stop(): Promise<void>;
   resolveEvidence(evidenceId: string): Promise<EvidenceRef>;
 
@@ -513,9 +513,11 @@ export function factsFromCheckpoint(
     if (matching.length > 1) return { incomplete: true, reason: `more than one ${kind} observation matches the checkpoint's ${key} revision` };
     found[key] = matching[0];
   }
+  const { order, email } = found;
+  if (order === undefined || email === undefined) return { incomplete: true, reason: "order or email observation missing" };
   return {
     incomplete: false,
-    order: structuredClone(found.order!.facts as OrderFacts),
-    email: structuredClone(found.email!.facts as EmailDraftFacts),
+    order: structuredClone(order.facts as OrderFacts),
+    email: structuredClone(email.facts as EmailDraftFacts),
   };
 }
