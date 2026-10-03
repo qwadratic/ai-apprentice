@@ -12,7 +12,7 @@ UNITS=(apprentice-runner.service apprentice-api.service apprentice-deploy.servic
 
 id apprentice >/dev/null 2>&1 || useradd --system --create-home --home-dir /home/apprentice --shell /bin/bash apprentice
 install -d -o root -g root -m 755 /opt/apprentice
-install -d -o apprentice -g apprentice -m 750 /var/lib/apprentice /var/lib/apprentice/db /var/lib/apprentice/media /var/lib/apprentice/runner-cwd
+install -d -o apprentice -g apprentice -m 750 /var/lib/apprentice /var/lib/apprentice/db /var/lib/apprentice/media /var/lib/apprentice/runner-cwd /var/lib/apprentice/sessions
 if [ ! -d /opt/apprentice/repo/.git ]; then
   install -d -o apprentice -g apprentice -m 755 /opt/apprentice/repo
   sudo -u apprentice git clone -q https://github.com/qwadratic/ai-apprentice.git /opt/apprentice/repo

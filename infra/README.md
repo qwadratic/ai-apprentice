@@ -22,7 +22,7 @@ infra/
 | Public URL | `https://apprentice.exe.xyz` → VM port **8000** (only public port) |
 | Runner | `http://127.0.0.1:8787` (loopback only; bearer `RUNNER_TOKEN`) |
 | Code | `/opt/apprentice/infra` (copy installed by `install.sh`), `/opt/apprentice/repo` (anonymous clone of `main`, touched only by `deploy.sh`) |
-| Data | `/var/lib/apprentice/{db,media,runner-cwd}`, owner `apprentice`, mode 750; survives restarts and reboots |
+| Data | `/var/lib/apprentice/{db,media,runner-cwd,sessions}`, owner `apprentice`, mode 750; survives restarts and reboots |
 | Secrets | `/etc/apprentice/env`, root:root 0600, loaded by systemd `EnvironmentFile=` |
 | OS | Ubuntu 24.04, systemd 255, Node 24 LTS, pnpm via corepack |
 
@@ -86,6 +86,7 @@ The token goes only into the environment of that one command and is never printe
 | `RUNNER_CONCURRENCY` | runner | default 2 (about 1 GiB RAM per SDK subprocess) |
 | `DEPLOY_REF` | deploy | default `main` |
 | `DEBUG_ENDPOINTS` | placeholder | `1` enables `GET /debug/sse` |
+| `SESSIONS_DIR` | placeholder | default `/var/lib/apprentice/sessions` (not in the env file; set in the unit if needed) |
 
 ## Contract for streams A and B: the real API (`apps/api`)
 
@@ -140,6 +141,22 @@ The placeholder exposes the runner publicly as `POST /runner/v1/*` behind `Autho
 
 Logs carry status, duration and the upstream status only, never the URL or the key. The limits are in memory and reset when the service restarts. When `apps/api` replaces the placeholder, it must serve the same route itself.
 
+
+## Session logs (placeholder, TASK-3.22, for stream B's lab page)
+
+Files in `/var/lib/apprentice/sessions` (apprentice, 750): `{sessionId}.jsonl` (events), `{sessionId}.elevenlabs.json` (conversation from ElevenLabs), `{sessionId}.mp3` (audio). `sessionId` must match `^[A-Za-z0-9-]{8,64}$`, `conversationId` `^[A-Za-z0-9_-]{1,128}$`.
+
+**Browser routes** (no token; `Origin` must be in `ALLOWED_ORIGINS`, else 403; CORS as above):
+
+- `POST /agent/sessions/{sessionId}/events` with `{conversationId?, events: [{t: ms epoch, dir: "sent"|"recv"|"sys"|"err", type, text}]}` → `200 {ok: true, stored: n}`. Appends one JSON line per event plus `conversationId` and `receivedAt`. Body ≤ 256 KiB (413), one session file ≤ 5 MiB (413 `session_full`), 120 requests/min per IP (429), bad shape → 400 with the failing `field`.
+- `POST /agent/sessions/{sessionId}/finish` with `{conversationId}` → fetches `GET /v1/convai/conversations/{conversationId}` (up to 5 tries, 3 s apart, until `status` is `done` or `failed`) and stores the JSON, then `GET .../audio` and stores it if ElevenLabs returns `audio/*`. Answers `200 {ok: true, transcriptStored, audioStored, transcriptStatus, conversationStatus, audioStatus}`, or `502` with the same fields when no conversation could be fetched. 6 requests/min per IP; body ≤ 4 KiB; up to ~25 s.
+
+**Reading** (`Authorization: Bearer $API_TOKEN`, else 401):
+
+- `GET /agent/sessions` → `{ok, total_bytes, warn, sessions: [{id, size, mtime, hasEvents, hasTranscript, hasAudio}]}`, newest first.
+- `GET /agent/sessions/{sessionId}` → `{ok, id, events: [...], transcript: {...}|null, audio_bytes}`; 404 if nothing is stored.
+
+**Disk:** above 1 GiB the API logs `sessions dir over warn threshold` and listings show `warn: true`; above 2 GiB it deletes the oldest sessions (all three files) down to 1.5 GiB and logs `sessions rotated`. Checked at most once a minute after a write. Logs never contain bodies, transcripts, keys or signed URLs. Check usage: `sudo du -sh /var/lib/apprentice/sessions` or `sudo journalctl -u apprentice-api | grep -E 'warn threshold|rotated'`.
 
 ## Measurements
 
