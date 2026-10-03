@@ -3,6 +3,11 @@
 //
 // Secrets: the page never holds an API key. The backend (VM API) mints a signed URL;
 // ?agent=<id> is for a PUBLIC test agent only.
+//
+// Backend route (decided by the coordinator, served by the VM):
+//   GET {base}/agent/elevenlabs/signed-url?role=interviewer
+//   200 application/json  {"signed_url": "wss://..."}
+// {base} is the "API base" field (or ?api=<base>). The signed URL is a secret: never logged here.
 import { Conversation } from 'https://cdn.jsdelivr.net/npm/@elevenlabs/client@1.26.0/+esm';
 
 const $ = (id) => document.getElementById(id);
@@ -91,6 +96,13 @@ function render() {
 
 // ---- Session -------------------------------------------------------------
 let starting = false;
+let liveAnnounced = false;
+
+function announceLive() {
+  if (liveAnnounced) return;
+  liveAnnounced = true;
+  sys('Session started. Microphone is live.');
+}
 
 async function getSessionConfig() {
   if (publicAgentId) {
@@ -98,7 +110,7 @@ async function getSessionConfig() {
     return { agentId: publicAgentId };
   }
   const base = els.apiBase.value.trim().replace(/\/+$/, '');
-  const url = `${base}/agent/elevenlabs/signed-url`;
+  const url = `${base}/agent/elevenlabs/signed-url?role=interviewer`;
   sys(`GET ${url}`);
   let res;
   try {
@@ -122,13 +134,17 @@ async function startSession() {
   if (connected || starting) return;
   notice('');
   starting = true;
+  liveAnnounced = false;
   offRecord = false;
   render();
   try {
     const cfg = await getSessionConfig();
     conversation = await Conversation.startSession({
       ...cfg,
-      onConnect: ({ conversationId } = {}) => recv('CONNECT', `conversation ${conversationId || ''}`.trim()),
+      onConnect: ({ conversationId } = {}) => {
+        recv('CONNECT', `conversation ${conversationId || ''}`.trim());
+        announceLive();
+      },
       onDisconnect: (d) => {
         recv('DISCONNECT', d && d.reason ? String(d.reason) : '');
         markDisconnected();
@@ -136,6 +152,7 @@ async function startSession() {
       onStatusChange: ({ status }) => {
         recv('STATUS', status);
         connected = status === 'connected';
+        if (connected) announceLive();
         render();
       },
       onModeChange: ({ mode: m }) => {
@@ -154,8 +171,7 @@ async function startSession() {
         if (ctx) err(typeof ctx === 'string' ? ctx : JSON.stringify(ctx));
       },
     });
-    connected = true;
-    sys('Session started. Microphone is live.');
+    // Connected state and the "live" log line come from the callbacks, not from this resolve.
   } catch (e) {
     err(e && e.message ? e.message : String(e));
     notice(e && e.message ? e.message : String(e));

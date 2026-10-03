@@ -94,6 +94,13 @@ h2 { font-size: 1rem; margin: 0; }
 .log .err .tag { color: var(--err); }
 .log .sys .tag { color: var(--sys); }
 
+.howto {
+  max-width: 1100px; margin: 12px auto 0; padding: 12px 16px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 14px;
+}
+.howto ol { margin: 6px 0 0; padding-left: 22px; }
+.howto li { margin: 2px 0; }
+
 footer { max-width: 1100px; margin: 20px auto; padding-bottom: 24px; color: var(--muted); font-size: .85rem; }
 
 @media (max-width: 760px) {
