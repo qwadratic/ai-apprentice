@@ -1,0 +1,347 @@
+<title>Clipa Model Sheet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+  /* Layout: an animator's model sheet. One stage with construction lines and the pose picker,
+     then the character at working size on two real screens, then the tag to embed it. */
+  :root {
+    --bg: #f3f6f5;
+    --panel: #ffffff;
+    --ink: #13221f;
+    --muted: #586a66;
+    --line: #d7e1df;
+    --grid: #e6eeec;
+    --accent: #0b7f74;
+    --accent-soft: #dff4f0;
+    --amber: #9a5a00;
+    --amber-soft: #fff1d6;
+    --bubble: #12302c;
+    --bubble-ink: #f4fbfa;
+    --bubble-warn: #f5a524;
+    --bubble-warn-ink: #2b1a00;
+    --doc: #ffffff;
+    --doc-ink: #1f2933;
+    --doc-dim: #66717d;
+    --doc-line: #e3e7eb;
+    --doc-btn: #1f6feb;
+    --ide: #1e1f22;
+    --ide-ink: #c9ced6;
+    --ide-dim: #7d8590;
+    --ide-key: #c792ea;
+    --ide-str: #c3e88d;
+    --ide-btn: #238636;
+    --btn-ink: #ffffff;
+    --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    --font-body: "Atkinson Hyperlegible", "Helvetica Neue", Arial, system-ui, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e1514; --panel: #151f1e; --ink: #e4eeec; --muted: #94a7a3; --line: #263533; --grid: #1b2726;
+      --accent: #45cdbd; --accent-soft: #143430; --amber: #f5b54a; --amber-soft: #3a2a10;
+      --bubble: #e9f7f4; --bubble-ink: #10302c;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e1514; --panel: #151f1e; --ink: #e4eeec; --muted: #94a7a3; --line: #263533; --grid: #1b2726;
+    --accent: #45cdbd; --accent-soft: #143430; --amber: #f5b54a; --amber-soft: #3a2a10;
+    --bubble: #e9f7f4; --bubble-ink: #10302c;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.5 var(--font-body);
+    padding: 0 16px;
+  }
+  .page { max-width: 1040px; margin: 0 auto; padding-block: 28px 48px; display: grid; gap: 28px; }
+
+  header { display: grid; gap: 6px; }
+  .eyebrow { font: 600 12px/1.2 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+  h1 { margin: 0; font: 800 clamp(40px, 9vw, 64px)/0.95 var(--font-display); letter-spacing: -0.02em; text-wrap: balance; }
+  .lede { margin: 0; max-width: 62ch; color: var(--muted); }
+  h2 { margin: 0; font: 600 22px/1.2 var(--font-display); text-wrap: balance; }
+  .section { display: grid; gap: 14px; }
+  .section > p { margin: 0; max-width: 65ch; color: var(--muted); }
+
+  /* Stage */
+  .sheet { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+  .stage {
+    position: relative; overflow: clip; height: 400px;
+    border: 1px solid var(--line); border-radius: 14px;
+    background-color: var(--panel);
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 24px 24px;
+    background-position: center center;
+    display: grid; grid-template-rows: auto 1fr auto; padding: 14px;
+  }
+  .stage-meta { display: flex; justify-content: space-between; gap: 12px; font: 400 12px/1.4 var(--font-mono); color: var(--muted); }
+  .stage-meta b { color: var(--ink); font-weight: 600; }
+  .stage-body { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 18px 28px; padding-block: 18px; }
+  .stage clipa-buddy { --clipa-size: clamp(150px, 40vw, 230px); }
+  .bubble {
+    max-width: 30ch; min-width: 0; padding: 10px 13px; border-radius: 12px;
+    background: var(--bubble); color: var(--bubble-ink);
+    font: 600 15px/1.35 var(--font-body);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+  }
+  .bubble.warn { background: var(--bubble-warn); color: var(--bubble-warn-ink); }
+  .stage-caption { margin: 0; color: var(--muted); font-size: 15px; }
+  .stage-caption b { color: var(--ink); }
+
+  /* Picker */
+  .picker { display: grid; gap: 12px; }
+  .states { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .state-btn {
+    display: grid; gap: 2px; text-align: left; cursor: pointer; min-width: 0;
+    padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line);
+    background: var(--panel); color: var(--ink); font: inherit;
+  }
+  .state-btn .name { font: 600 14px/1.2 var(--font-mono); }
+  .state-btn .hint { font-size: 13px; line-height: 1.35; color: var(--muted); }
+  .state-btn:hover { border-color: var(--accent); }
+  .state-btn[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+  .state-btn[data-state="warning"][aria-pressed="true"] { border-color: var(--amber); background: var(--amber-soft); box-shadow: inset 0 0 0 1px var(--amber); }
+  .state-btn:focus-visible, .chip:focus-visible, .tour:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .row-label { font: 600 12px/1 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-right: 4px; }
+  .chip {
+    cursor: pointer; padding: 6px 10px; border-radius: 999px; border: 1px solid var(--line);
+    background: var(--panel); color: var(--ink); font: 400 13px/1.2 var(--font-mono);
+  }
+  .chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+  .chip:disabled { opacity: 0.45; cursor: default; }
+  .tour {
+    cursor: pointer; padding: 9px 14px; border-radius: 10px; border: 0;
+    background: var(--accent); color: var(--panel); font: 700 14px/1.2 var(--font-body);
+  }
+
+  /* Working size */
+  .screens { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  figure { margin: 0; display: grid; gap: 8px; min-width: 0; }
+  figcaption { font-size: 14px; color: var(--muted); }
+  .screen { position: relative; overflow: hidden; border-radius: 12px; height: 228px; border: 1px solid var(--line); }
+  .screen.doc { background: var(--doc); color: var(--doc-ink); }
+  .screen.ide { background: var(--ide); color: var(--ide-ink); }
+  .doc-body { padding: 14px 16px; display: grid; gap: 6px; font-size: 14px; }
+  .doc-title { font-weight: 700; font-size: 15px; }
+  .doc-row { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--doc-line); padding-bottom: 5px; font-variant-numeric: tabular-nums; }
+  .doc-row span:first-child { color: var(--doc-dim); }
+  .fake-btn { justify-self: start; margin-top: 4px; padding: 6px 14px; border-radius: 6px; font-weight: 700; font-size: 13px; }
+  .doc .fake-btn { background: var(--doc-btn); color: var(--btn-ink); }
+  .ide-body { padding: 14px 16px; font: 400 12.5px/1.65 var(--font-mono); white-space: pre; }
+  .ide-body .k { color: var(--ide-key); } .ide-body .s { color: var(--ide-str); } .ide-body .c { color: var(--ide-dim); }
+  .ide .fake-btn { position: absolute; left: 16px; top: 128px; background: var(--ide-btn); color: var(--btn-ink); font-family: var(--font-body); }
+  .pointer { position: absolute; width: 16px; height: 24px; }
+  .screen clipa-buddy { position: absolute; }
+  .scales { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .scale { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-around; gap: 18px; padding: 18px 16px 14px; border-radius: 12px; border: 1px solid var(--line); }
+  .scale.on-doc { background: var(--doc); }
+  .scale.on-ide { background: var(--ide); }
+  .scale figure { justify-items: center; }
+  .scale figcaption { font: 400 12px/1 var(--font-mono); }
+  .scale.on-doc figcaption { color: var(--doc-dim); }
+  .scale.on-ide figcaption { color: var(--ide-dim); }
+
+  /* Embed */
+  pre.code { margin: 0; overflow-x: auto; padding: 14px 16px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); font: 400 13px/1.6 var(--font-mono); color: var(--ink); }
+  .attrs { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 16px; margin: 0; font-size: 15px; }
+  .attrs dt { font: 600 13px/1.6 var(--font-mono); color: var(--accent); }
+  .attrs dd { margin: 0; color: var(--muted); }
+  .note { font-size: 14px; color: var(--muted); margin: 0; }
+
+  @media (max-width: 760px) {
+    .sheet, .screens, .scales { grid-template-columns: minmax(0, 1fr); }
+    .stage { height: 440px; }
+    .stage-body { flex-direction: column; justify-content: center; gap: 14px; }
+  }
+  @media (max-width: 380px) {
+    .states { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tour { display: none; }
+  }
+</style>
+
+<main class="page">
+  <header>
+    <span class="eyebrow">AI Apprentice · mascot</span>
+    <h1>Clipa</h1>
+    <p class="lede">A teal loop-clip that sits next to your cursor. It watches the expert work, asks why at a natural pause, and puts its hand up before a new hire crosses a guardrail. Dot eyes, no eyebrows, a soft outline that holds on light documents and dark editors alike.</p>
+  </header>
+
+  <section class="sheet" aria-label="Pose picker">
+    <div class="stage">
+      <div class="stage-meta"><span>state <b id="meta-state">speaking</b></span><span id="meta-size">230 px</span></div>
+      <div class="stage-body">
+        <clipa-buddy id="hero" state="speaking"></clipa-buddy>
+        <div class="bubble" id="bubble">You moved that one to capex. What made you do that?</div>
+      </div>
+      <p class="stage-caption" id="caption"><b>Speaking.</b> Asks one question at a natural pause, about what just changed on screen.</p>
+    </div>
+
+    <div class="picker">
+      <div class="states" role="group" aria-label="State">
+        <button class="state-btn" type="button" id="st-idle" data-state="idle" aria-pressed="false"><span class="name">idle</span><span class="hint">Quiet. Breathes and blinks.</span></button>
+        <button class="state-btn" type="button" id="st-listening" data-state="listening" aria-pressed="false"><span class="name">listening</span><span class="hint">Push-to-talk held. Leans in.</span></button>
+        <button class="state-btn" type="button" id="st-thinking" data-state="thinking" aria-pressed="false"><span class="name">thinking</span><span class="hint">Working out the answer.</span></button>
+        <button class="state-btn" type="button" id="st-speaking" data-state="speaking" aria-pressed="true"><span class="name">speaking</span><span class="hint">Asks why at a pause.</span></button>
+        <button class="state-btn" type="button" id="st-warning" data-state="warning" aria-pressed="false"><span class="name">warning</span><span class="hint">Teach mode. Hand up: wait.</span></button>
+        <button class="state-btn" type="button" id="st-happy" data-state="happy" aria-pressed="false"><span class="name">happy</span><span class="hint">Answer noted, step right.</span></button>
+        <button class="state-btn" type="button" id="st-pointing" data-state="pointing" aria-pressed="false"><span class="name">pointing</span><span class="hint">Shows where to look.</span></button>
+        <button class="state-btn" type="button" id="st-off" data-state="off" aria-pressed="false"><span class="name">off the record</span><span class="hint">Grey, eyes closed.</span></button>
+      </div>
+      <div class="row" role="group" aria-label="Pointing direction">
+        <span class="row-label">Point</span>
+        <button class="chip" type="button" id="pt-up-left" data-point="up-left" aria-label="Point up and left" aria-pressed="true">&#8598;</button>
+        <button class="chip" type="button" id="pt-left" data-point="left" aria-label="Point left" aria-pressed="false">&#8592;</button>
+        <button class="chip" type="button" id="pt-down-left" data-point="down-left" aria-label="Point down and left" aria-pressed="false">&#8601;</button>
+        <button class="chip" type="button" id="pt-up-right" data-point="up-right" aria-label="Point up and right" aria-pressed="false">&#8599;</button>
+        <button class="chip" type="button" id="pt-right" data-point="right" aria-label="Point right" aria-pressed="false">&#8594;</button>
+        <button class="chip" type="button" id="pt-down-right" data-point="down-right" aria-label="Point down and right" aria-pressed="false">&#8600;</button>
+      </div>
+      <div class="row">
+        <button class="tour" type="button" id="tour" aria-pressed="false">Play all states</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="working-size">
+    <h2 id="working-size">At working size</h2>
+    <p>In the app Clipa is 48 px tall and sits just below and to the right of the pointer, so it never covers what you click. Both screens follow the state you pick above.</p>
+    <div class="screens">
+      <figure>
+        <div class="screen doc">
+          <div class="doc-body">
+            <div class="doc-title">Invoice 4473 · equipment</div>
+            <div class="doc-row"><span>Amount</span><span>€7,200.00</span></div>
+            <div class="doc-row"><span>Cost center</span><span>4711 · opex</span></div>
+            <div class="doc-row"><span>Approval</span><span>none yet</span></div>
+            <span class="fake-btn">Post</span>
+          </div>
+          <svg class="pointer" style="left: 44px; top: 140px" viewBox="0 0 16 24" aria-hidden="true"><path d="M1 1v18l4.6-4.3 3.1 7.1 3-1.3-3.1-6.9H15z" fill="#111" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/></svg>
+          <clipa-buddy class="mini" size="48" style="left: 70px; top: 160px" state="speaking"></clipa-buddy>
+        </div>
+        <figcaption>Light document: accounts payable, an invoice about to be posted.</figcaption>
+      </figure>
+      <figure>
+        <div class="screen ide">
+<div class="ide-body"><span class="c">// PR #212 · all checks green</span>
+<span class="k">test</span>.skip(<span class="s">'refund over limit'</span>, () =&gt; {
+  expect(total).toBeGreaterThan(<span class="s">0</span>)
+})</div>
+          <span class="fake-btn">Merge</span>
+          <svg class="pointer" style="left: 52px; top: 136px" viewBox="0 0 16 24" aria-hidden="true"><path d="M1 1v18l4.6-4.3 3.1 7.1 3-1.3-3.1-6.9H15z" fill="#111" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/></svg>
+          <clipa-buddy class="mini" size="48" style="left: 78px; top: 156px" state="speaking"></clipa-buddy>
+        </div>
+        <figcaption>Dark editor: a green pull request that skips a test.</figcaption>
+      </figure>
+    </div>
+    <div class="scales" aria-label="Sizes">
+      <div class="scale on-doc">
+        <figure><clipa-buddy class="mini" size="48" state="speaking"></clipa-buddy><figcaption>48 px</figcaption></figure>
+        <figure><clipa-buddy class="mini" size="64" state="speaking"></clipa-buddy><figcaption>64 px</figcaption></figure>
+        <figure><clipa-buddy class="mini" size="72" state="speaking"></clipa-buddy><figcaption>72 px</figcaption></figure>
+      </div>
+      <div class="scale on-ide">
+        <figure><clipa-buddy class="mini" size="48" state="speaking"></clipa-buddy><figcaption>48 px</figcaption></figure>
+        <figure><clipa-buddy class="mini" size="64" state="speaking"></clipa-buddy><figcaption>64 px</figcaption></figure>
+        <figure><clipa-buddy class="mini" size="72" state="speaking"></clipa-buddy><figcaption>72 px</figcaption></figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="embed">
+    <h2 id="embed">Embed</h2>
+    <p>One script, no dependencies, no network requests. The only global it adds is the element itself.</p>
+<pre class="code">&lt;script src="clipa.js"&gt;&lt;/script&gt;
+&lt;clipa-buddy state="speaking" size="72"&gt;&lt;/clipa-buddy&gt;</pre>
+    <dl class="attrs">
+      <dt>state</dt><dd>idle, listening, thinking, speaking, warning, happy or pointing</dd>
+      <dt>size</dt><dd>height in px or any CSS length; width is 0.8 of it</dd>
+      <dt>point</dt><dd>up-left, left, down-left, up-right, right or down-right</dd>
+      <dt>off</dt><dd>off the record: grey, eyes closed, overrides state</dd>
+    </dl>
+    <p class="note">With reduced motion turned on, every pose stays and the loops stop.</p>
+  </section>
+</main>
+
+<script src="clipa.js"></script>
+<script>
+  (() => {
+    const lines = {
+      idle: ['', 'Idle.', 'Nothing to say. Shown only when the buddy is pinned in the menu.'],
+      listening: ['Listening…', 'Listening.', 'Push-to-talk is held (Control+Option). Clipa leans in and goes quiet.'],
+      thinking: ['…', 'Thinking.', 'Push-to-talk released: the answer is being transcribed.'],
+      speaking: ['You moved that one to capex. What made you do that?', 'Speaking.', 'Asks one question at a natural pause, about what just changed on screen.'],
+      warning: ['Sabine would stop here. Why do you think?', 'Warning.', 'Teach mode: the new hire reaches Post on a risky invoice. Hand up, before it is saved.'],
+      happy: ['Noted: equipment over €5,000 is always capex.', 'Happy.', 'The expert’s answer is saved to the knowledge base.'],
+      pointing: ['Check the cost center first.', 'Pointing.', 'Shows where to look on screen.'],
+      off: ['', 'Off the record.', 'Not watching, not listening. Nothing is captured or logged.']
+    };
+    const hero = document.getElementById('hero');
+    const all = Array.from(document.querySelectorAll('clipa-buddy'));
+    const bubble = document.getElementById('bubble');
+    const caption = document.getElementById('caption');
+    const metaState = document.getElementById('meta-state');
+    const metaSize = document.getElementById('meta-size');
+    const stateButtons = Array.from(document.querySelectorAll('.state-btn'));
+    const pointButtons = Array.from(document.querySelectorAll('.chip[data-point]'));
+    const tourButton = document.getElementById('tour');
+    let current = 'speaking';
+    let point = 'up-left';
+    let tour = null;
+
+    function apply() {
+      for (const el of all) {
+        el.off = current === 'off';
+        el.state = current === 'off' ? 'idle' : current;
+        el.point = point;
+      }
+      const [say, name, text] = lines[current];
+      bubble.textContent = say;
+      bubble.hidden = !say;
+      bubble.classList.toggle('warn', current === 'warning');
+      caption.innerHTML = '';
+      const b = document.createElement('b');
+      b.textContent = name;
+      caption.append(b, ' ' + text);
+      metaState.textContent = current === 'off' ? 'off' : current;
+      for (const btn of stateButtons) btn.setAttribute('aria-pressed', String(btn.dataset.state === current));
+      for (const btn of pointButtons) {
+        btn.setAttribute('aria-pressed', String(btn.dataset.point === point));
+        btn.disabled = current !== 'pointing';
+      }
+    }
+
+    function stopTour() {
+      if (!tour) return;
+      clearInterval(tour);
+      tour = null;
+      tourButton.textContent = 'Play all states';
+      tourButton.setAttribute('aria-pressed', 'false');
+    }
+
+    stateButtons.forEach((btn) => btn.addEventListener('click', () => { stopTour(); current = btn.dataset.state; apply(); }));
+    pointButtons.forEach((btn) => btn.addEventListener('click', () => { stopTour(); point = btn.dataset.point; apply(); }));
+    tourButton.addEventListener('click', () => {
+      if (tour) { stopTour(); return; }
+      const order = ['idle', 'listening', 'thinking', 'speaking', 'warning', 'happy', 'pointing', 'off'];
+      let i = Math.max(0, order.indexOf(current));
+      tourButton.textContent = 'Stop';
+      tourButton.setAttribute('aria-pressed', 'true');
+      tour = setInterval(() => { i = (i + 1) % order.length; current = order[i]; apply(); }, 2600);
+    });
+
+    const sizeObserver = () => { metaSize.textContent = Math.round(hero.getBoundingClientRect().height) + ' px'; };
+    window.addEventListener('resize', sizeObserver);
+    apply();
+    requestAnimationFrame(sizeObserver);
+  })();
+</script>
