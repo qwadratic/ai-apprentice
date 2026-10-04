@@ -35,6 +35,15 @@ export const CHECKPOINT_TIMEOUT_MS = 4000;
 export const WARN_HOLD_MS = 15000;
 /** A spoken question that produces no agent audio within this time stops looking "thinking". */
 export const ASK_AUDIO_TIMEOUT_MS = 12000;
+/** What the person is told when a reply did not confirm or correct the teach-back. */
+const REVIEW_NOTICES: Readonly<Record<string, string>> = {
+  unclear: 'I could not tell whether that was a confirmation or a correction, so nothing changed. Say it again, or use the buttons.',
+  stale: 'The teach-back changed since you read it, so nothing was confirmed. Read the new one and confirm that.',
+  refused: 'The teach-back cannot be confirmed yet: an item of the Work Map lacks the expert\'s words or a screen moment. Answer the open questions first.',
+  skipped: 'Skipped. The rule stays provisional: in Teach the tutor will say it does not know instead of applying it.',
+  corrected: 'Corrected. The new version is provisional until you confirm the new teach-back.',
+  needs_words: 'Say or type what is different, and Clipa will update the map.',
+};
 export const PERSONA_STORAGE_KEY = 'apprentice.shell.persona';
 const MAX_BUFFERED_CONTEXT = 20;
 
@@ -588,10 +597,10 @@ export class ShellController {
       }
       if (result.teachBack === 'confirmed') this.store.dispatch({ type: 'TEACHBACK_CONFIRM' });
       else if (result.teachBack === 'corrected') this.store.dispatch({ type: 'TEACHBACK_CORRECT', text: text.trim() });
-      else if (result.teachBack === 'refused') {
-        this.store.dispatch({ type: 'BANNER_SET', banner: { kind: 'warn', text: 'The teach-back cannot be confirmed yet: an item of the Work Map lacks the expert\'s words or a screen moment. Answer the open questions first.' } });
-      }
       if (result.changed || result.teachBack !== undefined) this.refreshAfterAnswer();
+      // The notice comes after the reload: a new teach-back clears the old one.
+      const notice = REVIEW_NOTICES[result.teachBack ?? ''];
+      if (notice !== undefined) this.store.dispatch({ type: 'REVIEW_NOTICE', notice });
     };
     if (outcome instanceof Promise) {
       outcome.then(apply, (e: unknown) => this.err(`${this.brain.name} answer failed: ${errMsg(e)}`));
@@ -864,7 +873,9 @@ export class ShellController {
     const review = this.safe('review', () => this.brain.review(), null);
     if (!review) return;
     this.store.dispatch({ type: 'MAP_SET', map: review.map });
-    this.store.dispatch({ type: 'REVIEW_SET', gaps: review.gaps, teachBack: review.teachBack });
+    this.store.dispatch({
+      type: 'REVIEW_SET', gaps: review.gaps, teachBack: review.teachBack, digest: review.teachBackDigest ?? null, buttons: review.buttons ?? false,
+    });
     this.persistMap(review.map);
   }
 
@@ -882,22 +893,37 @@ export class ShellController {
     this.persist('MAP_VERSION', text.length <= 3800 ? full : { version: map.version, confirmed: map.confirmed === true, guardrails, stepCount: steps.length });
   }
 
+  /** Confirm: counts for exactly the teach-back on screen (its digest). The brain refuses it as `stale` if the map moved on. */
   confirmTeachBack(): void {
     const tb = this.state.review.teachBack;
     if (tb.text === null) return;
     this.sys('Teach-back confirmed by button.');
-    this.persist('ANSWER', { kind: 'confirm', mode: this.state.session?.mode ?? null, topic: 'teach_back', atMs: this.deps.now() - this.epochMs });
-    const input: AnswerInput = { questionId: null, topic: 'teach_back', text: tb.text, atMs: this.deps.now() - this.epochMs, kind: 'confirm' };
+    const atMs = this.deps.now() - this.epochMs;
+    this.persist('ANSWER', { kind: 'confirm', mode: this.state.session?.mode ?? null, topic: 'teach_back', atMs, digest: tb.digest });
+    const input: AnswerInput = { questionId: null, topic: 'teach_back', text: tb.text, atMs, kind: 'confirm', digest: tb.digest };
     this.afterAnswer(this.safe('onAnswer', () => this.brain.onAnswer(input), undefined), { type: 'TEACHBACK_CONFIRM' }, tb.text, null);
   }
 
   correctTeachBack(text: string): void {
+    const tb = this.state.review.teachBack;
     const clean = text.trim();
-    if (this.state.review.teachBack.text === null || clean === '') return;
+    if (tb.text === null || clean === '') return;
     this.sys('Teach-back corrected by button.');
-    this.persist('ANSWER', { kind: 'correct', mode: this.state.session?.mode ?? null, topic: 'teach_back', atMs: this.deps.now() - this.epochMs, text: clean });
-    const input: AnswerInput = { questionId: null, topic: 'teach_back', text: clean, atMs: this.deps.now() - this.epochMs, kind: 'correct' };
+    const atMs = this.deps.now() - this.epochMs;
+    this.persist('ANSWER', { kind: 'correct', mode: this.state.session?.mode ?? null, topic: 'teach_back', atMs, text: clean, digest: tb.digest });
+    const input: AnswerInput = { questionId: null, topic: 'teach_back', text: clean, atMs, kind: 'correct', digest: tb.digest };
     this.afterAnswer(this.safe('onAnswer', () => this.brain.onAnswer(input), undefined), { type: 'TEACHBACK_CORRECT', text: clean }, clean, null);
+  }
+
+  /** Skip: the rule stays provisional and Teach will not apply it. Offered after two unclear replies. */
+  skipTeachBack(): void {
+    const tb = this.state.review.teachBack;
+    if (tb.text === null) return;
+    this.sys('Teach-back skipped by button.');
+    const atMs = this.deps.now() - this.epochMs;
+    this.persist('ANSWER', { kind: 'skip', mode: this.state.session?.mode ?? null, topic: 'teach_back', atMs, digest: tb.digest });
+    const input: AnswerInput = { questionId: null, topic: 'teach_back', text: '', atMs, kind: 'skip', digest: tb.digest };
+    this.afterAnswer(this.safe('onAnswer', () => this.brain.onAnswer(input), undefined), null, '', null);
   }
 
   // ---- Teach: checkpoint and evidence -------------------------------------

@@ -64,7 +64,12 @@ export interface AnswerInput {
   topic: string | null;
   text: string;
   atMs: number;
-  kind: 'answer' | 'confirm' | 'correct';
+  kind: 'answer' | 'confirm' | 'correct' | 'skip';
+  /**
+   * The digest of the teach-back that is on screen (ReviewOutput.teachBackDigest). A confirmation, a correction by button or a
+   * spoken reply counts for exactly that version: if the map moved on since, the brain answers `stale` and confirms nothing.
+   */
+  digest?: string | null;
 }
 
 export interface GapItem {
@@ -117,7 +122,7 @@ export interface BrainSession {
 
 /** What the brain tells the shell about an answer that changed the teach-back. */
 export interface AnswerResult {
-  teachBack?: 'confirmed' | 'corrected' | 'unclear' | 'refused';
+  teachBack?: 'confirmed' | 'corrected' | 'unclear' | 'refused' | 'stale' | 'skipped' | 'needs_words';
   /** The Work Map or the review changed: reload them. */
   changed?: boolean;
 }
@@ -130,8 +135,12 @@ export interface MasteryLines {
 
 export interface ReviewOutput {
   gaps: GapItem[];
-  /** The brain's teach-back, or null until there is enough to repeat back. */
+  /** The brain's teach-back (scope, fields, exception, reason), or null until there is enough to repeat back. */
   teachBack: string | null;
+  /** The fingerprint of what the teach-back states: a confirmation must carry it (AnswerInput.digest). */
+  teachBackDigest?: string | null;
+  /** The review could not understand the expert twice: Confirm / Correct / Skip buttons are offered for the open item. */
+  buttons?: boolean;
   map: DraftMap;
 }
 

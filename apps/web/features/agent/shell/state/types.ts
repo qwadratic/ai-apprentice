@@ -100,7 +100,17 @@ export type TeachBackStatus = 'none' | 'pending' | 'confirmed' | 'corrected';
 
 export interface ReviewState {
   gaps: GapItem[];
-  teachBack: { text: string | null; status: TeachBackStatus; correction: string | null };
+  teachBack: {
+    text: string | null;
+    status: TeachBackStatus;
+    correction: string | null;
+    /** The fingerprint of the text on screen: confirm and correct carry it, so they count for exactly this version. */
+    digest: string | null;
+  };
+  /** The review could not understand the expert twice: Skip joins Confirm and Correct. */
+  buttons: boolean;
+  /** What the last reply did not do (unclear, stale, refused, skipped), in plain words. */
+  notice: string | null;
 }
 
 export interface CheckpointCard {

@@ -9,6 +9,8 @@ export function ReviewView() {
   const gaps = useShellState((s) => s.review.gaps);
   const feed = useShellState((s) => s.feed);
   const teachBack = useShellState((s) => s.review.teachBack);
+  const buttons = useShellState((s) => s.review.buttons);
+  const notice = useShellState((s) => s.review.notice);
   const map = useShellState((s) => s.draftMap);
   const [correcting, setCorrecting] = useState(false);
   const [draft, setDraft] = useState('');
@@ -67,10 +69,17 @@ export function ReviewView() {
           {teachBack.status !== 'none' && <span className={`as-tag as-tag--${teachBack.status === 'pending' ? 'accent' : 'ok'}`}>{teachBack.status}</span>}
         </h3>
         {hasText ? (
-          <blockquote className="as-teachback" data-testid="teachback-text">{teachBack.text}</blockquote>
+          <>
+            <blockquote className="as-teachback" data-testid="teachback-text">{teachBack.text}</blockquote>
+            <p className="as-note" data-testid="teachback-digest">
+              Confirm and Correct count for exactly this text{teachBack.digest !== null && <> (fingerprint <code>{teachBack.digest}</code>)</>}. Until you confirm
+              it, the rule is provisional and the tutor will not apply it.
+            </p>
+          </>
         ) : (
           <p className="as-empty">No teach-back yet. Clipa repeats the process back once there is enough to repeat; you then confirm it or correct it.</p>
         )}
+        {notice !== null && <p className="as-note as-note--attention" role="status" data-testid="review-notice">{notice}</p>}
         {teachBack.correction && <p className="as-feed__answer"><span className="as-step__key">Your correction</span> <q>{teachBack.correction}</q></p>}
         {correcting ? (
           <div className="as-correct">
@@ -87,6 +96,7 @@ export function ReviewView() {
           <div className="as-row">
             <button type="button" className="as-btn as-btn--primary" disabled={!hasText || teachBack.status === 'confirmed'} onClick={() => controller.confirmTeachBack()}>Confirm</button>
             <button type="button" className="as-btn" disabled={!hasText} onClick={() => { setDraft(teachBack.correction ?? ''); setCorrecting(true); }}>Correct</button>
+            {buttons && <button type="button" className="as-btn" data-testid="skip-teachback" onClick={() => controller.skipTeachBack()}>Skip</button>}
           </div>
         )}
       </section>

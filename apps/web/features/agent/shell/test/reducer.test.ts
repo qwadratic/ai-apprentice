@@ -183,3 +183,21 @@ test('the feed takes a `said` item and ignores a second item with the same id', 
   assert.equal(s.feed.length, 1);
   assert.equal(s.feed[0]?.status, 'said');
 });
+
+test('the review keeps the digest of the teach-back on screen, a notice and the buttons; a new teach-back clears the notice', () => {
+  let s = reduce(initialState(), { type: 'REVIEW_SET', gaps: [], teachBack: 'Scope: only for customer_07.', digest: 'abc12345', buttons: false });
+  assert.equal(s.review.teachBack.digest, 'abc12345');
+  s = reduce(s, { type: 'REVIEW_NOTICE', notice: 'I could not tell.' });
+  s = reduce(s, { type: 'REVIEW_SET', gaps: [], teachBack: 'Scope: only for customer_07.', digest: 'abc12345', buttons: true });
+  assert.equal(s.review.notice, 'I could not tell.', 'the same teach-back keeps its notice');
+  assert.equal(s.review.buttons, true);
+  s = reduce(s, { type: 'TEACHBACK_CONFIRM' });
+  assert.equal(s.review.notice, null);
+  assert.equal(s.review.teachBack.status, 'confirmed');
+  s = reduce(s, { type: 'REVIEW_SET', gaps: [], teachBack: 'Scope: only for customer_07.', digest: 'abc12345', buttons: false });
+  assert.equal(s.review.teachBack.status, 'confirmed', 'a reload of the same version does not undo the confirmation');
+  s = reduce(s, { type: 'REVIEW_NOTICE', notice: 'old' });
+  s = reduce(s, { type: 'REVIEW_SET', gaps: [], teachBack: 'Scope: for every customer.', digest: 'ffff0000', buttons: false });
+  assert.equal(s.review.teachBack.status, 'pending', 'another digest is another teach-back');
+  assert.equal(s.review.notice, null);
+});

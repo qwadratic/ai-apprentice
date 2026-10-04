@@ -6,64 +6,17 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Brain } from '../brain/types.ts';
 import { CHECKPOINT_TIMEOUT_MS } from '../controller.ts';
-import type { FeedItem } from '../state/types.ts';
-import { expertAnswer, expertTeachback, learnFixture, novicePredict } from './fixtures.ts';
+import { learnFixture, novicePredict } from './fixtures.ts';
 import type { Rig, RecordedRequest } from './helpers.ts';
 import { ScriptedBrain, createRig, must, settle } from './helpers.ts';
-import { productRig } from './product-rig.ts';
-
-type Answerer = (item: FeedItem, spoken: string) => string | null;
-
-/**
- * Plays the conversation: time advances in half seconds; whatever the controller sends to the voice as [ASK] is "spoken" by the
- * agent (mode speaking, an agent transcript line), then the person answers with what `answer` returns for that question.
- */
-async function converse(rig: Rig, state: { handled: number }, answer: Answerer, ms: number): Promise<void> {
-  for (let elapsed = 0; elapsed < ms; elapsed += 500) {
-    rig.timers.advance(500);
-    await settle(3);
-    while (state.handled < rig.voice.userMessages.length) {
-      const spoken = must(rig.voice.userMessages[state.handled]).replace(/^\[ASK\]\s*/, '');
-      state.handled += 1;
-      rig.voice.mode('speaking');
-      rig.voice.say('ai', spoken);
-      rig.timers.advance(2500);
-      rig.voice.mode('listening');
-      const open = [...rig.controller.store.getState().feed].reverse().find((f) => f.status === 'asked');
-      const reply = open ? answer(open, spoken) : null;
-      if (reply !== null) {
-        rig.timers.advance(1500);
-        rig.voice.say('user', reply);
-        await settle(40);
-      }
-    }
-  }
-}
-
-const learnAnswers: Answerer = (item) => (['reason', 'essentials', 'guardrail'].includes(item.topic) ? expertAnswer(item.topic) : null);
-
-function reviewAnswerer(): Answerer {
-  let teachBacks = 0;
-  return (item) => {
-    if (item.topic === 'teach_back') {
-      teachBacks += 1;
-      return teachBacks === 1 ? expertTeachback('correction') : expertTeachback('confirm');
-    }
-    return expertAnswer(item.topic);
-  };
-}
+import { converse, learnAnswers, learnThenReview, productRig, reviewAnswerer } from './product-rig.ts';
 
 const uploadedEvents = (calls: RecordedRequest[]): Array<{ type: string; text: string }> =>
   calls.filter((c) => c.url.endsWith('/events')).flatMap((c) => (c.body as { events: Array<{ type: string; text: string }> }).events);
 
 /** Learn and Review as the expert would do them; returns the rig at a confirmed Work Map. */
 async function learnAndReview(rig: Rig, state: { handled: number }): Promise<void> {
-  await rig.controller.setSampleObservations(true);
-  await rig.controller.start('learn');
-  await converse(rig, state, learnAnswers, 90_000);
-  await rig.controller.end();
-  await rig.controller.start('review');
-  await converse(rig, state, reviewAnswerer(), 90_000);
+  await learnThenReview(rig, state, reviewAnswerer());
 }
 
 test('Learn: at least three questions at natural pauses, one about a guardrail, never while the expert types', async () => {
@@ -124,6 +77,9 @@ test('Teach: T1 is warned with the expert quote, T2 allowed, T3 another customer
   const rig = productRig();
   const state = { handled: 0 };
   await learnAndReview(rig, state);
+  // Teach runs only on a confirmed teach-back (the confirmation gate): version 2, corrected and then confirmed by the expert.
+  assert.equal(rig.controller.store.getState().review.teachBack.status, 'confirmed');
+  assert.equal(rig.controller.store.getState().draftMap.confirmed, true);
 
   const runCase = async (id: 't1' | 't2' | 't3' | 't4') => {
     await rig.controller.runSampleCase(id);

@@ -22,7 +22,7 @@ export function initialState(persona: Persona = DEFAULT_PERSONA): ShellState {
     observations: [],
     feed: [],
     draftMap: { steps: [] },
-    review: { gaps: [], teachBack: { text: null, status: 'none', correction: null } },
+    review: { gaps: [], teachBack: { text: null, status: 'none', correction: null, digest: null }, buttons: false, notice: null },
     teach: { checkpoint: null, mastery: null, sampleCase: 't1' },
     replay: { evidenceId: null },
     clipaHint: null,
@@ -59,7 +59,8 @@ export type Action =
   | { type: 'FEED_STATUS'; id: string; status: FeedStatus; note: string | null }
   | { type: 'CLIPA_HINT'; hint: 'warning' | 'pointing' | null }
   | { type: 'MAP_SET'; map: DraftMap }
-  | { type: 'REVIEW_SET'; gaps: GapItem[]; teachBack: string | null }
+  | { type: 'REVIEW_SET'; gaps: GapItem[]; teachBack: string | null; digest?: string | null; buttons?: boolean }
+  | { type: 'REVIEW_NOTICE'; notice: string | null }
   | { type: 'TEACHBACK_CONFIRM' }
   | { type: 'TEACHBACK_CORRECT'; text: string }
   | { type: 'CHECKPOINT_RESULT'; card: CheckpointCard }
@@ -85,7 +86,7 @@ function learnReset(state: ShellState): Partial<ShellState> {
     feed: [],
     decisions: [],
     draftMap: { steps: [] },
-    review: { gaps: [], teachBack: { text: null, status: 'none', correction: null } },
+    review: { gaps: [], teachBack: { text: null, status: 'none', correction: null, digest: null }, buttons: false, notice: null },
     teach: { ...state.teach, checkpoint: null, mastery: null },
     replay: { evidenceId: null },
     clipaHint: null,
@@ -186,26 +187,32 @@ export function reduce(state: ShellState, action: Action): ShellState {
     case 'MAP_SET':
       return { ...state, draftMap: action.map };
     case 'REVIEW_SET': {
+      const digest = action.digest ?? null;
       const keepStatus = state.review.teachBack.status === 'confirmed' || state.review.teachBack.status === 'corrected';
-      const sameText = state.review.teachBack.text === action.teachBack;
+      const same = state.review.teachBack.text === action.teachBack && state.review.teachBack.digest === digest;
       return {
         ...state,
         review: {
           gaps: action.gaps,
-          teachBack: keepStatus && sameText
+          teachBack: keepStatus && same
             ? state.review.teachBack
-            : { text: action.teachBack, status: action.teachBack === null ? 'none' : 'pending', correction: null },
+            : { text: action.teachBack, status: action.teachBack === null ? 'none' : 'pending', correction: null, digest },
+          buttons: action.buttons ?? false,
+          // A new teach-back (another version) clears what was said about the one before.
+          notice: same ? state.review.notice : null,
         },
       };
     }
+    case 'REVIEW_NOTICE':
+      return state.review.notice === action.notice ? state : { ...state, review: { ...state.review, notice: action.notice } };
     case 'TEACHBACK_CONFIRM':
       return state.review.teachBack.text === null
         ? state
-        : { ...state, review: { ...state.review, teachBack: { ...state.review.teachBack, status: 'confirmed', correction: null } } };
+        : { ...state, review: { ...state.review, notice: null, teachBack: { ...state.review.teachBack, status: 'confirmed', correction: null } } };
     case 'TEACHBACK_CORRECT':
       return state.review.teachBack.text === null
         ? state
-        : { ...state, review: { ...state.review, teachBack: { ...state.review.teachBack, status: 'corrected', correction: action.text } } };
+        : { ...state, review: { ...state.review, notice: null, teachBack: { ...state.review.teachBack, status: 'corrected', correction: action.text } } };
     case 'CHECKPOINT_RESULT':
       return { ...state, teach: { ...state.teach, checkpoint: action.card } };
     case 'CHECKPOINT_DELIVERY_FAILED':

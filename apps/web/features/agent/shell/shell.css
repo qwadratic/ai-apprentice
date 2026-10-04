@@ -215,6 +215,7 @@
 .apprentice-shell .screen-panel canvas[hidden] { display: none; }
 .apprentice-shell .as-screen__mount[inert] { opacity: 0.55; }
 .apprentice-shell .as-workspace { border-style: dashed; min-height: 180px; }
+.apprentice-shell .as-note--attention { background: var(--as-warn-soft); color: var(--as-warn); border-radius: 6px; padding: 6px 10px; }
 .apprentice-shell .as-standin { display: grid; gap: 8px; margin: 8px 0; }
 .apprentice-shell .as-standin__box {
   border: 1px dashed var(--as-border); border-radius: 8px; padding: 8px 10px; background: var(--as-surface-2);

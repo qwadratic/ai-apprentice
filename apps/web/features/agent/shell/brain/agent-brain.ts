@@ -9,11 +9,13 @@
 import type { ActionCheckpoint, CheckpointReply, ScreenObservation, ScreenStatus } from '@apprentice/contracts';
 import {
   ConversationPolicy, HeuristicAnswerExtractor, HeuristicReplyClassifier, LlmAnswerExtractor, LlmEntityResolver, LlmReplyClassifier,
-  MAX_FOLLOW_UPS, applyTeachBackReply, buildPrediction, buildTeachBack, checkpoint as judgeCheckpoint, createMapState, evaluatePrediction,
-  knownCustomerRefs, latestConfirmed, planFollowUps, reduceMap, reviewStatus, summarizeMastery, workingMap,
+  MAX_FOLLOW_UPS, ReviewClarifier, applyTeachBackReply, buildPrediction, buildTeachBack, checkpoint as judgeCheckpoint, createMapState,
+  evaluatePrediction, knownCustomerRefs, latestConfirmed, planFollowUps, pressReviewButton, reduceMap, reviewStatus, summarizeMastery,
+  workingMap,
 } from '@apprentice/agent';
 import type {
-  AnswerExtractor, BrainDecision as PolicyDecision, CaseOutcome, MapState, Prediction, Question, ReplyClassifier, ReplyVerdict, WorkMap,
+  AnswerExtractor, BrainDecision as PolicyDecision, CaseOutcome, MapState, Prediction, Question, ReplyClassifier, ReplyVerdict, TeachBack,
+  WorkMap,
 } from '@apprentice/agent';
 import type { Mode } from '../state/types.ts';
 import type {
@@ -22,7 +24,6 @@ import type {
 } from './types.ts';
 
 const REVIEW_GAP_MS = 1500;
-const MAX_TEACH_BACK_TRIES = 3;
 const MAX_OBSERVATIONS = 300;
 
 /** What the topic of a question is called in the shell's decision log. */
@@ -57,7 +58,7 @@ export const SEND_TARGET: ClipaTargetRef = { surface: 'email', hint: 'send' };
 type OpenQuestion =
   | { kind: 'learn'; questionId: string; question: Question }
   | { kind: 'followup'; question: Question }
-  | { kind: 'teachback'; text: string }
+  | { kind: 'teachback'; heard: TeachBack }
   | { kind: 'predict'; questionId: string; prediction: Prediction };
 
 interface TeachProgress {
@@ -102,7 +103,11 @@ export class AgentBrain implements Brain {
   private lastAnsweredAtMs: number | null = null;
   // Review
   private asked = new Set<string>();
-  private teachBackTries = 0;
+  private clarifier = new ReviewClarifier();
+  /** The teach-back last said to the expert (the one a spoken reply answers); null before the first. */
+  private heard: TeachBack | null = null;
+  /** The review gave up understanding the expert: the buttons are shown and the teach-back is not asked again until one is pressed. */
+  private buttons = false;
   private reviewClosed = false;
   private reviewHalted = false;
   // Teach
@@ -127,7 +132,9 @@ export class AgentBrain implements Brain {
     this.busy = false;
     this.lastAnsweredAtMs = null;
     this.asked = new Set();
-    this.teachBackTries = 0;
+    this.clarifier = new ReviewClarifier();
+    this.heard = null;
+    this.buttons = false;
     this.reviewClosed = false;
     this.reviewHalted = false;
     this.teach = null;
@@ -254,7 +261,8 @@ export class AgentBrain implements Brain {
   }
 
   async onAnswer(a: AnswerInput): Promise<AnswerResult | void> {
-    if (a.kind === 'confirm') return this.confirmNow(a);
+    if (a.kind === 'confirm') return this.pressButton(a, 'confirm');
+    if (a.kind === 'skip') return this.pressButton(a, 'skip');
     if (a.kind === 'correct') return this.reply(a, 'correct');
     const open = this.open;
     if (open === null || this.busy) {
@@ -329,29 +337,67 @@ export class AgentBrain implements Brain {
     return { changed: true };
   }
 
-  /** The reply to the teach-back, by voice (verdict from the classifier) or typed (verdict forced). */
+  /** The teach-back the reply is for: the one the person has on screen (its digest), else the one that was spoken. */
+  private heardFor(a: AnswerInput): TeachBack | undefined {
+    if (a.digest) return { text: '', evidenceIds: [], version: 0, digest: a.digest };
+    return this.heard ?? undefined;
+  }
+
+  private teachBackId(): string {
+    return `teachback:${workingMap(this.state).version}`;
+  }
+
+  /**
+   * The reply to the teach-back, by voice (verdict from the classifier) or typed (verdict forced). The gate lives in packages/agent:
+   * a reply counts for the teach-back it followed (its digest), a confirmation is only confirmation words, two unclear replies in a
+   * row hand over to the buttons, and a reply to a teach-back that is out of date confirms nothing (`stale`).
+   */
   private async reply(a: AnswerInput, force: 'correct' | null): Promise<AnswerResult> {
     const forced: ReplyClassifier | null = force === 'correct'
       ? { name: 'typed correction', classify: (): Promise<ReplyVerdict> => Promise.resolve({ verdict: 'correct', correction: null }) }
       : null;
     this.busy = true;
     try {
-      const outcome = await applyTeachBackReply(this.state, { text: a.text, atMs: a.atMs }, this.extractor, forced ?? this.classifier);
+      const id = this.teachBackId();
+      const outcome = await applyTeachBackReply(this.state, { text: a.text, atMs: a.atMs }, this.extractor, forced ?? this.classifier, this.heardFor(a));
       this.state = outcome.state;
       this.open = null;
       this.policy?.setMap(workingMap(this.state));
-      if (outcome.outcome === 'refused') {
-        this.reviewHalted = true;
-        const missing = outcome.issues.map((i) => `${i.kind} ${i.id} lacks ${i.missing.join(' and ')}`).join('; ');
-        this.options.log(`Teach-back not confirmed: ${missing}.`);
-        this.say('refused', `I cannot save this version yet: ${missing}. Please answer the open questions first.`);
-      } else if (outcome.outcome === 'unclear') {
-        this.teachBackTries += 1;
-        this.options.log(`Teach-back reply unclear (try ${this.teachBackTries} of ${MAX_TEACH_BACK_TRIES}).`);
-      } else if (outcome.outcome === 'confirmed') {
-        this.options.log(`Work Map version ${latestConfirmed(this.state)?.version ?? '?'} confirmed.`);
-      } else {
-        this.options.log(`Work Map corrected: next version ${workingMap(this.state).version}.`);
+      switch (outcome.outcome) {
+        case 'refused': {
+          this.reviewHalted = true;
+          const missing = outcome.issues.map((i) => `${i.kind} ${i.id} lacks ${i.missing.join(' and ')}`).join('; ');
+          this.options.log(`Teach-back not confirmed: ${missing}.`);
+          this.say('refused', `I cannot save this version yet: ${missing}. Please answer the open questions first.`);
+          break;
+        }
+        case 'unclear': {
+          const step = this.clarifier.unclear(id);
+          if (step.kind === 'buttons') {
+            this.buttons = true;
+            this.options.log('Teach-back reply unclear twice: Confirm, Correct and Skip are offered; the rule stays provisional.');
+            this.say('unclear', 'I could not tell whether that was a yes or a correction. Please use the buttons: Confirm, Correct or Skip. Until then I will not treat the rule as confirmed.');
+          } else {
+            this.options.log(`Teach-back reply unclear (ask again, attempt ${step.attempt}).`);
+          }
+          break;
+        }
+        case 'stale':
+          this.heard = outcome.teachBack;
+          this.options.log('The teach-back changed since it was heard: nothing was confirmed; the current version is played back again.');
+          break;
+        case 'confirmed':
+          this.clarifier.understood(id);
+          this.heard = null;
+          this.buttons = false;
+          this.options.log(`Work Map version ${latestConfirmed(this.state)?.version ?? '?'} confirmed.`);
+          break;
+        case 'corrected':
+          this.clarifier.understood(id);
+          this.heard = null;
+          this.buttons = false;
+          this.options.log(`Work Map corrected: provisional version ${workingMap(this.state).version}, to be confirmed by a new teach-back.`);
+          break;
       }
       return { teachBack: outcome.outcome, changed: true };
     } finally {
@@ -360,17 +406,35 @@ export class AgentBrain implements Brain {
     }
   }
 
-  private confirmNow(a: AnswerInput): AnswerResult {
-    try {
-      const outcome = reduceMap(this.state, { type: 'confirm', atMs: a.atMs, quote: null });
-      this.state = outcome;
-      this.open = null;
-      this.policy?.setMap(workingMap(this.state));
-      this.options.log(`Work Map version ${latestConfirmed(this.state)?.version ?? '?'} confirmed.`);
-      return { teachBack: 'confirmed', changed: true };
-    } catch (e) {
-      this.options.log(`Confirm refused: ${errMsg(e)}`);
-      return { teachBack: 'refused' };
+  /** Confirm and Skip buttons: Confirm carries the digest of the teach-back on screen (pressReviewButton refuses a stale one). */
+  private pressButton(a: AnswerInput, button: 'confirm' | 'skip'): AnswerResult {
+    const id = this.teachBackId();
+    const out = pressReviewButton(this.state, this.clarifier, id, button, a.atMs, this.heardFor(a));
+    this.state = out.state;
+    switch (out.outcome) {
+      case 'confirmed':
+        this.open = null;
+        this.heard = null;
+        this.buttons = false;
+        this.policy?.setMap(workingMap(this.state));
+        this.options.log(`Work Map version ${latestConfirmed(this.state)?.version ?? '?'} confirmed with the button.`);
+        return { teachBack: 'confirmed', changed: true };
+      case 'stale':
+        this.heard = out.teachBack;
+        this.options.log('Confirm refused: the teach-back on screen is out of date (the map changed). Nothing was confirmed.');
+        return { teachBack: 'stale', changed: true };
+      case 'skipped':
+        this.open = null;
+        this.buttons = false;
+        this.reviewHalted = true;
+        this.options.log('Teach-back skipped: the rule stays provisional, so Teach will not apply it.');
+        this.say('skipped', 'Skipped. The rule stays unconfirmed, so in Teach I will say I do not know instead of applying it.');
+        return { teachBack: 'skipped', changed: true };
+      case 'refused':
+        this.options.log(`Confirm refused: ${out.issues.map((i) => `${i.kind} ${i.id} lacks ${i.missing.join(' and ')}`).join('; ')}.`);
+        return { teachBack: 'refused' };
+      case 'needs_words':
+        return { teachBack: 'needs_words' };
     }
   }
 
@@ -400,20 +464,22 @@ export class AgentBrain implements Brain {
         utterance: { text: next.text }, expectsAnswer: true, clipa: { state: 'speaking' },
       }];
     }
-    const status = reviewStatus(this.state, { persona: this.persona, held });
+    const status = reviewStatus(this.state, { persona: this.persona, held, unresolved: this.clarifier.unresolved() });
     if (status.done) {
       if (this.reviewClosed) return [];
       this.reviewClosed = true;
       this.say('review_done', `Thank you. The Work Map is confirmed (version ${status.confirmed?.version ?? map.version}). You can switch to Teach now.`);
       return this.outbox.splice(0);
     }
-    if (this.teachBackTries >= MAX_TEACH_BACK_TRIES || map.guardrails.length === 0) return [];
-    const text = buildTeachBack(map).text;
-    this.open = { kind: 'teachback', text };
+    // After two unclear replies the buttons take over: nothing is asked again until one is pressed.
+    if (this.buttons || map.guardrails.length === 0) return [];
+    const tb = buildTeachBack(map);
+    this.heard = tb;
+    this.open = { kind: 'teachback', heard: tb };
     return [{
-      decision: 'ASK_NOW', topic: 'teach_back', kind: 'teach_back', evidenceIds: buildTeachBack(map).evidenceIds,
+      decision: 'ASK_NOW', topic: 'teach_back', kind: 'teach_back', evidenceIds: [...tb.evidenceIds],
       whyNow: `No gap is left; playing back version ${map.version} for the expert to confirm or correct.`,
-      utterance: { text }, expectsAnswer: true, clipa: { state: 'speaking' },
+      utterance: { text: tb.text }, expectsAnswer: true, clipa: { state: 'speaking' },
     }];
   }
 
@@ -422,11 +488,11 @@ export class AgentBrain implements Brain {
   review(): ReviewOutput {
     const map = workingMap(this.state);
     const held = this.learnPolicy?.heldForReview(this.nowMs) ?? [];
-    const gaps = planFollowUps(map, { persona: this.persona, held, max: MAX_FOLLOW_UPS }).map((q) => ({
+    const gaps = planFollowUps(map, { persona: this.persona, held, max: MAX_FOLLOW_UPS, unresolved: this.clarifier.unresolved() }).map((q) => ({
       id: q.id, topic: q.topic, question: q.text, evidenceIds: [...q.evidenceIds],
     }));
-    const teachBack = gaps.length === 0 && map.guardrails.length > 0 ? buildTeachBack(map).text : null;
-    return { gaps, teachBack, map: this.shown(map) };
+    const tb = gaps.length === 0 && map.guardrails.length > 0 ? buildTeachBack(map) : null;
+    return { gaps, teachBack: tb?.text ?? null, teachBackDigest: tb?.digest ?? null, buttons: this.buttons, map: this.shown(map) };
   }
 
   private shown(map: WorkMap): DraftMap {
