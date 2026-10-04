@@ -502,6 +502,16 @@ test('map_synthesis: a model that leaves out the processes still gives a map; a 
   assert.equal((await post(s.base, 'map_synthesis', s.token, MAP_INPUT)).status, 502, 'other keys stay strict');
 });
 
+test('map_synthesis: at most three open points reach Reflect, the first three in order', async (t) => {
+  const gaps = ['Who does it apply to?', 'Is it still fine when both are there?', 'When would you stop and ask?', 'Fourth?', 'Fifth?']
+    .map((question) => ({ question, targetId: 'rule-x', evidenceIds: ['obs-2'], regionIds: [] }));
+  const s = await setup(t, () => ok({ ...MAP_REPLY, gaps }), HIGH);
+  const r = await post(s.base, 'map_synthesis', s.token, MAP_INPUT);
+  assert.equal(r.status, 200);
+  const map = (await bodyOf(r)).output as MapSynthesisOutput;
+  assert.deepEqual(map.gaps.map((g) => g.question), ['Who does it apply to?', 'Is it still fine when both are there?', 'When would you stop and ask?']);
+});
+
 const MATCH_INPUT = {
   processes: [
     { id: 'm1-p1', title: 'Budget plan', summary: 'Keeps the plan in budget.', steps: ['Lowered the budget to 300'], rules: ['when budget above 300, ask the lead'] },
@@ -577,6 +587,13 @@ test('map_edit: operations are checked against the map; a reason keeps the exper
   r = await post(s.base, 'map_edit', s.token, input);
   assert.deepEqual((await bodyOf(r)).output, { intent: 'other', operations: [], reply: '', teachBack: null });
   assert.equal((await post(s.base, 'map_edit', s.token, { ...input, map: { steps: 'x', guardrails: [] } })).status, 400);
+  // An edit says nothing back: the app reads the new summary or asks the next point itself.
+  reply = { intent: 'edit', operations: [{ op: 'resolve_gap', targetId: 'gap-1', field: null, value: null, value2: null, quote: null }], reply: '', teachBack: 'For the lead: ask above 500. Right?' };
+  r = await post(s.base, 'map_edit', s.token, input);
+  assert.equal(r.status, 200);
+  assert.deepEqual((await bodyOf(r)).output, {
+    intent: 'edit', operations: [{ op: 'resolve_gap', targetId: 'gap-1', field: null, value: null, value2: null, quote: null }], reply: '', teachBack: 'For the lead: ask above 500. Right?',
+  });
 });
 
 // ---- honesty: what the runner actually receives must be generic -----------------------------------------------------
@@ -584,10 +601,10 @@ const PINNED_PROMPT_SHA256: Record<string, string> = {
   'answer-extraction.ts': '28c542eb5bf30514aed951b611649de202107cfa2cde6504e664b76c947e373d',
   'reply-classification.ts': 'd702dcfb366d9879bc0a1c5e3b3c647e06961c71dfdcaadc07ddb27f0c06f7e4',
   'entity-resolution.ts': '711256123da833fb9e95f440d16da7829ce88fc17b08d1ea10d3c560cf2687be',
-  'generic-question.ts': 'b068e2b40b719e41cead4f1c698606e38fd902d064936a6d28fe5daa5fcc7b69',
-  'guardrail-check.ts': '215ae8386c99ee8cdcb6c2adfeab02db8b3c7e284040040869ba22dec22a09d8',
-  'map-synthesis.ts': 'a3fbf74152054f5249f458a0cbd3e507e97ea1d0e2baba216fccbb9bc1e37a9c',
-  'map-edit.ts': 'a787ccbd01dc117a5fdd73933c7353cb97fff3a990303bb3c4c142bf551803be',
+  'generic-question.ts': 'bd3ecc5241795398e8cc5212642050b9978d9ce6288b9356144c769e8cee1d81',
+  'guardrail-check.ts': '8ace038475b50ba9a14c2924fbdac755efcbc46cebd90e7c08d5f7ee8b985940',
+  'map-synthesis.ts': '47a21163c19ba8f9854fb163733f900696f897c622f40e8e2e23013f6a9e1d81',
+  'map-edit.ts': '4893d3c9ab30358b6422665f8c47545c27434f7de835271472b69a80ab233d53',
   'process-match.ts': '8b55b19924632678bb5b59e1c652b29dd398ed1dbe012ea92eb0be2b6af71189',
 };
 const sha256 = (v: string): string => createHash('sha256').update(v).digest('hex');

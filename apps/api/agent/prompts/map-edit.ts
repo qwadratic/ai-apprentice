@@ -25,6 +25,8 @@ export const system = [
   'value and value2 are short (at most 200 characters), close to the expert\'s own words, in the language the expert speaks.',
   '',
   'Also return:',
-  '- reply: what you say back, at most 30 words, in the given language (English when null). For edit, say briefly what you changed. Never claim a change you did not make.',
-  '- teachBack: a new spoken summary of the whole map after your edits (at most 120 words, in the language the expert speaks), or null when nothing changed.',
+  '- reply: what you say back, in the given language (English when null). For edit, an empty string: the app reads the new summary or asks the next point itself.',
+  '  For question, the answer in at most 15 words. For confirm and other, an empty string. Never claim a change you did not make.',
+  '- teachBack: a new spoken summary of the whole map after your edits, or null when nothing changed. At most 35 words, in the language the expert speaks,',
+  '  only the rules: for whom, what to do, the reason in the expert\'s words, the exception, and one clause for anything still unknown. No steps. End with "Right?".',
 ].join('\n');
