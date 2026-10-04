@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@kigulx'
 created_date: '2026-10-03 21:16'
-updated_date: '2026-10-04 03:30'
+updated_date: '2026-10-04 03:43'
 labels:
   - stream-a
   - screen
@@ -42,16 +42,18 @@ Follow-up for capture/privacy after its capture handoff. Own packages/screen/rec
 
 <!-- SECTION:PLAN:BEGIN -->
 1. Attach a processed-only segmented recorder through existing capture lifecycle hooks, with explicit format, finalization, and chunk storage failures. 2. Implement a pure session-relative segment timeline and a mountable ReplayPanel with evidence selection and unavailable states. 3. Verify actual browser video pixels and pause/mask/resize boundaries, timeline mapping, and storage lifecycle. 4. Publish one reviewed TASK-2.5 PR with exact imports and integration instructions for the B-owned shell; no shared contract or occupied runtime edits.
+
+5. Include the integration owner-reviewed API composition: authenticated recording routes, raw chunk streaming, CORS chunk header and actual createApi binary roundtrip verification in the same task PR.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-Implemented processed-only segmented MediaRecorder, IndexedDB media plus timecode persistence, session-to-media timeline, ReplayPanel, and isolated authenticated recording chunk storage. Final npm run check with PLAYWRIGHT_MODULE and Chrome passed: 492 tests, zero failures or skips, typecheck and production build passed. Browser source is synthetic canvas; actual MediaRecorder, decoding, masking, pause gap, IndexedDB restoration, and ReplayPanel seek are exercised. HTTP tests use a standalone loopback adapter and the real client/handlers/file-store protocol, not createApi/registerWebRoute. Production raw-body route composition, CORS X-Recording-Chunk-Index, and host session index remain with the main integration owner; B owns ReplaySlot wiring. AC3 stays open until production upload composition is verified. No B shell, occupied capture/bridge/panel, shared contracts, root manifests, or lockfile edits. Task remains In Progress until merge.
+Implemented processed-only segmented recorder, durable IndexedDB media/timecodes, Evidence timeline, ReplayPanel, authenticated file-backed chunk store and production API composition. Base feature head 7c33530 passed npm run check with Chrome: 492 tests, zero failures/skips, typecheck/build passed; GitHub Node22/24 and Backlog CI passed. Integrated owner-reviewed composition commits43b9deb and9e29a1c. createRecordingModule mounts MEDIA_DIR/recordings with real agent authorization and Origin checks; chunk routes stream raw bytes and CORS permits X-Recording-Chunk-Index. Actual createApi/createAgent test issues two sessions, uploads two non-UTF8 chunks, finalizes, and verifies exact concatenation; checks unauthorized/cross-session/foreign and missing Origin/413/ordinary JSON handling. Browser tests use a synthetic display source with real MediaRecorder, video decoding, masks, pause gap, IndexedDB restoration and ReplayPanel. Deployed browser-origin verification, host server session index and B ReplaySlot wiring remain integration handoffs, so AC3 stays open. Publication authorized and PR40 open; merge-owner B. No B shell, occupied capture/bridge/panel, shared contracts, root manifests or lockfile edits. Task remains In Progress until merge.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added processed-only recording and replay with persisted segment timestamps, privacy-boundary finalization, explicit storage/media failures, authenticated chunk persistence, and exact session-time evidence mapping. Verified with 492 passing tests including real Chrome encoded-pixel and record-to-replay tests, typecheck, build, and client/server protocol tests. Production upload composition and B-owned shell mounting are explicit integration handoffs, so AC3 and terminal status remain open.
+Added processed-only recording/replay with persisted timestamps, privacy-boundary finalization, bounded media/storage errors and authenticated chunk persistence mounted in the real API composition. Base feature verified with 492 tests including Chrome record-to-replay; API composition adds real-session multi-chunk binary roundtrip and denial-path coverage. Deployed browser-origin verification and B shell mounting remain explicit handoffs; AC3 and terminal status remain open.
 <!-- SECTION:FINAL_SUMMARY:END -->
