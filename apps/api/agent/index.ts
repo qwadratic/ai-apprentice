@@ -4,9 +4,11 @@ import { createSessionStore } from './auth.ts';
 import type { SessionStore } from './auth.ts';
 import { resolveConfig } from './config.ts';
 import type { AgentOptions } from './config.ts';
+import { registerAdminRoutes } from './admin.ts';
 import { createElevenLabsClient } from './elevenlabs.ts';
 import { registerAgentRoutes } from './routes.ts';
 import type { AgentRuntime } from './routes.ts';
+import { createMaintenance } from './rotation.ts';
 import { createSessionFiles } from './sessions.ts';
 
 export type { AgentOptions, FetchFn } from './config.ts';
@@ -17,6 +19,10 @@ export interface Agent {
   authorize(request: Request, sessionId: string | null): Promise<boolean>;
   /** Resolves when background work started by /finish has completed (for tests and graceful shutdown). */
   idle(): Promise<void>;
+  /** One disk maintenance pass now (orphan tmp cleanup, warn, rotation). It also runs on mount and every 10 min. */
+  maintain(): Promise<void>;
+  /** Stops the maintenance timer. */
+  close(): void;
   store: SessionStore;
 }
 
@@ -25,9 +31,12 @@ export function createAgent(options: AgentOptions = {}): Agent {
   const config = resolveConfig(options);
   const store = createSessionStore({ ...config, maxLive: config.limits.maxLiveSessions });
   const files = createSessionFiles(config.sessionsDir);
-  const runtime: AgentRuntime = { config, store, files, eleven: createElevenLabsClient(config, files), background: new Set() };
+  const maintenance = createMaintenance(config, files);
+  const runtime: AgentRuntime = { config, store, files, eleven: createElevenLabsClient(config, files), maintenance, background: new Set() };
   return {
-    module: { name: 'agent', mount: (app) => { registerAgentRoutes(app, runtime); } },
+    module: { name: 'agent', mount: (app) => { registerAgentRoutes(app, runtime); registerAdminRoutes(app, runtime); maintenance.start(); } },
+    maintain: () => maintenance.run(),
+    close: () => { maintenance.stop(); },
     authorize: async (request, sessionId) => store.check(request.headers.get('authorization'), sessionId).ok,
     idle: async () => { while (runtime.background.size > 0) await Promise.allSettled([...runtime.background]); },
     store,
@@ -38,7 +47,9 @@ export function createAgent(options: AgentOptions = {}): Agent {
 let shared: Agent | undefined;
 const defaultAgent = (): Agent => (shared ??= createAgent());
 
-export const agentModule: ApiModule = { name: 'agent', mount: (app) => defaultAgent().module.mount(app) };
+/** `import { mount as mountAgent } from '../agent/index.ts'` (doc-9 4.1, docs/web-foundation.md). */
+export const mount: ApiModule['mount'] = (app) => defaultAgent().module.mount(app);
+export const agentModule: ApiModule = { name: 'agent', mount };
 
 /**
  * Screen-module dependency (doc-9 4.2). Reads `Authorization: Bearer <token>`.

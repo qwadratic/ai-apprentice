@@ -4,6 +4,7 @@ import type { AgentConfig } from './config.ts';
 import { clientIp, isLocalDevRequest, isRecord, makeLimiter } from './config.ts';
 import type { SessionStore, AuthResult } from './auth.ts';
 import type { ElevenLabsClient, ConversationResult } from './elevenlabs.ts';
+import type { Maintenance } from './rotation.ts';
 import { sleep } from './elevenlabs.ts';
 import { CONVERSATION_ID, SESSION_ID, parseEvents } from './sessions.ts';
 import type { SessionFiles } from './sessions.ts';
@@ -13,6 +14,7 @@ export interface AgentRuntime {
   store: SessionStore;
   files: SessionFiles;
   eleven: ElevenLabsClient;
+  maintenance: Maintenance;
   /** Background work (audio fetch after /finish) still running; tests await it. */
   background: Set<Promise<void>>;
 }
@@ -50,10 +52,11 @@ async function readBody(req: Request, max: number): Promise<Body> {
 export function registerAgentRoutes(app: Express, rt: AgentRuntime): void {
   const { config, store, files, eleven } = rt;
   const { limits } = config;
-  const sessionsLimited = makeLimiter(limits.sessionsPerMinute, limits.sessionsPerHour, config.now);
-  const signedUrlLimited = makeLimiter(limits.signedUrlPerMinute, limits.signedUrlPerHour, config.now);
-  const eventsLimited = makeLimiter(limits.eventsPerMinute, 0, config.now);
-  const finishLimited = makeLimiter(limits.finishPerMinute, 0, config.now);
+  // Per-IP windows are the real limit; the global caps are safety nets that one IP cannot reach on its own.
+  const sessionsLimited = makeLimiter({ perMinute: limits.sessionsPerMinute, perIpPerHour: limits.sessionsPerIpPerHour, globalPerHour: limits.sessionsGlobalPerHour }, config.now);
+  const signedUrlLimited = makeLimiter({ perMinute: limits.signedUrlPerMinute, perIpPerHour: limits.signedUrlPerIpPerHour, globalPerHour: limits.signedUrlGlobalPerHour }, config.now);
+  const eventsLimited = makeLimiter({ perMinute: limits.eventsPerMinute }, config.now);
+  const finishLimited = makeLimiter({ perMinute: limits.finishPerMinute }, config.now);
   const finishing = new Set<string>();
   let eventBytes: Array<[number, number]> = [];
   const overHourlyBudget = (n: number): boolean => {
@@ -123,14 +126,17 @@ export function registerAgentRoutes(app: Express, rt: AgentRuntime): void {
     const receivedAt = config.now();
     const lines = p.events.map((e) => JSON.stringify({ t: e.t, dir: e.dir, type: e.type, text: e.text, conversationId: p.conversationId ?? null, receivedAt })).join('\n') + '\n';
     const bytes = Buffer.byteLength(lines);
+    // 507, not 413: the request was fine, this session has no room left. It is checked before the global
+    // hourly budget so that a full session cannot drain the budget of other sessions.
+    if ((await files.eventsSize(id)) + bytes > limits.sessionFileBytes) { reply(res, 507, { ok: false, error: 'session_full', max_bytes: limits.sessionFileBytes }); return; }
     if (overHourlyBudget(bytes)) {
       config.log({ level: 'warn', msg: 'events hourly byte cap reached' });
       reply(res, 429, { ok: false, error: 'hourly_byte_cap', max_bytes_per_hour: limits.eventBytesPerHour }, { 'Retry-After': '300' });
       return;
     }
-    // 507, not 413: the request was fine, this session has no room left.
-    if (!(await files.appendEvents(id, lines, limits.sessionFileBytes))) { reply(res, 507, { ok: false, error: 'session_full', max_bytes: limits.sessionFileBytes }); return; }
+    await files.appendEvents(id, lines);
     reply(res, 200, { ok: true, stored: p.events.length });
+    rt.maintenance.afterWrite();
   });
 
   // finish answers within ~20 s once a transcript is stored (partial if ElevenLabs is still processing);
@@ -169,6 +175,7 @@ export function registerAgentRoutes(app: Express, rt: AgentRuntime): void {
       if (!g.conv) { reply(res, 502, { ok: false, error: 'conversation_unavailable', transcriptStatus: g.status, transcriptStored: false, audioStored: false }); return; }
       if (!(await files.bindConversation(id, conversationId))) { reply(res, 409, { ok: false, error: 'conversation_mismatch' }); return; }
       await files.storeTranscript(id, g.conv);
+      rt.maintenance.afterWrite();
       const partial = !(g.conv.status === 'done' || g.conv.status === 'failed');
       reply(res, 200, { ok: true, transcriptStored: true, partial, conversationStatus: g.conv.status ?? null, audioStored: false, audioPending: true });
       handedOff = true;

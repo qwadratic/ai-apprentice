@@ -11,9 +11,10 @@ test('POST /api/agent/sessions issues a 32-byte token and stores only its hash',
   const { base, dir } = await start(t);
   const before = Date.now();
   const s = await issue(base);
+  assert.deepEqual(Object.keys(s).sort(), ['issuedAtMs', 'serverNowMs', 'sessionId', 'token'], 'no sessionEpochMs: the browser picks the timeline epoch');
   assert.match(s.sessionId, /^[0-9a-f-]{36}$/);
   assert.equal(Buffer.from(s.token, 'base64url').length, 32);
-  assert.ok(s.sessionEpochMs >= before && s.sessionEpochMs <= Date.now());
+  assert.ok(s.issuedAtMs >= before && s.issuedAtMs <= s.serverNowMs && s.serverNowMs <= Date.now());
   const stored = await readFile(join(dir, 'agent-sessions.json'), 'utf8');
   assert.ok(!stored.includes(s.token), 'the raw token must not be stored');
   const hash = createHash('sha256').update(s.token).digest('hex');
@@ -95,4 +96,34 @@ test('the exported module and authorize() read the environment and survive a mod
   assert.notEqual(two, one);
   assert.equal(await two.authorize(requestWith(`Bearer ${s.token}`), s.sessionId), true);
   assert.equal(await two.authorize(requestWith(), null), false);
+});
+
+test('doc-9 shape: `mount` is a named export next to agentModule', async () => {
+  const index = await import('../agent/index.ts');
+  assert.equal(typeof index.mount, 'function');
+  assert.equal(index.agentModule.name, 'agent');
+  assert.equal(index.agentModule.mount, index.mount);
+  assert.equal(typeof index.authorize, 'function');
+});
+
+test('authorize() works as the screen module\'s dependency (null first, then the body\'s sessionId)', async (t) => {
+  const { registerWebRoute } = await import('../src/web-routes.ts');
+  const { mount: mountScreen } = await import('../screen/index.mjs');
+  const { agent } = await start(t);
+  const offered: unknown[] = [];
+  const service = { offer: (input: unknown) => { offered.push(input); return 'accepted'; }, evidence: {} };
+  const app = await createApi({ allowedOrigins: [ORIGIN], modules: [{ name: 'screen', mount: (a) => { mountScreen(a, { register: registerWebRoute, service, authorize: agent.authorize }); } }] });
+  const server = app.listen(0, '127.0.0.1');
+  t.after(() => new Promise<void>((resolve) => { server.close(() => resolve()); server.closeAllConnections(); }));
+  await new Promise<void>((resolve) => { if (server.listening) resolve(); else server.once('listening', () => resolve()); });
+  const address = server.address();
+  assert.ok(address && typeof address !== 'string');
+  const a = await agent.store.issue();
+  const b = await agent.store.issue();
+  const frame = (sessionId: string): string => JSON.stringify({ sessionId, frameId: 'f1', timestampMs: 1, processed: true, mediaType: 'image/png', data: 'AAAA' });
+  const post = (token: string | null, sessionId: string) => fetch(`http://127.0.0.1:${address.port}/screen/frames`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: frame(sessionId) });
+  assert.equal((await post(null, a.sessionId)).status, 401, 'no token: rejected before the body is read');
+  assert.equal((await post(a.token, b.sessionId)).status, 403, 'token of another session');
+  assert.equal((await post(a.token, a.sessionId)).status, 202, 'own session passes authorization and reaches the service');
+  assert.equal(offered.length, 1);
 });

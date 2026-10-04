@@ -50,8 +50,8 @@ element<HTMLButtonElement>('prepare').onclick = async () => {
     const response = await fetch(`${apiBase}/api/agent/sessions`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     if (!response.ok) throw new Error(`Agent session setup returned HTTP ${response.status}.`);
     const data: unknown = await response.json();
-    if (!data || typeof data !== 'object' || !('sessionId' in data) || typeof data.sessionId !== 'string' || !('sessionEpochMs' in data) || typeof data.sessionEpochMs !== 'number' || !('token' in data) || typeof data.token !== 'string') throw new Error('Agent session response is invalid.');
-    session = { sessionId: data.sessionId, sessionEpochMs: data.sessionEpochMs };
+    if (!data || typeof data !== 'object' || !('sessionId' in data) || typeof data.sessionId !== 'string' || !('token' in data) || typeof data.token !== 'string') throw new Error('Agent session response is invalid.');
+    session = { sessionId: data.sessionId, sessionEpochMs: Date.now() };
     token = `Bearer ${data.token}`;
     record('Real agent session prepared.');
     const runtime = createScreenBridge({ apiBase, authHeader: () => token, sourceRevision: () => null });
@@ -66,7 +66,7 @@ element<HTMLButtonElement>('prepare').onclick = async () => {
       element<HTMLButtonElement>('evidence').disabled = !observation.evidenceIds.length;
       record(`Validated ${observation.kind}; ${observation.evidenceIds.length} evidence reference(s).`);
     });
-    const unmount = mountScreenPanel(element('panel'), { capture: runtime.capture, session: () => session, controller: runtime.panelController });
+    const unmount = mountScreenPanel(element('panel'), { capture: runtime.capture, session: () => ({ ...session, sessionEpochMs: Date.now() }), controller: runtime.panelController });
     dispose = () => { unmount(); unsubscribeStatus(); unsubscribeObservation(); runtime.dispose(); };
     element('setup').textContent = 'Session ready. Choose the synthetic order tab or window, review the local preview, add a mask, then confirm.';
     element<HTMLButtonElement>('evidence').onclick = async () => {

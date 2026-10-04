@@ -7,6 +7,7 @@ status: In Progress
 assignee:
   - '@qwadratic'
 created_date: '2026-10-04 00:52'
+updated_date: '2026-10-04 01:11'
 labels:
   - stream-b
 dependencies: []
@@ -34,3 +35,9 @@ Ivan, 4 Oct 03:00: a demo B can run and test without people. A web page that loo
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Cancelled 4 Oct 01:20 by Ivan: the simulator and the lab are not needed; the product shell (TASK-3.8) is the vehicle. Its uncommitted agent modules (policy, map, answers, questions, review, tutor, types, tests) and fixtures (fixtures/agent/sim, fixtures/agent/expected t1-t6) were salvaged to move into packages/agent.
+<!-- SECTION:NOTES:END -->
