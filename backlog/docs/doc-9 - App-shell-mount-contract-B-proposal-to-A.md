@@ -144,7 +144,7 @@ Proposal:
 
 ### 4.2 Session token and screen authorization (B)
 
-- `POST /api/agent/sessions` returns `{ sessionId, sessionEpochMs, token }`. The token is 32 random bytes, and the server stores only its hash.
+- `POST /api/agent/sessions` returns `201 { sessionId, token, issuedAtMs, serverNowMs }`. The token is 32 random bytes, and the server stores only its hash. The server does not set the timeline epoch: the browser picks `sessionEpochMs = Date.now()` at the start click and passes it to `bridge.start()`, so every timestamp uses one clock (implemented in TASK-3.27).
 - B writes `authorize(request, sessionId)` for A's screen module. With a session id it checks `Authorization: Bearer <token>` against that session; with `null` (A calls it before reading a body) it checks that the token is valid for some live session. `API_TOKEN` never reaches the browser.
 - `POST /api/agent/sessions` itself is unauthenticated, but origin-checked against `ALLOWED_ORIGINS` and rate-limited per IP.
 - The bridge sends the token through `authHeader()` (2.1).

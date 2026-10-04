@@ -7,6 +7,7 @@ status: In Progress
 assignee:
   - '@qwadratic'
 created_date: '2026-10-04 00:55'
+updated_date: '2026-10-04 01:09'
 labels:
   - stream-b
   - api
@@ -18,7 +19,7 @@ ordinal: 40000
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Stream A asked in Hive (4 Oct 00:41) for B's auth/mount/session implementation so the real capture can reach the API. apps/api/agent/index.ts exports mount(app) for A's createApi registry and authorize(request, sessionId|null) for A's screen module (doc-9 4.1-4.2): POST /api/agent/sessions returns {sessionId, sessionEpochMs, token} (32 random bytes, only the hash stored, origin-checked, rate-limited); GET /api/agent/elevenlabs/signed-url (server key, never logged); POST /api/agent/sessions/:id/events and /finish ported from infra/placeholder-api with the same limits. No global API token in the browser.
+Stream A asked in Hive (4 Oct 00:41) for B's auth/mount/session implementation so the real capture can reach the API. apps/api/agent/index.ts exports mount(app) (and agentModule) for A's createApi registry and authorize(request, sessionId|null) for A's screen module (doc-9 4.1-4.2): POST /api/agent/sessions returns 201 {sessionId, token, issuedAtMs, serverNowMs} (32 random bytes, only the hash stored, origin-checked, per-IP rate-limited; the browser picks sessionEpochMs at the start click); GET /api/agent/elevenlabs/signed-url (server key, never logged); POST /api/agent/sessions/:id/events and /finish ported from infra/placeholder-api with the same limits, plus rotation and the API_TOKEN admin routes. No global API token in the browser.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
