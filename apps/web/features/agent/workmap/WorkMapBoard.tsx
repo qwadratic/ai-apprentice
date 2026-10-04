@@ -53,6 +53,35 @@ export interface WorkMapBoardProps {
   inlineMoment?: boolean;
   /** Pre-select a card or a frame by key: "step:step-4", "guardrail:g1", "gap:q-R-1" or "frame:obs-005". */
   initialSelection?: string | null;
+  /** The map's business processes (fromGenericMap): with two or more, steps and guardrails are grouped under their titles. */
+  processes?: readonly BoardProcess[];
+}
+
+/** A business process of the map: its title and the ids of its steps and rules. */
+export interface BoardProcess { id: string; title: string; stepIds: readonly string[]; guardrailIds: readonly string[] }
+
+/**
+ * Cards grouped under the map's processes, in the processes' order; a card no process names goes under the first. Null with
+ * fewer than two processes: the board then renders one plain list, exactly as before processes existed.
+ */
+function byProcess<T extends { id: string }>(
+  cards: readonly T[],
+  processes: readonly BoardProcess[] | undefined,
+  idsOf: (p: BoardProcess) => readonly string[],
+): Array<{ id: string; title: string; cards: T[] }> | null {
+  if (processes === undefined || processes.length < 2) return null;
+  const groups = processes.map((p) => ({ id: p.id, title: p.title, ids: idsOf(p), cards: [] as T[] }));
+  for (const c of cards) (groups.find((g) => g.ids.includes(c.id)) ?? groups[0])?.cards.push(c);
+  return groups.filter((g) => g.cards.length > 0).map((g) => ({ id: g.id, title: g.title, cards: g.cards }));
+}
+
+function ProcessGroup(props: { id: string; title: string; children: ReactNode }): ReactNode {
+  return (
+    <div className="wm-process" data-process={props.id}>
+      <h4 className="wm-process__title">{props.title}</h4>
+      <ol className="wm-cards">{props.children}</ol>
+    </div>
+  );
 }
 
 type MediaState = { state: 'loading' } | { state: 'ready'; url: string; synthetic: boolean } | { state: 'missing' };
@@ -284,6 +313,147 @@ export function WorkMapBoard(props: WorkMapBoardProps): ReactNode {
 
   const stateClass = (key: string): string => (selected === key ? ' is-selected' : frameCards.has(key) ? ' is-related' : '');
 
+  const stepItem = (s: StepCard): ReactNode => (
+    <li key={s.id}>
+      <article
+        className={`wm-card wm-card--step${s.judgment ? ' wm-card--judgment' : ''}${stateClass(cardKey(s))}`}
+        data-card={cardKey(s)}
+        data-status={s.status}
+        {...clickable(() => selectCard(s))}
+      >
+        <Thumb media={s.moment ? media[s.moment.evidenceId] : undefined} alt={`Screen moment of step ${s.number}`} />
+        <div className="wm-card__body">
+          <header className="wm-card__head">
+            <span className="wm-num">{s.number}</span>
+            <span className="wm-kind">{s.judgment ? 'Judgment call' : 'Action'}</span>
+            <time className="wm-time">{formatClock(s.atMs)}</time>
+            <StatusPill status={s.status} note={s.statusNote} />
+          </header>
+          <h4 className="wm-card__title">{s.action}</h4>
+          <p className="wm-goal">{s.goal}</p>
+          {s.decision && (
+            <p className="wm-line">
+              <span className="wm-label">Decision</span> {s.decision}
+            </p>
+          )}
+          {s.reason && (
+            <p className="wm-line">
+              <span className="wm-label">Reason</span> {s.reason}
+            </p>
+          )}
+          <Quote quote={s.quote} atMs={s.quoteAtMs} />
+          {s.judgment && s.quote === null && <p className="wm-missing">No reason in the expert's words yet.</p>}
+          {(s.scope || s.requiredFields.length > 0 || s.exceptions.length > 0) && (
+            <dl className="wm-meta">
+              {s.scope && (
+                <div>
+                  <dt>Scope</dt>
+                  <dd>{s.scope}</dd>
+                </div>
+              )}
+              {s.requiredFields.length > 0 && (
+                <div>
+                  <dt>Required</dt>
+                  <dd>
+                    <Fields fields={s.requiredFields} />
+                  </dd>
+                </div>
+              )}
+              {s.exceptions.length > 0 && (
+                <div>
+                  <dt>Exceptions</dt>
+                  <dd>{s.exceptions.join(' ')}</dd>
+                </div>
+              )}
+            </dl>
+          )}
+          <footer className="wm-card__foot">
+            <FrameLinks frameIds={s.frameIds} frames={frames} />
+          </footer>
+          <ConfirmHook card={s} onConfirmRequest={props.onConfirmRequest} />
+        </div>
+      </article>
+    </li>
+  );
+  const guardrailItem = (g: GuardrailCard): ReactNode => (
+    <li key={g.id}>
+      <article
+        className={`wm-card wm-card--guardrail${g.unexplained ? ' wm-card--habit' : ''}${stateClass(cardKey(g))}`}
+        data-card={cardKey(g)}
+        data-status={g.status}
+        {...clickable(() => selectCard(g))}
+      >
+        <div className="wm-card__body">
+          <header className="wm-card__head">
+            <span className="wm-shield" aria-hidden="true" />
+            <span className="wm-kind">
+              {g.id.toUpperCase()} · {g.triggerLabel}
+            </span>
+            <StatusPill status={g.status} note={g.statusNote} />
+          </header>
+          {g.unexplained && <p className="wm-missing">{g.statusNote}.</p>}
+          <p className="wm-line wm-line--when">
+            <span className="wm-label">When</span> {g.condition}
+          </p>
+          <p className="wm-line wm-line--then">
+            <span className="wm-label">Then</span> {g.requiredAction}
+          </p>
+          <dl className="wm-meta">
+            <div>
+              <dt>Scope</dt>
+              <dd>{g.scope}</dd>
+            </div>
+            {g.requiredFields.length > 0 && (
+              <div>
+                <dt>Required</dt>
+                <dd>
+                  <Fields fields={g.requiredFields} />
+                </dd>
+              </div>
+            )}
+            <div>
+              <dt>Exceptions</dt>
+              <dd>{g.exceptions.length > 0 ? g.exceptions.join(' ') : 'None stated'}</dd>
+            </div>
+            <div>
+              <dt>Reason</dt>
+              <dd className={g.reason === null ? 'wm-unknown' : ''}>{g.reason ?? 'Unknown'}</dd>
+            </div>
+            {g.escalateTo && (
+              <div>
+                <dt>Ask</dt>
+                <dd>{g.escalateTo}</dd>
+              </div>
+            )}
+            {g.duration && (
+              <div>
+                <dt>Holds</dt>
+                <dd>{g.duration}</dd>
+              </div>
+            )}
+          </dl>
+          <Quote quote={g.quote} atMs={g.quoteAtMs} />
+          {g.frameIds.length > 0 && (
+            <div className="wm-evidence-strip">
+              {g.frameIds.map((id) => {
+                const f = frames.get(id);
+                return f ? (
+                  <Thumb key={id} media={f.evidenceId ? media[f.evidenceId] : undefined} alt={`Evidence frame ${f.index}`} time={formatClock(f.atMs)} />
+                ) : null;
+              })}
+            </div>
+          )}
+          <footer className="wm-card__foot">
+            <FrameLinks frameIds={g.frameIds} frames={frames} />
+          </footer>
+          <ConfirmHook card={g} onConfirmRequest={props.onConfirmRequest} />
+        </div>
+      </article>
+    </li>
+  );
+  const stepGroups = byProcess(board.steps, props.processes, (p) => p.stepIds);
+  const ruleGroups = byProcess(board.guardrails, props.processes, (p) => p.guardrailIds);
+
   const versionLabel = board.confirmed ? 'confirmed' : board.mapStatus;
   const inline = props.inlineMoment !== false;
   const title = props.title ?? 'Briefing board';
@@ -418,70 +588,11 @@ export function WorkMapBoard(props: WorkMapBoardProps): ReactNode {
           <h3 id="wm-steps-h" className="wm-h3">
             Steps <span className="wm-h3__sub">{board.counts.judgmentCalls} judgment calls</span>
           </h3>
-          <ol className="wm-cards">
-            {board.steps.map((s) => (
-              <li key={s.id}>
-                <article
-                  className={`wm-card wm-card--step${s.judgment ? ' wm-card--judgment' : ''}${stateClass(cardKey(s))}`}
-                  data-card={cardKey(s)}
-                  data-status={s.status}
-                  {...clickable(() => selectCard(s))}
-                >
-                  <Thumb media={s.moment ? media[s.moment.evidenceId] : undefined} alt={`Screen moment of step ${s.number}`} />
-                  <div className="wm-card__body">
-                    <header className="wm-card__head">
-                      <span className="wm-num">{s.number}</span>
-                      <span className="wm-kind">{s.judgment ? 'Judgment call' : 'Action'}</span>
-                      <time className="wm-time">{formatClock(s.atMs)}</time>
-                      <StatusPill status={s.status} note={s.statusNote} />
-                    </header>
-                    <h4 className="wm-card__title">{s.action}</h4>
-                    <p className="wm-goal">{s.goal}</p>
-                    {s.decision && (
-                      <p className="wm-line">
-                        <span className="wm-label">Decision</span> {s.decision}
-                      </p>
-                    )}
-                    {s.reason && (
-                      <p className="wm-line">
-                        <span className="wm-label">Reason</span> {s.reason}
-                      </p>
-                    )}
-                    <Quote quote={s.quote} atMs={s.quoteAtMs} />
-                    {s.judgment && s.quote === null && <p className="wm-missing">No reason in the expert's words yet.</p>}
-                    {(s.scope || s.requiredFields.length > 0 || s.exceptions.length > 0) && (
-                      <dl className="wm-meta">
-                        {s.scope && (
-                          <div>
-                            <dt>Scope</dt>
-                            <dd>{s.scope}</dd>
-                          </div>
-                        )}
-                        {s.requiredFields.length > 0 && (
-                          <div>
-                            <dt>Required</dt>
-                            <dd>
-                              <Fields fields={s.requiredFields} />
-                            </dd>
-                          </div>
-                        )}
-                        {s.exceptions.length > 0 && (
-                          <div>
-                            <dt>Exceptions</dt>
-                            <dd>{s.exceptions.join(' ')}</dd>
-                          </div>
-                        )}
-                      </dl>
-                    )}
-                    <footer className="wm-card__foot">
-                      <FrameLinks frameIds={s.frameIds} frames={frames} />
-                    </footer>
-                    <ConfirmHook card={s} onConfirmRequest={props.onConfirmRequest} />
-                  </div>
-                </article>
-              </li>
-            ))}
-          </ol>
+          {stepGroups === null ? (
+            <ol className="wm-cards">{board.steps.map(stepItem)}</ol>
+          ) : (
+            stepGroups.map((g) => <ProcessGroup key={g.id} id={g.id} title={g.title}>{g.cards.map(stepItem)}</ProcessGroup>)
+          )}
         </section>
 
         <aside className="wm-col wm-col--side">
@@ -535,84 +646,11 @@ export function WorkMapBoard(props: WorkMapBoardProps): ReactNode {
             <h3 id="wm-guard-h" className="wm-h3">
               Guardrails <span className="wm-h3__sub">when to stop or ask</span>
             </h3>
-            <ol className="wm-cards">
-              {board.guardrails.map((g) => (
-                <li key={g.id}>
-                  <article
-                    className={`wm-card wm-card--guardrail${g.unexplained ? ' wm-card--habit' : ''}${stateClass(cardKey(g))}`}
-                    data-card={cardKey(g)}
-                    data-status={g.status}
-                    {...clickable(() => selectCard(g))}
-                  >
-                    <div className="wm-card__body">
-                      <header className="wm-card__head">
-                        <span className="wm-shield" aria-hidden="true" />
-                        <span className="wm-kind">
-                          {g.id.toUpperCase()} · {g.triggerLabel}
-                        </span>
-                        <StatusPill status={g.status} note={g.statusNote} />
-                      </header>
-                      {g.unexplained && <p className="wm-missing">{g.statusNote}.</p>}
-                      <p className="wm-line wm-line--when">
-                        <span className="wm-label">When</span> {g.condition}
-                      </p>
-                      <p className="wm-line wm-line--then">
-                        <span className="wm-label">Then</span> {g.requiredAction}
-                      </p>
-                      <dl className="wm-meta">
-                        <div>
-                          <dt>Scope</dt>
-                          <dd>{g.scope}</dd>
-                        </div>
-                        {g.requiredFields.length > 0 && (
-                          <div>
-                            <dt>Required</dt>
-                            <dd>
-                              <Fields fields={g.requiredFields} />
-                            </dd>
-                          </div>
-                        )}
-                        <div>
-                          <dt>Exceptions</dt>
-                          <dd>{g.exceptions.length > 0 ? g.exceptions.join(' ') : 'None stated'}</dd>
-                        </div>
-                        <div>
-                          <dt>Reason</dt>
-                          <dd className={g.reason === null ? 'wm-unknown' : ''}>{g.reason ?? 'Unknown'}</dd>
-                        </div>
-                        {g.escalateTo && (
-                          <div>
-                            <dt>Ask</dt>
-                            <dd>{g.escalateTo}</dd>
-                          </div>
-                        )}
-                        {g.duration && (
-                          <div>
-                            <dt>Holds</dt>
-                            <dd>{g.duration}</dd>
-                          </div>
-                        )}
-                      </dl>
-                      <Quote quote={g.quote} atMs={g.quoteAtMs} />
-                      {g.frameIds.length > 0 && (
-                        <div className="wm-evidence-strip">
-                          {g.frameIds.map((id) => {
-                            const f = frames.get(id);
-                            return f ? (
-                              <Thumb key={id} media={f.evidenceId ? media[f.evidenceId] : undefined} alt={`Evidence frame ${f.index}`} time={formatClock(f.atMs)} />
-                            ) : null;
-                          })}
-                        </div>
-                      )}
-                      <footer className="wm-card__foot">
-                        <FrameLinks frameIds={g.frameIds} frames={frames} />
-                      </footer>
-                      <ConfirmHook card={g} onConfirmRequest={props.onConfirmRequest} />
-                    </div>
-                  </article>
-                </li>
-              ))}
-            </ol>
+            {ruleGroups === null ? (
+              <ol className="wm-cards">{board.guardrails.map(guardrailItem)}</ol>
+            ) : (
+              ruleGroups.map((g) => <ProcessGroup key={g.id} id={g.id} title={g.title}>{g.cards.map(guardrailItem)}</ProcessGroup>)
+            )}
           </section>
         </aside>
       </div>

@@ -22,4 +22,4 @@ export type {
 } from './model.ts';
 export { syntheticEvidenceResolver, syntheticFrameUrl } from './synthetic-frames.ts';
 export { fromGenericMap } from './generic.ts';
-export type { GenericBoard, GenericComment } from './generic.ts';
+export type { GenericBoard, GenericComment, GenericProcess } from './generic.ts';
