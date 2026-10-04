@@ -4,6 +4,9 @@ import { JourneyRail } from '../journey/JourneyRail.tsx';
 import { ClipaLogo } from './ClipaLogo.tsx';
 import { ToneMenu } from './ToneMenu.tsx';
 
+/** The latest macOS build, published by macos-build.yml on every push to main under one fixed release tag. */
+export const MAC_DOWNLOAD_URL = 'https://github.com/qwadratic/clipa/releases/download/clipa-macos-latest/Clipa-macos.zip';
+
 interface HeaderProps {
   debugOpen: boolean;
   onToggleDebug: () => void;
@@ -11,7 +14,7 @@ interface HeaderProps {
   headerRef?: Ref<HTMLElement>;
 }
 
-/** The header: the Clipa wordmark, the journey rail (the mode switcher), Off the record, Clipa's tone and Debug. */
+/** The header: the Clipa wordmark, the journey rail (the mode switcher), the macOS download, Off the record, Clipa's tone and Debug. */
 export function Header({ debugOpen, onToggleDebug, headerRef }: HeaderProps) {
   const { controller } = useShell();
   const offRecord = useShellState((s) => s.offRecord);
@@ -26,6 +29,9 @@ export function Header({ debugOpen, onToggleDebug, headerRef }: HeaderProps) {
       <JourneyRail />
 
       <div className="as-header__tools">
+        <a className="as-btn as-btn--link" href={MAC_DOWNLOAD_URL} title="Clipa for macOS: unzip, then xattr -dr com.apple.quarantine Clipa.app">
+          macOS app
+        </a>
         <button
           type="button"
           className={`as-btn as-btn--off${offRecord ? ' is-on' : ''}`}

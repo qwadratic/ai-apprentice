@@ -72,6 +72,7 @@
 .apprentice-shell .as-logo { display: inline-flex; align-items: center; }
 .apprentice-shell .as-logo svg { display: block; flex: none; height: 64px; width: auto; }
 .apprentice-shell .as-header__tools { grid-area: tools; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.apprentice-shell a.as-btn--link { display: inline-flex; align-items: center; text-decoration: none; color: inherit; }
 
 /* Visible to screen readers only. */
 .apprentice-shell .as-sr {
