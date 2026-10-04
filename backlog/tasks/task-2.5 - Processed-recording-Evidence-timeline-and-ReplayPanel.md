@@ -1,11 +1,11 @@
 ---
 id: TASK-2.5
 title: Processed recording Evidence timeline and ReplayPanel
-status: To Do
+status: In Progress
 assignee:
   - '@kigulx'
 created_date: '2026-10-03 21:16'
-updated_date: '2026-10-03 22:29'
+updated_date: '2026-10-04 03:06'
 labels:
   - stream-a
   - screen
@@ -37,3 +37,9 @@ Follow-up for capture/privacy after its capture handoff. Own packages/screen/rec
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Attach a processed-only segmented recorder through existing capture lifecycle hooks, with explicit format, finalization, and chunk storage failures. 2. Implement a pure session-relative segment timeline and a mountable ReplayPanel with evidence selection and unavailable states. 3. Verify actual browser video pixels and pause/mask/resize boundaries, timeline mapping, and storage lifecycle. 4. Publish one reviewed TASK-2.5 PR with exact imports and integration instructions for the B-owned shell; no shared contract or occupied runtime edits.
+<!-- SECTION:PLAN:END -->
