@@ -18,6 +18,9 @@ export const PULLS_API_URL = `https://api.github.com/repos/${REPO}/pulls?state=o
 // The VM API. Its CORS allow-list holds this page's origin (https://qwadratic.github.io), the same as for the lab.
 export const API_BASE = 'https://apprentice.exe.xyz';
 export const HEALTH_URL = `${API_BASE}/health`;
+// Runner state and the shas: apps/api reports them here (the infra ops module). The placeholder API that served
+// the VM before has them in /health itself and answers 404 here; status.ts then falls back to /health.
+export const VM_HEALTH_URL = `${API_BASE}/ops/vm-health`;
 export const OPS_STATUS_URL = `${API_BASE}/ops/deploy/status`;
 
 // Written next to this page by release.yml: {"sha": "<40 hex>", "at": "<ISO time>", "run": "<run url>"}.
