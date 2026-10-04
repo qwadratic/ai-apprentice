@@ -129,7 +129,7 @@ export function checkpoint(input: CheckpointInput): TutorVerdict {
 
   const open = mine.find((g) => g.status !== "confirmed");
   if (open) {
-    const why = open.unexplained
+    const why = open.unexplained || open.reasonUnknown
       ? "the expert said they do not know why"
       : open.status === "conflicted"
         ? "the expert gave conflicting statements about it"

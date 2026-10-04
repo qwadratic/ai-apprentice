@@ -16,6 +16,14 @@ export interface ExtractionInput {
   targetId: string | null;
   /** The customer the question concerned, or null. */
   entityRef: string | null;
+  /** The question as it was asked; helps an LLM extractor. */
+  questionText?: string | null;
+  /** Customer refs seen on screen: a spoken "customer seven" is mapped onto one of them, never invented. */
+  knownRefs?: readonly string[];
+  /** Spoken phrases (lower case) already resolved to refs by an EntityResolver. */
+  aliases?: Readonly<Record<string, string>>;
+  /** Names of the order fields the screen shows (not their values). */
+  orderFields?: readonly string[];
 }
 
 export interface AnswerExtraction {

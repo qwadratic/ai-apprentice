@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { test } from "node:test";
 import { buildTeachBack, planFollowUps, workingMap } from "../src/index.ts";
-import { buildState, expertAnswer, expertTeachback, startLearnSession } from "./brain-helpers.ts";
+import { arr, buildState, expertAnswer, expertTeachback, readJson, rec, startLearnSession, str } from "./brain-helpers.ts";
 
 const SRC = new URL("../src/", import.meta.url);
 
@@ -40,7 +40,15 @@ const words = (s: string): string[] =>
     .split(/\s+/)
     .filter(Boolean);
 
-const ANSWERS = ["reason", "essentials", "guardrail", "scope", "exception", "why_stop", "duration"].map(expertAnswer).concat(expertTeachback("correction"));
+const paraphrases = rec(readJson("sim/paraphrases.json"));
+const ANSWERS = ["reason", "essentials", "guardrail", "scope", "exception", "why_stop", "duration"]
+  .map(expertAnswer)
+  .concat(
+    expertTeachback("correction"),
+    arr(paraphrases.reasonParaphrases).map((p) => str(rec(p).text)),
+    arr(paraphrases.corrections).map(str),
+    str(paraphrases.spokenScope),
+  );
 
 function grams(text: string, n = 4): string[] {
   const w = words(text);

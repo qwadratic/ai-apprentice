@@ -39,3 +39,47 @@ export function factPresent(text: string, order: OrderFacts, key: FactKey): bool
 export function factsPresentIn(text: string, order: OrderFacts): FactKey[] {
   return FACT_KEYS.filter((k) => factPresent(text, order, k));
 }
+
+/** A stronger normalisation for change detection and loose mentions: case, whitespace and punctuation are noise. */
+export function normalizeLoose(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+/**
+ * The facts of an observation as a comparable string. Strings are normalised (case, whitespace, punctuation), the OCR text of
+ * attachments is left out (it differs from frame to frame), and keys are sorted. Two observations with the same fingerprint
+ * differ only by noise.
+ */
+export function factsFingerprint(facts: unknown): string {
+  const walk = (v: unknown): unknown => {
+    if (typeof v === "string") return normalizeLoose(v);
+    if (Array.isArray(v)) return v.map(walk);
+    if (typeof v === "object" && v !== null) {
+      return Object.fromEntries(
+        Object.entries(v)
+          .filter(([k]) => k !== "ocrText")
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([k, x]) => [k, walk(x)]),
+      );
+    }
+    return v;
+  };
+  return JSON.stringify(walk(facts));
+}
+
+/**
+ * True when the text mentions the value, tolerant of case, spacing, line breaks and punctuation. A long value (an address)
+ * also counts when its first comma-separated part is there ("14 Sample Lane" for "14 Sample Lane, 1010 Exampletown").
+ */
+export function valueMentioned(text: string, value: string | null): boolean {
+  if (value === null) return false;
+  const haystack = normalizeLoose(text);
+  const full = normalizeLoose(value);
+  if (full.length < 4) return false;
+  if (haystack.includes(full)) return true;
+  const first = normalizeLoose(value.split(",")[0] ?? "");
+  return first.length >= 8 && first.split(" ").length >= 2 && haystack.includes(first);
+}

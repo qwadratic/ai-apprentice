@@ -119,6 +119,8 @@ export interface MapGuardrailData {
   /** Open points kept as unknown instead of being guessed. */
   unknowns: string[];
   reason: string | null;
+  /** The expert was asked why and said they do not know. Not asked again. */
+  reasonUnknown: boolean;
   /** The expert's own words that carry the reason (or, without one, the statement of the rule). */
   quote: string | null;
   quoteAtMs: number | null;

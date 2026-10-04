@@ -5,6 +5,7 @@
 //   agent   Clipa is not speaking (immediately quiet)
 // Pure bookkeeping: time is always passed in, nothing is scheduled.
 import type { ScreenObservation } from "@apprentice/contracts";
+import { factsFingerprint } from "../knowledge/facts.ts";
 import type { PolicyReason, QuietSnapshot, QuietThresholds } from "./types.ts";
 
 export class QuietTracker {
@@ -22,7 +23,8 @@ export class QuietTracker {
       this.lastInputAtMs = Math.max(this.lastInputAtMs ?? 0, obs.facts.lastInputAtMs);
       return;
     }
-    const facts = JSON.stringify(obs.facts);
+    // Noise (OCR whitespace, case, punctuation, attachment text) is not a change on screen.
+    const facts = factsFingerprint(obs.facts);
     if (this.lastFacts.get(obs.kind) === facts) return;
     this.lastFacts.set(obs.kind, facts);
     this.lastChangeAtMs = Math.max(this.lastChangeAtMs ?? 0, obs.timestampMs);

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "note": "Other ways the scripted expert might answer. Read only by tests, never by agent code. Synthetic.",
+  "reasonParaphrases": [
+    { "text": "He asked for it in writing, his phone blocks pictures in our emails.", "mentions": "phone" },
+    { "text": "His phone can't show images, so I write the details out myself.", "mentions": "phone" },
+    { "text": "Customer_07 can't open pictures on his phone, that's why I handle it myself.", "mentions": "phone" },
+    { "text": "It's his phone. It blocks pictures in our emails.", "mentions": "phone" },
+    { "text": "He asked for it in writing because his phone blocks pictures.", "mentions": "phone" }
+  ],
+  "confirmations": ["Okay, that's correct.", "Sounds good.", "Uh, yes, that's right."],
+  "corrections": [
+    "Almost. One correction: the order number goes in as well, not only the address and the window.",
+    "Yes, but the order number is needed too.",
+    "No, that's not right, it is for every customer."
+  ],
+  "unclear": ["Hmm.", "I'm not sure."],
+  "noReasonAnswers": ["Hm.", "No idea why, I just do it.", "Just because."],
+  "spokenCustomers": ["customer seven", "Customer 07", "customer zero seven", "customer_7", "Customer 7"],
+  "spokenScope": "Only customer seven gets it. Customer nine asks for something similar, but I never found out why.",
+  "essentialsWithoutFields": "Everything I need for the delivery.",
+  "essentialsInOtherWords": "The address and the time."
+}

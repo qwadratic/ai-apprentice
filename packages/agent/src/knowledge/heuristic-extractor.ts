@@ -1,30 +1,35 @@
 // Heuristic answer extraction: sentence splitting and keyword cues. No model, no network.
 // Its vocabulary is generic (reason words, scope words, the names of order fields); it contains no customer rule.
-// It is deliberately simple and has known blind spots (negation, pronouns, paraphrase); an LLM extractor behind the
-// same AnswerExtractor interface replaces it later.
+// It is deliberately simple and has known blind spots (negation, pronouns, deep paraphrase); an LLM extractor behind the
+// same AnswerExtractor interface (llm/) replaces it where it is available, and falls back to this one.
+import { mentionedRefs, resolveAliases } from "./entities.ts";
+import type { EntityResolver } from "./entities.ts";
 import type { AnswerExtraction, AnswerExtractor, ExtractionInput } from "./extractor.ts";
 import { FACT_KEYS } from "./types.ts";
 import type { FactKey, MapExceptionData } from "./types.ts";
 
 const FACT_PATTERNS: ReadonlyArray<readonly [FactKey, RegExp]> = [
-  ["deliveryAddress", /\baddress\b/i],
-  ["deliveryWindow", /\b(window|time slot|delivery time)\b/i],
-  ["orderId", /\border (number|id|no\.?)\b|\bORD-\d+/i],
+  ["deliveryAddress", /\b(address|street)\b/i],
+  ["deliveryWindow", /\b(window|time ?slot|delivery (time|date|slot|day)|time|date)\b/i],
+  ["orderId", /\border (number|id|no\.?|ref(erence)?)\b|\bORD-\d+|\border ?#/i],
 ];
 
-const REASON_CUE = /\b(because|since|so that|that's why|the reason)\b/i;
+/** The reason follows the cue: "because the customer asked". */
+const REASON_CUE = /\b(because|since|so that|the reason( is)?|due to|owing to|on account of)\b/i;
+/** The reason comes before the cue: "the customer asked, that is why I ...". */
+const REASON_BEFORE_CUE = /\b(that's why|that is why|which is why|this is why|that's the reason|hence|therefore)\b/i;
 const UNKNOWN_REASON_CUE =
-  /\b(never (found out|asked|learned|knew)|no idea|don't know why|do not know why|not sure why|can't say why)\b/i;
+  /\b(never (found out|asked|learned|knew)|no idea|don't know why|do not know why|not sure why|can't say why|dunno|idk|no clue|just because|no (particular |real )?reason)\b/i;
 const EXCEPTION_CUE = /\b(fine|ok|okay|allowed|acceptable|no problem|doesn't matter|does not matter|on top)\b/i;
 const RETRACT_CUE = /\b(actually,? (no|not)|not needed any more|no longer|ignore that|scratch that|never mind)\b/i;
 const CONFIRM_CUE = /^\s*(yes|yep|yeah|correct|right|exactly|that's (right|correct)|confirmed)\b/i;
 const ALL_CUE = /\b(all|every|each|any) (other )?customers?\b|\beveryone\b|\bin general\b/i;
 const NOT_ALL_CUE = /\bno (other )?customers?\b|\bnot (for )?(all|every|other)\b/i;
 const ONLY_CUE = /\b(only|just)\b/i;
-const CUSTOMER_REF = /\bcustomer_\d+\b/gi;
 const STOP_CUE = /\bif (.+?),? I (stop|hold|ask|check|escalate)\b/i;
 const WHO_CUE =
   /\b(?:ask|check with|call|escalate to|tell|ping)\s+((?:the|my)\s+[a-z]+(?:\s+[a-z]+)?)(?=\s+(?:first|before|about)|[.,;!?]|$)/i;
+const LEADING_FILLER = /^(?:(?:well|so|um|uh|er|hmm|yeah|yes|yep|okay|ok|right|sure|honestly|basically|actually|look)\b[\s,.-]*)+/i;
 
 export function splitSentences(text: string): string[] {
   return text
@@ -44,8 +49,11 @@ export function extractFactsOrAll(text: string): FactKey[] {
   return /\b(everything|all of it|all the details)\b/i.test(text) ? [...FACT_KEYS] : extractFacts(text);
 }
 
-function customerRefs(text: string): string[] {
-  return [...text.matchAll(CUSTOMER_REF)].map((m) => m[0].toLowerCase());
+const stripEnd = (s: string): string => s.replace(/[\s.!?,;:-]+$/, "").trim();
+
+/** Who the expert asks or defers to in a sentence ("ask the finance lead first"), or null. */
+export function findEscalateTo(text: string): string | null {
+  return WHO_CUE.exec(text)?.[1]?.trim() ?? null;
 }
 
 function clauseAfter(sentence: string, cue: RegExp): string | null {
@@ -59,9 +67,18 @@ function clauseAfter(sentence: string, cue: RegExp): string | null {
   return clause && clause.length > 2 ? clause : null;
 }
 
+function clauseBefore(sentence: string, cue: RegExp): string | null {
+  const m = cue.exec(sentence);
+  if (!m) return null;
+  const clause = stripEnd(sentence.slice(0, m.index));
+  return clause.length > 2 ? clause : null;
+}
+
 export function heuristicExtract(input: ExtractionInput): AnswerExtraction {
   const text = input.text.trim();
   const sentences = splitSentences(text);
+  const mentions = (s: string): string[] => mentionedRefs(s, { knownRefs: input.knownRefs, aliases: input.aliases });
+  const asksWhy = input.topic === "reason" || input.topic === "why_stop";
 
   let rationale: string | null = null;
   let reasonQuote: string | null = null;
@@ -78,9 +95,9 @@ export function heuristicExtract(input: ExtractionInput): AnswerExtraction {
   let namedCustomerSentence: string | null = null;
   const unknowns: string[] = [];
 
-  for (const s of sentences) {
+  sentences.forEach((s, i) => {
     const unknownWhy = UNKNOWN_REASON_CUE.test(s);
-    const refs = customerRefs(s);
+    const refs = mentions(s);
     if (unknownWhy) {
       reasonUnknown = true;
       for (const ref of refs) {
@@ -92,11 +109,21 @@ export function heuristicExtract(input: ExtractionInput): AnswerExtraction {
       for (const ref of refs) scopeCustomers.add(ref);
       if (refs.length > 0) namedCustomerSentence ??= s;
     }
-    if (REASON_CUE.test(s) && rationale === null && !unknownWhy) {
-      const clause = clauseAfter(s, REASON_CUE);
-      if (clause) {
-        rationale = clause;
+    if (rationale === null && !unknownWhy) {
+      const after = REASON_CUE.test(s) ? clauseAfter(s, REASON_CUE) : null;
+      if (after) {
+        rationale = after;
         reasonQuote = s;
+      } else if (REASON_BEFORE_CUE.test(s)) {
+        const before = clauseBefore(s, REASON_BEFORE_CUE);
+        const previous = sentences[i - 1];
+        if (before) {
+          rationale = before;
+          reasonQuote = s;
+        } else if (previous !== undefined && stripEnd(previous).length > 2) {
+          rationale = stripEnd(previous);
+          reasonQuote = previous;
+        }
       }
     }
     if (ALL_CUE.test(s) && !NOT_ALL_CUE.test(s)) {
@@ -115,6 +142,17 @@ export function heuristicExtract(input: ExtractionInput): AnswerExtraction {
     }
     const who = WHO_CUE.exec(s);
     if (who && escalateTo === null) escalateTo = who[1]?.trim() ?? null;
+  });
+
+  const retracts = RETRACT_CUE.test(text);
+  // A "why" question was asked and the answer gives something other than "I don't know": that something is the reason,
+  // whether or not the expert said "because". The whole answer (minus leading filler) is kept in their own words.
+  if (asksWhy && rationale === null && !reasonUnknown && !retracts) {
+    const body = stripEnd(text.replace(LEADING_FILLER, ""));
+    if (body.split(/\s+/).filter(Boolean).length >= 3) {
+      rationale = body;
+      reasonQuote = text;
+    }
   }
 
   // A scope answer that names customers is explicit even without "only" or "all".
@@ -176,7 +214,7 @@ export function heuristicExtract(input: ExtractionInput): AnswerExtraction {
     stopCondition,
     escalateTo,
     unexplainedCustomers,
-    retracts: RETRACT_CUE.test(text),
+    retracts,
     confirms: CONFIRM_CUE.test(text),
     confidence: evidenceOfClaim ? 0.7 : 0.4,
   };
@@ -184,7 +222,13 @@ export function heuristicExtract(input: ExtractionInput): AnswerExtraction {
 
 export class HeuristicAnswerExtractor implements AnswerExtractor {
   readonly name = "heuristic";
-  extract(input: ExtractionInput): Promise<AnswerExtraction> {
-    return Promise.resolve(heuristicExtract(input));
+  private readonly resolver: EntityResolver | undefined;
+  /** An optional EntityResolver resolves spoken customer phrases the numeric scheme cannot ("customer Kowalski"). */
+  constructor(resolver?: EntityResolver) {
+    this.resolver = resolver;
+  }
+  async extract(input: ExtractionInput): Promise<AnswerExtraction> {
+    const aliases = { ...(await resolveAliases(input.text, input.knownRefs, this.resolver)), ...input.aliases };
+    return heuristicExtract({ ...input, aliases });
   }
 }

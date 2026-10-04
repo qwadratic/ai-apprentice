@@ -30,6 +30,8 @@ import type {
 interface GuardrailExtra {
   /** Facts the expert named as essential, or null when not asked or not said. */
   essential: FactKey[] | null;
+  /** Facts the expert did not name but the screen showed typed for this customer, fixed the first time they were needed. */
+  inferred: FactKey[] | null;
   /** Facts added by a correction. */
   corrected: FactKey[];
   /** A guardrail that copies another one's requirements (a similar request the expert could not explain). */
@@ -51,8 +53,13 @@ interface DraftData {
   guardrailSeq: number;
   order: OrderFacts | null;
   prevEmail: EmailDraftFacts | null;
+  /** Facts typed into the message for the order now open. */
   observedBodyFacts: FactKey[];
   bodyStepId: string | null;
+  /** Customer refs seen on screen, in the order they appeared. */
+  customers: string[];
+  /** Per customer: the facts the expert typed into a message. Never reset when the next order opens. */
+  typedFacts: Record<string, FactKey[]>;
 }
 
 export interface MapState {
@@ -111,6 +118,8 @@ export function createMapState(): MapState {
     prevEmail: null,
     observedBodyFacts: [],
     bodyStepId: null,
+    customers: [],
+    typedFacts: {},
   };
   return deepFreeze({ draft, versions: [] as WorkMap[] });
 }
@@ -146,6 +155,7 @@ function reduceObservation(d: DraftData, obs: ScreenObservation): void {
     const f = obs.facts;
     const same = d.order !== null && d.order.orderId === f.orderId && d.order.customerRef === f.customerRef;
     d.order = f;
+    if (f.customerRef !== null && !d.customers.includes(f.customerRef)) d.customers.push(f.customerRef);
     if (same) return;
     d.prevEmail = null;
     d.observedBodyFacts = [];
@@ -201,6 +211,11 @@ function reduceObservation(d: DraftData, obs: ScreenObservation): void {
     const found = factsPresentIn(email.bodyText, d.order);
     const before = d.observedBodyFacts.length;
     for (const f of found) if (!d.observedBodyFacts.includes(f)) d.observedBodyFacts.push(f);
+    const who = d.order.customerRef;
+    if (who !== null) {
+      const typed = (d.typedFacts[who] ??= []);
+      for (const f of found) if (!typed.includes(f)) typed.push(f);
+    }
     if (found.length > 0 && (d.observedBodyFacts.length > before || d.bodyStepId === null)) {
       const action = `Wrote the ${labelFacts(FACT_KEYS.filter((k) => d.observedBodyFacts.includes(k)))} into the message`;
       const existing = d.steps.find((s) => s.id === d.bodyStepId);
@@ -254,6 +269,7 @@ function createGuardrail(
     exceptions: [],
     unknowns: [],
     reason: null,
+    reasonUnknown: false,
     quote: null,
     quoteAtMs: null,
     quotes: [],
@@ -265,7 +281,7 @@ function createGuardrail(
     evidenceIds: [],
   };
   d.guardrails.push(g);
-  d.extras[g.id] = { essential: init.essential, corrected: [], copyOf: init.copyOf };
+  d.extras[g.id] = { essential: init.essential, inferred: null, corrected: [], copyOf: init.copyOf };
   return g;
 }
 
@@ -344,12 +360,14 @@ function reduceAnswer(d: DraftData, x: AnswerExtraction): void {
 
   switch (topic) {
     case "reason": {
-      const g = customerGuardrail(d, x.entityRef);
+      const g = targetGuardrail(d, x);
       if (x.rationale !== null) {
         g.reason = x.rationale;
+        g.reasonUnknown = false;
         setQuote(g, x.reasonQuote ?? x.quote, x.atMs, true);
       } else {
         setQuote(g, x.quote, x.atMs, false);
+        if (x.reasonUnknown) g.reasonUnknown = true;
       }
       g.quotes.push(x.quote);
       for (const u of x.unknowns) if (!g.unknowns.includes(u)) g.unknowns.push(u);
@@ -431,7 +449,10 @@ function reduceAnswer(d: DraftData, x: AnswerExtraction): void {
       const g = targetGuardrail(d, x);
       if (x.rationale !== null) {
         g.reason = x.rationale;
+        g.reasonUnknown = false;
         setQuote(g, x.reasonQuote ?? x.quote, x.atMs, false);
+      } else if (x.reasonUnknown) {
+        g.reasonUnknown = true;
       }
       g.quotes.push(x.quote);
       break;
@@ -447,6 +468,7 @@ function reduceAnswer(d: DraftData, x: AnswerExtraction): void {
       break;
   }
   if (x.retracts && topic !== "ticket_note") targetGuardrail(d, x).status = "conflicted";
+  freezeInferred(d);
 }
 
 function reduceCorrection(d: DraftData, x: AnswerExtraction): void {
@@ -463,6 +485,7 @@ function reduceCorrection(d: DraftData, x: AnswerExtraction): void {
     }
     if (x.rationale !== null) {
       g.reason = x.rationale;
+      g.reasonUnknown = false;
       setQuote(g, x.reasonQuote ?? x.quote, x.atMs, true);
     }
     g.quotes.push(x.quote);
@@ -475,13 +498,36 @@ function reduceCorrection(d: DraftData, x: AnswerExtraction): void {
 // Snapshots, validation, sealing
 // ---------------------------------------------------------------------------
 
+/** The facts the expert typed into messages for the customers a guardrail covers, in canonical order. */
+function typedFor(d: DraftData, g: MapGuardrailData): FactKey[] {
+  const refs = g.scope.kind === "all" ? Object.keys(d.typedFacts) : g.scope.customers;
+  const all = new Set<FactKey>(refs.flatMap((c) => d.typedFacts[c] ?? []));
+  return FACT_KEYS.filter((f) => all.has(f));
+}
+
+/**
+ * What the message must carry: what the expert named as essential; else what the screen showed them typing for this
+ * customer, fixed the first time it was needed (so the next order cannot change the rule); plus later corrections.
+ */
 function requiredFactsFor(d: DraftData, g: MapGuardrailData): FactKey[] {
   const extra = d.extras[g.id];
   if (!extra) return [];
+  const originGuardrail = extra.copyOf !== null ? d.guardrails.find((x) => x.id === extra.copyOf) : g;
   const origin = extra.copyOf !== null ? d.extras[extra.copyOf] : extra;
-  const base = origin?.essential ?? d.observedBodyFacts;
+  const base = origin?.essential ?? origin?.inferred ?? (originGuardrail ? typedFor(d, originGuardrail) : []);
   const all = new Set<FactKey>([...base, ...(origin?.corrected ?? []), ...extra.corrected]);
   return FACT_KEYS.filter((f) => all.has(f));
+}
+
+/** Fixes the inferred required facts of every customer rule the expert did not name, once the screen has shown some. */
+function freezeInferred(d: DraftData): void {
+  for (const g of d.guardrails) {
+    const extra = d.extras[g.id];
+    if (!extra || g.trigger !== "customer" || g.unexplained || extra.copyOf !== null) continue;
+    if (extra.essential !== null || extra.inferred !== null) continue;
+    const facts = typedFor(d, g);
+    if (facts.length > 0) extra.inferred = facts;
+  }
 }
 
 function projectGuardrail(d: DraftData, g: MapGuardrailData): MapGuardrailData {
@@ -503,7 +549,7 @@ function projectGuardrail(d: DraftData, g: MapGuardrailData): MapGuardrailData {
     if (!unknowns.includes(u)) unknowns.push(u);
   };
   if (g.unexplained) add("The expert does not know why; treated as a habit, not a rule.");
-  else if (g.reason === null) add("The reason was not explained.");
+  else if (g.reason === null) add(g.reasonUnknown ? "The expert does not know why." : "The reason was not explained.");
   if (g.trigger === "customer" && !g.unexplained) {
     if (!g.scope.explicit) add(`Scope not stated; defaults to ${g.scope.customers.join(", ") || "the observed customer"}.`);
     if (copy.requiredFacts.length === 0) add("What the message must contain was not said.");
@@ -580,6 +626,7 @@ export function validateWorkMap(map: WorkMap): string[] {
 }
 
 function seal(d: DraftData, status: "superseded" | "confirmed", atMs: number, quote: string | null): WorkMap {
+  freezeInferred(d);
   const sealed = deepFreeze(project(d, d.version, status, { atMs, quote }));
   d.sealedVersion = d.version;
   d.dirty = false;
@@ -591,7 +638,7 @@ function seal(d: DraftData, status: "superseded" | "confirmed", atMs: number, qu
 // ---------------------------------------------------------------------------
 
 function fingerprint(d: DraftData): string {
-  return JSON.stringify([d.steps, d.guardrails, d.answered, d.extras]);
+  return JSON.stringify([d.steps, d.guardrails, d.answered, d.extras, d.typedFacts, d.customers]);
 }
 
 export function reduceMap(state: MapState, event: MapEvent): MapState {
@@ -643,6 +690,11 @@ function reduceCorrectionEvent(d: DraftData, x: AnswerExtraction): WorkMap | nul
 // ---------------------------------------------------------------------------
 // Reading a state
 // ---------------------------------------------------------------------------
+
+/** Customer refs seen on screen so far: what a spoken "customer seven" can be mapped onto. */
+export function knownCustomerRefs(state: MapState): string[] {
+  return [...state.draft.customers];
+}
 
 /** The working draft as a map (status "draft"). It is what the teach-back describes. */
 export function workingMap(state: MapState): WorkMap {

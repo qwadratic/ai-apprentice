@@ -9,6 +9,7 @@ import { wordCount } from "./personas.ts";
 export type CandidateKind =
   | "attachment_removed"
   | "attachment_added"
+  | "body_text_why"
   | "body_text_added"
   | "recipient_changed"
   | "preview_opened"
@@ -19,6 +20,7 @@ export type CandidateKind =
 export const KIND_TOPIC: Readonly<Record<CandidateKind, Topic | null>> = {
   attachment_removed: "reason",
   attachment_added: null,
+  body_text_why: "reason",
   body_text_added: "essentials",
   recipient_changed: "reason",
   preview_opened: "guardrail",
@@ -44,6 +46,12 @@ const LEARN_VARIANTS: Readonly<Record<CandidateKind, Variants | null>> = {
     `You took the ${what(ctx)} attachment off the email${forWho(ctx)}. What made you do that?`,
     `Why did you remove the ${what(ctx)} attachment${forWho(ctx)}?`,
     `Why remove the ${what(ctx)} attachment?`,
+  ],
+  body_text_why: (ctx) => [
+    `You wrote details from ${ctx.orderId ?? "the order"} into your message${forWho(ctx)}. What made you do that, and does it always go that way?`,
+    `You wrote details from ${ctx.orderId ?? "the order"} into your message${forWho(ctx)}. What made you do that?`,
+    `Why did you write those details into the message${forWho(ctx)}?`,
+    "Why write those details into the message?",
   ],
   body_text_added: (ctx) => [
     `You typed details from ${ctx.orderId ?? "the order"} straight into your message. Which of those details matter most, and why those?`,
@@ -86,9 +94,11 @@ export function learnVariants(kind: CandidateKind, ctx: QuestionContext): string
 }
 
 /** Review follow-ups by what is still missing. */
-export type GapTopic = "scope" | "exception" | "why_stop" | "duration";
+export type GapTopic = "reason" | "scope" | "exception" | "why_stop" | "duration";
 
 const GAP_VARIANTS: Readonly<Record<GapTopic, (who: string) => string[]>> = {
+  // The reason was missed or not given during the task: ask it again, plainly.
+  reason: (who) => [`What is the reason you handle ${who} this way?`, `Why do you handle ${who} this way?`, "Why do you do it this way?"],
   scope: (who) => [
     `Is this only for ${who}, or do other customers get the same treatment?`,
     `Only ${who}, or others too?`,

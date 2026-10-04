@@ -244,7 +244,7 @@ test("duplicate topics and answers already in the map are skipped, with the reas
   assert.deepEqual(must(skipped.find((d) => d.decision === "SKIP")).reasons, ["answered_in_map"]);
 });
 
-test("routine changes are skipped, and stale candidates are dropped", () => {
+test("routine changes are skipped", () => {
   const h = harness();
   h.see(h.feed.order(0, ORD));
   h.see(h.feed.email(0, C));
@@ -253,14 +253,41 @@ test("routine changes are skipped, and stale candidates are dropped", () => {
   h.see(h.feed.ticket(600, C, "done"));
   const kinds = h.policy.log.filter((d) => d.decision === "SKIP").map((d) => d.reasons.join());
   assert.deepEqual(kinds, ["visible_on_screen", "visible_on_screen"]);
+});
 
-  // A candidate that never found a pause within 30 s is dropped.
-  const g = harness({ maxAgeMs: 30000 });
-  learnUntilRemoval(g);
-  g.policy.humanSpeech(true);
-  g.at(40000);
-  const out = g.policy.tick();
-  assert.deepEqual(must(out.find((d) => d.decision === "SKIP")).reasons, ["stale"]);
+test("a question that waited too long is held for Review, not lost: the expert types for 35 s", () => {
+  const h = harness({ maxAgeMs: 30000 });
+  learnUntilRemoval(h);
+  const decided: BrainDecision[] = [];
+  for (let t = 1500; t <= 36500; t += 1000) {
+    h.at(t);
+    h.see(h.feed.typing(t, t));
+    decided.push(...h.policy.tick());
+  }
+  h.at(37500);
+  const held = [...decided, ...h.policy.tick()];
+  const defer = must(held.find((d) => d.decision === "DEFER" && d.reasons.includes("stale")));
+  assert.equal(defer.deferTo, "review");
+  assert.ok(defer.expiresAtMs !== null && defer.expiresAtMs > 31000);
+  assert.equal(asks(held).length, 0);
+  const items = h.policy.heldForReview();
+  assert.equal(items.length, 1);
+  assert.equal(must(items[0]).topic, "reason");
+  assert.ok(must(items[0]).evidenceIds.length > 0);
+});
+
+test("the same topic already asked is not held for Review when it goes stale", () => {
+  const h = harness({ maxAgeMs: 30000 });
+  learnUntilRemoval(h);
+  h.at(3000);
+  const q = must(must(asks(h.policy.tick())[0]).question);
+  h.policy.finishQuestion(q.id, 4000);
+  h.see(h.feed.email(5000, C, { recipientRef: "contact_other" }));
+  h.policy.humanSpeech(true);
+  h.at(50000);
+  const out = h.policy.tick();
+  assert.deepEqual(must(out.find((d) => d.decision === "SKIP")).reasons, ["duplicate_topic"]);
+  assert.equal(h.policy.heldForReview().length, 0);
 });
 
 test("off the record: nothing is observed or asked, an open question is cancelled, and the gap is no baseline", () => {

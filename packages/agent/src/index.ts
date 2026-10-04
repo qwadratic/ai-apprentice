@@ -8,3 +8,4 @@ export * from "./fake/voice-adapter.ts";
 export * from "./policy/index.ts";
 export * from "./knowledge/index.ts";
 export * from "./tutor/index.ts";
+export * from "./llm/index.ts";

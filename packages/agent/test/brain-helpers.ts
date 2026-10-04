@@ -9,11 +9,12 @@ import {
   FakeClock,
   HeuristicAnswerExtractor,
   createMapState,
+  knownCustomerRefs,
   planFollowUps,
   reduceMap,
   workingMap,
 } from "../src/index.ts";
-import type { AnswerExtractor, BrainDecision, MapState, PersonaId, Question, Topic } from "../src/index.ts";
+import type { AnswerExtractor, BrainDecision, FetchLike, MapState, PersonaId, Question, Topic } from "../src/index.ts";
 import { must } from "./helpers.ts";
 
 const root = new URL("../../../fixtures/agent/", import.meta.url);
@@ -158,10 +159,58 @@ export function learnObservations(sessionId = "sess-learn"): LearnObservations {
   return { all: list, start, attached, removal, body, preview };
 }
 
+/** A Learn session where the expert types the details and never attaches an image: order, email, text, Preview, Send, ticket. */
+export function realisticObservations(sessionId = "sess-real", address = "14 Sample Lane,\n1010 Exampletown"): ScreenObservation[] {
+  const feed = new Feed(sessionId);
+  const o = order("ORD-2041");
+  const c = o.customerRef;
+  const body = `Hello, here are your delivery details.\nAddress: ${address}\nDelivery window: ${o.deliveryWindow}`;
+  return [
+    feed.order(0, o),
+    feed.email(500, c),
+    feed.email(15000, c, { bodyText: body }),
+    feed.email(30000, c, { bodyText: body, previewState: "preview" }),
+    feed.email(42000, c, { bodyText: body, previewState: "sent" }),
+    feed.ticket(44000, c, "open"),
+    feed.ticket(50000, c, "done"),
+  ];
+}
+
+// -- the server's LLM route, recorded ----------------------------------------
+
+export interface RecordedCall {
+  url: string;
+  authorization: string | undefined;
+  body: unknown;
+}
+
+/**
+ * A fetch that replays fixtures/agent/llm/recorded.json: the answer for a request is looked up by its answerText, reply or
+ * spoken phrase. A request with no recording gets HTTP 404. Calls are kept in `calls`.
+ */
+export function recordedFetch(): { fetch: FetchLike; calls: RecordedCall[] } {
+  const recorded = rec(readJson("llm/recorded.json"));
+  const calls: RecordedCall[] = [];
+  const impl: FetchLike = async (url, init) => {
+    const body: unknown = JSON.parse(init.body);
+    calls.push({ url, authorization: init.headers.authorization, body });
+    const task = url.slice(url.lastIndexOf("/") + 1);
+    const key = task === "answer_extraction" ? "answerText" : task === "reply_classification" ? "reply" : "spoken";
+    const hit = arr(recorded[task])
+      .map(rec)
+      .find((r) => r[key] === rec(body)[key]);
+    if (hit === undefined) return { ok: false, status: 404, json: async () => ({}) };
+    return { ok: true, status: 200, json: async () => ({ output: hit.output }) };
+  };
+  return { fetch: impl, calls };
+}
+
 // -- building a map without time -------------------------------------------
 
 export interface BuildOptions {
   answers?: Topic[];
+  /** Different wording for some answers (default: the scripted expert's). */
+  texts?: Partial<Record<Topic, string>>;
   followUps?: boolean;
   correction?: boolean;
   confirm?: boolean;
@@ -185,12 +234,13 @@ export async function buildState(opts: BuildOptions = {}): Promise<MapState> {
     if (!given.includes(topic)) continue;
     const extraction = await extractor.extract({
       topic,
-      text: expertAnswer(topic),
+      text: opts.texts?.[topic] ?? expertAnswer(topic),
       questionId: `q-${topic}`,
       atMs: (atMs += 7000),
       evidenceIds: [...ob.evidenceIds],
       targetId: null,
       entityRef: "customer_07",
+      knownRefs: knownCustomerRefs(state),
     });
     state = reduceMap(state, { type: "answer", extraction });
   }
@@ -199,12 +249,13 @@ export async function buildState(opts: BuildOptions = {}): Promise<MapState> {
       if (!given.includes(q.topic)) continue;
       const extraction = await extractor.extract({
         topic: q.topic,
-        text: expertAnswer(q.topic),
+        text: opts.texts?.[q.topic] ?? expertAnswer(q.topic),
         questionId: q.id,
         atMs: (atMs += 7000),
         evidenceIds: q.evidenceIds,
         targetId: q.targetId,
         entityRef: q.entityRef,
+        knownRefs: knownCustomerRefs(state),
       });
       state = reduceMap(state, { type: "answer", extraction });
     }
@@ -218,6 +269,7 @@ export async function buildState(opts: BuildOptions = {}): Promise<MapState> {
       evidenceIds: [],
       targetId: null,
       entityRef: null,
+      knownRefs: knownCustomerRefs(state),
     });
     state = reduceMap(state, { type: "correct", extraction });
   }
@@ -283,6 +335,8 @@ export interface LearnSessionOptions {
   agentSpeakMs?: number;
   humanAnswerMs?: number;
   extractor?: AnswerExtractor;
+  /** What the expert says to a question of this topic (default: the scripted answer). */
+  answerText?: (topic: Topic) => string;
 }
 
 export function startLearnSession(opts: LearnSessionOptions = {}): LearnSession {
@@ -327,12 +381,13 @@ export function startLearnSession(opts: LearnSessionOptions = {}): LearnSession 
         const q = talk.question;
         const extraction = await extractor.extract({
           topic: q.topic,
-          text: expertAnswer(q.topic),
+          text: opts.answerText?.(q.topic) ?? expertAnswer(q.topic),
           questionId: q.id,
           atMs: t,
           evidenceIds: q.evidenceIds,
           targetId: q.targetId,
           entityRef: q.entityRef,
+          knownRefs: knownCustomerRefs(state),
         });
         state = reduceMap(state, { type: "answer", extraction });
         policy.setMap(workingMap(state));

@@ -5,6 +5,7 @@
 // and cooldown. Every decision is logged as a BrainDecision. Time comes in as arguments (or the injected `now`);
 // nothing is scheduled here.
 import type { ScreenObservation } from "@apprentice/contracts";
+import { normalizeLoose, valueMentioned } from "../knowledge/facts.ts";
 import { isAnswered } from "../knowledge/types.ts";
 import type { Question, Topic, WorkMap } from "../knowledge/types.ts";
 import type { Mode } from "../schema.ts";
@@ -61,6 +62,7 @@ const PRIORITY: Readonly<Record<CandidateKind, number>> = {
   preview_opened: 4,
   attachment_removed: 3,
   recipient_changed: 3,
+  body_text_why: 3,
   body_text_added: 2,
   attachment_added: 1,
   ticket_done: 1,
@@ -71,6 +73,7 @@ const NOTE: Readonly<Record<CandidateKind, string>> = {
   preview_opened: "Preview was opened before Send",
   attachment_removed: "an attachment was removed",
   recipient_changed: "the recipient was changed",
+  body_text_why: "order details were typed into the message",
   body_text_added: "order details were typed into the message",
   attachment_added: "an attachment was added",
   ticket_done: "the ticket was marked done",
@@ -84,8 +87,7 @@ function dedupeKey(topic: Topic, entityRef: string | null): string {
 }
 
 function mentionsOrder(text: string, order: { orderId: string | null; deliveryAddress: string | null; deliveryWindow: string | null }): boolean {
-  const body = text.toLowerCase();
-  return [order.deliveryAddress, order.deliveryWindow, order.orderId].some((v) => v !== null && v.length > 3 && body.includes(v.toLowerCase()));
+  return [order.deliveryAddress, order.deliveryWindow, order.orderId].some((v) => valueMentioned(text, v));
 }
 
 export class ConversationPolicy {
@@ -185,10 +187,17 @@ export class ConversationPolicy {
     const gone = prev.attachments.length - email.attachments.length;
     if (gone > 0) this.consider("attachment_removed", obs, evidenceIds, prev.attachments[0]?.kind ?? null);
     else if (gone < 0) this.consider("attachment_added", obs, evidenceIds, email.attachments[0]?.kind ?? null);
-    if (prev.recipientRef !== null && email.recipientRef !== prev.recipientRef) this.consider("recipient_changed", obs, evidenceIds, null);
+    const sameRecipient =
+      prev.recipientRef === email.recipientRef ||
+      (prev.recipientRef !== null && email.recipientRef !== null && normalizeLoose(prev.recipientRef) === normalizeLoose(email.recipientRef));
+    if (prev.recipientRef !== null && !sameRecipient) this.consider("recipient_changed", obs, evidenceIds, null);
+    // The expert wrote the order's details into the message (or a substantial text of their own): why, and which details matter.
     const key = this.order?.orderId ?? "";
-    if (this.order !== null && !this.bodyAsked.has(key) && mentionsOrder(email.bodyText, this.order) && !mentionsOrder(prev.bodyText, this.order)) {
+    const typedDetails = this.order !== null && mentionsOrder(email.bodyText, this.order) && !mentionsOrder(prev.bodyText, this.order);
+    const typedText = normalizeLoose(email.bodyText).length >= 40 && normalizeLoose(prev.bodyText).length < 40;
+    if (this.order !== null && !this.bodyAsked.has(key) && (typedDetails || typedText)) {
       this.bodyAsked.add(key);
+      this.consider("body_text_why", obs, evidenceIds, null);
       this.consider("body_text_added", obs, evidenceIds, null);
     }
     if (prev.previewState !== "preview" && email.previewState === "preview") this.consider("preview_opened", obs, evidenceIds, null);
@@ -295,10 +304,7 @@ export class ConversationPolicy {
     const cfg = { maxAgeMs: this.options.maxAgeMs ?? 30_000, reviewTtlMs: this.options.reviewTtlMs ?? 7_200_000 };
 
     for (const c of this.candidates) {
-      if (c.state === "pending" && now - c.createdAtMs > cfg.maxAgeMs) {
-        c.state = "dropped";
-        out.push(this.record(now, "SKIP", ["stale"], `${c.note}, ${seconds(now - c.createdAtMs)} ago: too old to ask about now.`, c));
-      } else if (c.state === "review" && c.expiresAtMs !== null && now >= c.expiresAtMs) {
+      if (c.state === "review" && c.expiresAtMs !== null && now >= c.expiresAtMs) {
         c.state = "dropped";
         out.push(this.record(now, "SKIP", ["stale"], `${c.note}: held for Review but expired.`, c));
       }
@@ -315,6 +321,17 @@ export class ConversationPolicy {
       } else if (this.answeredInMap(c)) {
         c.state = "dropped";
         out.push(this.record(now, "SKIP", ["answered_in_map"], `${c.note}: the map already holds the expert's answer.`, c));
+      } else if (now - c.createdAtMs > cfg.maxAgeMs) {
+        // Too old to interrupt with, but still worth asking: held for Review instead of dropped.
+        c.state = "review";
+        c.heldAtMs = now;
+        c.expiresAtMs = now + cfg.reviewTtlMs;
+        out.push(
+          this.record(now, "DEFER", ["stale"], `${c.note}, ${seconds(now - c.createdAtMs)} ago: too old to ask about live; held for Review.`, c, {
+            deferTo: "review",
+            expiresAtMs: c.expiresAtMs,
+          }),
+        );
       }
     }
     const pending = this.candidates.filter((c) => c.state === "pending");
@@ -383,8 +400,14 @@ export class ConversationPolicy {
 
   private tickTeach(now: number): BrainDecision[] {
     const out: BrainDecision[] = [];
+    const maxAgeMs = this.options.maxAgeMs ?? 30_000;
     for (const c of this.candidates) {
       if (c.state !== "pending" || c.kind !== "decision_point") continue;
+      if (now - c.createdAtMs > maxAgeMs) {
+        c.state = "dropped";
+        out.push(this.record(now, "SKIP", ["stale"], `${c.note}, ${seconds(now - c.createdAtMs)} ago: too old to ask about now.`, c));
+        continue;
+      }
       const key = c.orderId ?? c.id;
       if (this.predictedOrders.has(key)) {
         c.state = "dropped";
