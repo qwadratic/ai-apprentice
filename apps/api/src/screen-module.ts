@@ -15,6 +15,8 @@ export interface ScreenModuleOptions {
   readonly databasePath?: string;
   readonly mediaDir?: string;
   readonly env?: Readonly<Record<string, string | undefined>>;
+  /** Server-side reader of every observation (the Clipa conductor, doc-12). */
+  readonly onObservation?: (sessionId: string, observation: unknown) => void;
 }
 
 /** Keeps ScreenSessionHub credentials server-side; browsers send only their agent session bearer token. */
@@ -27,6 +29,7 @@ export function createScreenModule(options: ScreenModuleOptions): ApiModule {
     });
     const hub = options.hub ?? runtime?.hub;
     if (!hub) throw new Error('Screen runtime unavailable');
+    if (options.onObservation) hub.onObservation(options.onObservation);
     const allowOrigin = authenticatedRouteOriginCheck(options.allowedOrigins);
     mountScreen(app, {hub, allowOrigin,
       register: (target, route) => registerAuthorizedRoute(target as Express, route, options.authorize, hub,

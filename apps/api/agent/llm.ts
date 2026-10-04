@@ -25,7 +25,7 @@ async function boundedText(r: globalThis.Response, max: number): Promise<string 
   return Buffer.concat(chunks).toString('utf8');
 }
 
-async function callRunner(config: AgentConfig, request: RunnerRequest, signal: AbortSignal, timeoutMs: number): Promise<RunnerResult> {
+export async function callRunner(config: AgentConfig, request: RunnerRequest, signal: AbortSignal, timeoutMs: number, model: string | null = null): Promise<RunnerResult> {
   if (!config.runnerToken || !config.runnerUrl) return { ok: false, status: 503, error: 'llm_not_configured' };
   let url: URL;
   try { url = new URL('/v1/complete', config.runnerUrl); } catch { return { ok: false, status: 503, error: 'llm_not_configured' }; }
@@ -34,12 +34,14 @@ async function callRunner(config: AgentConfig, request: RunnerRequest, signal: A
     const r = await config.fetch(url, {
       method: 'POST',
       headers: { Authorization: `Bearer ${config.runnerToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ system: request.system, prompt: request.prompt, schema: request.schema }),
+      body: JSON.stringify(model ? { system: request.system, prompt: request.prompt, schema: request.schema, model } : { system: request.system, prompt: request.prompt, schema: request.schema }),
       signal: AbortSignal.any([timeout, signal]),
     });
     if (r.status === 401 || r.status === 403) { await r.arrayBuffer().catch(() => {}); return { ok: false, status: 503, error: 'runner_auth' }; }
     if (r.status === 413 || r.status === 429) { await r.arrayBuffer().catch(() => {}); return { ok: false, status: 503, error: 'runner_busy' }; }
     if (r.status === 504) { await r.arrayBuffer().catch(() => {}); return { ok: false, status: 504, error: 'runner_timeout' }; }
+    // A runner that does not allow the fast model answers 400: run again on its default model.
+    if (r.status === 400 && model) { await r.arrayBuffer().catch(() => {}); return callRunner(config, request, signal, timeoutMs, null); }
     const raw = await boundedText(r, MAX_RUNNER_RESPONSE);
     if (r.status !== 200 || raw === null) return { ok: false, status: 502, error: 'runner_error' };
     let body: unknown;
@@ -50,6 +52,25 @@ async function callRunner(config: AgentConfig, request: RunnerRequest, signal: A
     // Not logged: the error text could echo request data.
     return timeout.aborted ? { ok: false, status: 504, error: 'runner_timeout' } : { ok: false, status: 503, error: 'runner_unavailable' };
   }
+}
+
+export type TaskResult = { ok: true; output: unknown } | { ok: false; error: LlmError | 'unknown_task' | 'invalid_input' | 'aborted' };
+
+/**
+ * One fixed task, run server-side (the conductor): the same prepare, runner call and output check as the route, without
+ * the HTTP budgets, which the caller replaces with its own. Inputs and outputs are never logged.
+ */
+export async function runLlmTask(config: AgentConfig, name: string, body: unknown, signal: AbortSignal): Promise<TaskResult> {
+  const task = Object.hasOwn(LLM_TASKS, name) ? LLM_TASKS[name] : undefined;
+  if (!task) return { ok: false, error: 'unknown_task' };
+  const prepared = task.prepare(body);
+  if (!prepared.ok) return { ok: false, error: 'invalid_input' };
+  const model = task.fast && config.fastModel ? config.fastModel : null;
+  const result = await callRunner(config, prepared.request, signal, Math.max(config.timing.llmTimeoutMs, task.timeoutMs ?? 0), model);
+  if (signal.aborted) return { ok: false, error: 'aborted' };
+  if (!result.ok) return { ok: false, error: result.error };
+  const output = prepared.check(result.json);
+  return output === null ? { ok: false, error: 'invalid_output' } : { ok: true, output };
 }
 
 export function registerLlmRoutes(app: Express, rt: AgentRuntime): void {
@@ -89,7 +110,8 @@ export function registerLlmRoutes(app: Express, rt: AgentRuntime): void {
     try {
       const aborted = new AbortController();
       res.on('close', () => { if (!res.writableEnded) aborted.abort(); });
-      const result = await callRunner(config, prepared.request, aborted.signal, Math.max(config.timing.llmTimeoutMs, task.timeoutMs ?? 0));
+      const result = await callRunner(config, prepared.request, aborted.signal, Math.max(config.timing.llmTimeoutMs, task.timeoutMs ?? 0),
+        task.fast && config.fastModel ? config.fastModel : null);
       if (aborted.signal.aborted) return; // the client went away
       if (!result.ok) {
         config.log({ level: 'warn', msg: 'llm call failed', task: name, status: result.status, error: result.error });

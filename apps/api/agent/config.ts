@@ -20,6 +20,10 @@ export interface AgentOptions {
   elevenLabsApiKey?: string;
   elevenLabsAgentIdInterviewer?: string;
   elevenLabsAgentIdTutor?: string;
+  /** Model for the short, latency-bound tasks (a question at a pause, a guardrail check). Default: env AGENT_FAST_MODEL; '' uses the runner's default. */
+  fastModel?: string;
+  /** The web app the macOS client sends people to (Review, Summary). Default: env PUBLIC_WEB_URL. */
+  publicWebUrl?: string;
   fetch?: FetchFn;
   now?: () => number;
   log?: Logger;
@@ -79,6 +83,8 @@ export interface AgentConfig {
   /** The agent Teach connects to (its own voice and prompt); empty when not configured. */
   tutorAgentId: string;
   agentIds: ReadonlySet<string>;
+  fastModel: string;
+  publicWebUrl: string;
   limits: Limits;
   timing: Timing;
   fetch: FetchFn;
@@ -143,6 +149,8 @@ export function resolveConfig(options: AgentOptions = {}, env: NodeJS.ProcessEnv
     interviewerAgentId: interviewer,
     tutorAgentId: tutor,
     agentIds: new Set([interviewer, tutor].filter(Boolean)),
+    fastModel: options.fastModel ?? env.AGENT_FAST_MODEL ?? 'claude-haiku-4-5-20251001',
+    publicWebUrl: options.publicWebUrl ?? (env.PUBLIC_WEB_URL || 'https://qwadratic.github.io/clipa/'),
     limits, timing,
     fetch: options.fetch ?? ((input, init) => fetch(input, init)),
     now: options.now ?? Date.now,

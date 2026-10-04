@@ -260,3 +260,22 @@ function asRecord(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('expected record');
   return value as Record<string, unknown>;
 }
+
+test('server-side readers get every published observation; a failing reader never breaks capture', () => {
+  let publish: SessionServiceFactoryContext['publish'] | undefined;
+  const evidence = createMemoryEvidenceStore();
+  const fake: ScreenService = {start() {}, pause() {}, resume() {}, stop() {},
+    snapshot: () => ({state: 'capturing', sessionId: 'session', generation: 1, active: 0, queued: 0, sequence: 0}),
+    offer: () => 'accepted', evidence};
+  const hub = new ScreenSessionHub(context => { publish = context.publish; return fake; }, parseStatus, () => 100_000, 2, 8);
+  const seen: string[] = [];
+  hub.onObservation(() => { throw new Error('reader failed'); });
+  const off = hub.onObservation((sessionId, value) => seen.push(`${sessionId}:${value.id}`));
+  const started = hub.start('session', 100_000, 1); const session = hub.authenticate('session', started.sessionToken);
+  const context = publicationContext(evidenceRecord('e', 'session', 'frame'), 'email', 'email-r1', 1);
+  publish?.(observation('o1', 1, 'f1', 'email-r1', 'email_draft'), context);
+  off();
+  publish?.(observation('o2', 2, 'f2', 'email-r1', 'email_draft'), context);
+  assert.deepEqual(seen, ['session:o1']);
+  assert.deepEqual(hub.updates(session, 1, 0).observations.map(o => o.id), ['o1', 'o2']);
+});
