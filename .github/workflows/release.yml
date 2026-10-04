@@ -161,12 +161,19 @@ jobs:
         env:
           SHA: ${{ needs.prepare.outputs.sha }}
           EVENT: ${{ github.event_name }}
+          ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
           if [ "$EVENT" = "workflow_dispatch" ]; then exit 0; fi
           git fetch --quiet origin main
           head=$(git rev-parse origin/main)
           if [ "$SHA" != "$head" ] && ! git diff --quiet "$SHA" "$head" -- . ':(exclude)backlog'; then
+            # First attempt: main moved during this run. The newer commit's run waits in the release
+            # concurrency group and publishes after this one, so publishing here is harmless.
+            if [ "$ATTEMPT" = "1" ]; then
+              echo "::notice::main moved to $head during this run; publishing $SHA now, and the newer run publishes over it."
+              exit 0
+            fi
             echo "::error::$SHA is no longer the head of main ($head). A re-run must not publish an older commit; use a manual run (with the freeze) for a rollback."
             exit 1
           fi
@@ -280,6 +287,7 @@ jobs:
           FREEZE: ${{ vars.DEPLOY_FREEZE }}
           EVENT: ${{ github.event_name }}
           CONFIRM: ${{ inputs.confirm }}
+          ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
           if [ "$FREEZE" = "1" ] && ! { [ "$EVENT" = "workflow_dispatch" ] && [ "$CONFIRM" = "true" ]; }; then
@@ -290,6 +298,13 @@ jobs:
           git fetch --quiet origin main
           head=$(git rev-parse origin/main)
           if [ "$SHA" != "$head" ] && ! git diff --quiet "$SHA" "$head" -- . ':(exclude)backlog'; then
+            # First attempt: main moved during this run. This run already published $SHA to Pages, so the
+            # API follows it (they move together); the newer run waits in the release concurrency group
+            # and then moves both.
+            if [ "$ATTEMPT" = "1" ]; then
+              echo "::notice::main moved to $head during this run; deploying $SHA to match Pages, and the newer run deploys over it."
+              exit 0
+            fi
             echo "::error::$SHA is no longer the head of main ($head); a re-run must not deploy an older commit."
             exit 1
           fi
