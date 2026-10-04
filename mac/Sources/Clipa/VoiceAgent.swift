@@ -105,6 +105,27 @@ final class VoiceAgent {
     }
 
     /// Context for the agent that is never spoken.
+    /// Smoke test only: pushes `seconds` of 48 kHz stereo silence through the microphone path (the same converter and
+    /// `user_audio_chunk` messages a real microphone uses). Returns the bytes of 16 kHz audio sent.
+    func sendSyntheticMicrophone(seconds: Double) -> Int {
+        guard state == .live, let socket,
+              let target = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true),
+              let source = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 2) else { return 0 }
+        pipe.configure(socket: socket, target: target)
+        defer { pipe.clear() }
+        let chunk: AVAudioFrameCount = 4800 // 100 ms
+        var sent = 0
+        for _ in 0..<max(1, Int(seconds * 10)) {
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: source, frameCapacity: chunk), let channels = buffer.floatChannelData else { break }
+            buffer.frameLength = chunk
+            for channel in 0..<Int(source.channelCount) {
+                channels[channel].update(repeating: 0, count: Int(chunk))
+            }
+            sent += pipe.process(buffer)
+        }
+        return sent
+    }
+
     func sendContext(_ text: String) {
         guard state == .live else { return }
         send(["type": "contextual_update", "text": text])
@@ -401,22 +422,24 @@ final class MicPipe: @unchecked Sendable {
     }
 
     static func tapBlock(_ pipe: MicPipe) -> AVAudioNodeTapBlock {
-        return { buffer, _ in pipe.process(buffer) }
+        return { buffer, _ in _ = pipe.process(buffer) }
     }
 
-    func process(_ buffer: AVAudioPCMBuffer) {
+    /// Returns the bytes of 16-bit audio sent (0 when nothing went out).
+    @discardableResult
+    func process(_ buffer: AVAudioPCMBuffer) -> Int {
         lock.lock()
         defer { lock.unlock() }
-        guard let socket, let target, buffer.frameLength > 0, buffer.format.sampleRate > 0 else { return }
+        guard let socket, let target, buffer.frameLength > 0, buffer.format.sampleRate > 0 else { return 0 }
         if converter == nil || converterInput != buffer.format {
             converter = AVAudioConverter(from: buffer.format, to: target)
             converter?.downmix = true
             converterInput = buffer.format
         }
-        guard let converter else { return }
+        guard let converter else { return 0 }
         let ratio = target.sampleRate / buffer.format.sampleRate
         let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 64
-        guard let output = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity) else { return }
+        guard let output = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity) else { return 0 }
         var supplied = false
         var error: NSError?
         let status = converter.convert(to: output, error: &error) { _, inputStatus in
@@ -428,10 +451,11 @@ final class MicPipe: @unchecked Sendable {
             inputStatus.pointee = .haveData
             return buffer
         }
-        guard status != .error, output.frameLength > 0, let samples = output.int16ChannelData else { return }
+        guard status != .error, output.frameLength > 0, let samples = output.int16ChannelData else { return 0 }
         let byteCount = Int(output.frameLength) * 2
         let data = silenced ? Data(count: byteCount) : Data(bytes: samples[0], count: byteCount)
         let message = "{\"user_audio_chunk\":\"\(data.base64EncodedString())\"}"
         socket.send(.string(message)) { _ in }
+        return byteCount
     }
 }

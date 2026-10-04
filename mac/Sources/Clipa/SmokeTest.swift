@@ -63,6 +63,9 @@ enum SmokeTest {
                     await wait(15) { voice.isLive || voice.state == .failed }
                     report("voice \(voice.state.rawValue) \(voice.detail)")
                     if voice.isLive {
+                        let micBytes = voice.sendSyntheticMicrophone(seconds: 1)
+                        report("voice: microphone path sent \(micBytes) bytes of 16 kHz audio for 1 s of 48 kHz stereo")
+                        if micBytes < 24_000 { failures.append("microphone conversion sent \(micBytes) bytes") }
                         voice.say("[ASK] This is the Clipa smoke test.")
                         await wait(20) { responses > 0 && voice.audioChunks > 0 }
                         report("voice: \(responses) agent response(s), \(voice.audioChunks) audio chunk(s)")
