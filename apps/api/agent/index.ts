@@ -11,6 +11,7 @@ import { registerAgentRoutes } from './routes.ts';
 import type { AgentRuntime } from './routes.ts';
 import { createMaintenance } from './rotation.ts';
 import { createSessionFiles } from './sessions.ts';
+import { createConductorHub, registerConductorRoutes } from './conductor/routes.ts';
 
 export type { AgentOptions, FetchFn } from './config.ts';
 export type { SessionStore, IssuedSession } from './auth.ts';
@@ -22,8 +23,10 @@ export interface Agent {
   idle(): Promise<void>;
   /** One disk maintenance pass now (orphan tmp cleanup, warn, rotation). It also runs on mount and every 10 min. */
   maintain(): Promise<void>;
-  /** Stops the maintenance timer. */
+  /** Stops the maintenance timer and the conductor's clock. */
   close(): void;
+  /** Feeds a screen observation of a session to its Clipa conductor (doc-12); a no-op when the session has none. */
+  observeScreen(sessionId: string, observation: unknown): void;
   store: SessionStore;
 }
 
@@ -34,10 +37,12 @@ export function createAgent(options: AgentOptions = {}): Agent {
   const files = createSessionFiles(config.sessionsDir);
   const maintenance = createMaintenance(config, files);
   const runtime: AgentRuntime = { config, store, files, eleven: createElevenLabsClient(config, files), maintenance, background: new Set() };
+  const conductors = createConductorHub(runtime);
   return {
-    module: { name: 'agent', mount: (app) => { registerAgentRoutes(app, runtime); registerLlmRoutes(app, runtime); registerAdminRoutes(app, runtime); maintenance.start(); } },
+    module: { name: 'agent', mount: (app) => { registerAgentRoutes(app, runtime); registerLlmRoutes(app, runtime); registerConductorRoutes(app, runtime, conductors); registerAdminRoutes(app, runtime); maintenance.start(); } },
     maintain: () => maintenance.run(),
-    close: () => { maintenance.stop(); },
+    close: () => { maintenance.stop(); conductors.close(); },
+    observeScreen: (sessionId, observation) => conductors.observe(sessionId, observation),
     authorize: async (request, sessionId) => store.check(request.headers.get('authorization'), sessionId).ok,
     idle: async () => { while (runtime.background.size > 0) await Promise.allSettled([...runtime.background]); },
     store,

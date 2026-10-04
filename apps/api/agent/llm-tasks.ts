@@ -6,6 +6,7 @@ import { system as answerExtractionSystem } from './prompts/answer-extraction.ts
 import { system as entityResolutionSystem } from './prompts/entity-resolution.ts';
 import { system as genericQuestionSystem } from './prompts/generic-question.ts';
 import { system as guardrailCheckSystem } from './prompts/guardrail-check.ts';
+import { system as mapEditSystem } from './prompts/map-edit.ts';
 import { system as mapSynthesisSystem } from './prompts/map-synthesis.ts';
 import { system as replyClassificationSystem } from './prompts/reply-classification.ts';
 
@@ -19,6 +20,8 @@ export interface LlmTask {
   readonly maxInputBytes?: number;
   /** Runner timeout for this task; the configured default when absent. */
   readonly timeoutMs?: number;
+  /** Latency-bound: run on the configured fast model when there is one. */
+  readonly fast?: boolean;
 }
 
 // ---- input parsing ---------------------------------------------------------
@@ -327,6 +330,7 @@ export interface GenericQuestionOutput { question: string | null; topic: (typeof
 
 const genericQuestion: LlmTask = {
   maxInputBytes: 32 * 1024,
+  fast: true,
   prepare(body) {
     if (!isRecord(body) || !onlyKeys(body, ['observations', 'transcript', 'asked', 'language'])) return fail('body');
     const observations = parseObservations(body.observations, 'observations', 8); if (!observations.ok) return observations;
@@ -475,6 +479,7 @@ export interface GuardrailCheckOutput { status: 'clear' | 'warn' | 'unknown'; gu
 
 const guardrailCheck: LlmTask = {
   maxInputBytes: 32 * 1024,
+  fast: true,
   prepare(body) {
     if (!isRecord(body) || !onlyKeys(body, ['guardrails', 'observations', 'transcript', 'language'])) return fail('body');
     const rules = body.guardrails;
@@ -519,6 +524,130 @@ const guardrailCheck: LlmTask = {
   },
 };
 
+// ---- map_edit ---------------------------------------------------------------
+// The expert talks, Clipa edits: one utterance becomes a few checked operations on the current map.
+export const EDIT_OPS = ['set', 'add_step', 'add_rule', 'remove', 'comment', 'resolve_gap'] as const;
+export const STEP_FIELDS = ['goal', 'action', 'decision', 'reason'] as const;
+export const RULE_FIELDS = ['condition', 'requiredAction', 'reason', 'escalateTo', 'exception'] as const;
+export interface EditOperation { op: (typeof EDIT_OPS)[number]; targetId: string | null; field: string | null; value: string | null; value2: string | null; quote: string | null }
+export interface MapEditOutput { intent: 'edit' | 'confirm' | 'question' | 'other'; operations: EditOperation[]; reply: string; teachBack: string | null }
+interface EditMapView {
+  steps: Array<{ id: string; kind: string; goal: string; action: string; decision: { summary: string; reason: string | null } | null }>;
+  guardrails: Array<{ id: string; condition: string; requiredAction: string; reason: string | null; escalateTo: string | null; exceptions: string[] }>;
+  gaps: Array<{ name: string; question: string }>;
+  teachBack: string;
+}
+
+function parseEditMap(v: unknown): Parsed<EditMapView> {
+  if (!isRecord(v) || !Array.isArray(v.steps) || !Array.isArray(v.guardrails)) return fail('map');
+  if (v.steps.length > 20 || v.guardrails.length > 12) return fail('map');
+  const steps: EditMapView['steps'] = [];
+  for (const [i, s] of (v.steps as unknown[]).entries()) {
+    if (!isRecord(s)) return fail(`map.steps.${i}`);
+    const sid = id(s.id, `map.steps.${i}.id`); if (!sid.ok) return sid;
+    const goal = text(s.goal, `map.steps.${i}.goal`, 300); if (!goal.ok) return goal;
+    const action = text(s.action, `map.steps.${i}.action`, 300); if (!action.ok) return action;
+    let decision: EditMapView['steps'][number]['decision'] = null;
+    if (isRecord(s.decision)) {
+      const summary = text(s.decision.summary, `map.steps.${i}.decision.summary`, 300); if (!summary.ok) return summary;
+      const reason = nullableText(s.decision.reason ?? null, `map.steps.${i}.decision.reason`, 400); if (!reason.ok) return reason;
+      decision = { summary: summary.value, reason: reason.value };
+    }
+    steps.push({ id: sid.value, kind: s.kind === 'judgment' ? 'judgment' : 'action', goal: goal.value, action: action.value, decision });
+  }
+  const guardrails: EditMapView['guardrails'] = [];
+  for (const [i, g] of (v.guardrails as unknown[]).entries()) {
+    if (!isRecord(g)) return fail(`map.guardrails.${i}`);
+    const gid = id(g.id, `map.guardrails.${i}.id`); if (!gid.ok) return gid;
+    const condition = text(g.condition, `map.guardrails.${i}.condition`, 300); if (!condition.ok) return condition;
+    const action = text(g.requiredAction, `map.guardrails.${i}.requiredAction`, 300); if (!action.ok) return action;
+    const reason = nullableText(g.reason ?? null, `map.guardrails.${i}.reason`, 400); if (!reason.ok) return reason;
+    const escalateTo = nullableText(g.escalateTo ?? null, `map.guardrails.${i}.escalateTo`, 200); if (!escalateTo.ok) return escalateTo;
+    const exceptions = textList(g.exceptions ?? [], `map.guardrails.${i}.exceptions`, 10, 300); if (!exceptions.ok) return exceptions;
+    guardrails.push({ id: gid.value, condition: condition.value, requiredAction: action.value, reason: reason.value, escalateTo: escalateTo.value, exceptions: exceptions.value });
+  }
+  const gaps: EditMapView['gaps'] = [];
+  for (const [i, q] of (Array.isArray(v.gaps) ? v.gaps as unknown[] : []).slice(0, 10).entries()) {
+    if (!isRecord(q)) return fail(`map.gaps.${i}`);
+    const question = text(q.question, `map.gaps.${i}.question`, 300); if (!question.ok) return question;
+    gaps.push({ name: `gap-${i + 1}`, question: question.value });
+  }
+  const teachBack = text(v.teachBack ?? '', 'map.teachBack', 3000, 0); if (!teachBack.ok) return teachBack;
+  return { ok: true, value: { steps, guardrails, gaps, teachBack: teachBack.value } };
+}
+
+/** Drops operations that name an unknown item or field; quotes are kept only as spans of the utterance. */
+export function checkEdit(raw: unknown, map: EditMapView, utterance: string): MapEditOutput | null {
+  if (!isRecord(raw) || !exactKeys(raw, ['intent', 'operations', 'reply', 'teachBack'])) return null;
+  const { intent, operations, reply, teachBack } = raw;
+  if (intent !== 'edit' && intent !== 'confirm' && intent !== 'question' && intent !== 'other') return null;
+  if (!Array.isArray(operations) || !isStr(reply, 400) || (teachBack !== null && !isStr(teachBack, CAPS.teachBack))) return null;
+  const stepIds = new Set(map.steps.map((x) => x.id));
+  const ruleIds = new Set(map.guardrails.map((x) => x.id));
+  const gapNames = new Set(map.gaps.map((x) => x.name));
+  const ops: EditOperation[] = [];
+  for (const o of operations.slice(0, 6)) {
+    if (!isRecord(o) || !exactKeys(o, ['op', 'targetId', 'field', 'value', 'value2', 'quote'])) return null;
+    const { op, targetId, field } = o;
+    const value = isStr(o.value, CAPS.condition, 1) ? o.value : null;
+    const value2 = isStr(o.value2, CAPS.condition, 1) ? o.value2 : null;
+    if (typeof op !== 'string' || !(EDIT_OPS as readonly string[]).includes(op)) continue;
+    const target = typeof targetId === 'string' ? targetId : null;
+    const quote = typeof o.quote === 'string' ? findQuoteSpan(utterance, o.quote) : null;
+    const isStep = target !== null && stepIds.has(target);
+    const isRule = target !== null && ruleIds.has(target);
+    if (op === 'set') {
+      const fields: readonly string[] = isStep ? STEP_FIELDS : isRule ? RULE_FIELDS : [];
+      if (typeof field !== 'string' || !fields.includes(field) || value === null) continue;
+      ops.push({ op, targetId: target, field, value, value2: null, quote: field === 'reason' ? quote : null });
+    } else if (op === 'add_step') {
+      if (value === null || (target !== null && !isStep)) continue;
+      ops.push({ op, targetId: target, field: null, value, value2, quote: null });
+    } else if (op === 'add_rule') {
+      if (value === null || value2 === null) continue;
+      ops.push({ op, targetId: null, field: null, value, value2, quote });
+    } else if (op === 'remove') {
+      if (!isStep && !isRule) continue;
+      ops.push({ op, targetId: target, field: null, value: null, value2: null, quote: null });
+    } else if (op === 'comment') {
+      if ((!isStep && !isRule) || value === null) continue;
+      ops.push({ op, targetId: target, field: null, value, value2: null, quote: null });
+    } else if (op === 'resolve_gap') {
+      if (target === null || !gapNames.has(target)) continue;
+      ops.push({ op, targetId: target, field: null, value: null, value2: null, quote: null });
+    }
+  }
+  // An edit with nothing left to apply must not be announced as done.
+  if (intent === 'edit' && ops.length === 0) return { intent: 'other', operations: [], reply: '', teachBack: null };
+  return { intent, operations: intent === 'edit' ? ops : [], reply: reply.trim(), teachBack: intent === 'edit' && typeof teachBack === 'string' && teachBack.trim() ? teachBack.trim() : null };
+}
+
+const mapEdit: LlmTask = {
+  maxInputBytes: 48 * 1024,
+  prepare(body) {
+    if (!isRecord(body) || !onlyKeys(body, ['map', 'utterance', 'recent', 'language'])) return fail('body');
+    const map = parseEditMap(body.map); if (!map.ok) return map;
+    const utterance = text(body.utterance, 'utterance', 1000); if (!utterance.ok) return utterance;
+    const recent = parseTranscript(body.recent ?? [], 'recent', 8); if (!recent.ok) return recent;
+    const lang = language(body.language ?? null, 'language'); if (!lang.ok) return lang;
+    const input = { map: map.value, utterance: utterance.value, recent: recent.value, language: lang.value };
+    const nullableString = nullable(STRING);
+    const schema: Json = {
+      type: 'object', additionalProperties: false, required: ['intent', 'operations', 'reply', 'teachBack'],
+      properties: {
+        intent: { type: 'string', enum: ['edit', 'confirm', 'question', 'other'] },
+        operations: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['op', 'targetId', 'field', 'value', 'value2', 'quote'], properties: {
+          op: { type: 'string', enum: [...EDIT_OPS] }, targetId: nullableString, field: nullable({ type: 'string', enum: [...new Set([...STEP_FIELDS, ...RULE_FIELDS])] }),
+          value: nullableString, value2: nullableString, quote: nullableString,
+        } } },
+        reply: STRING,
+        teachBack: nullableString,
+      },
+    };
+    return { ok: true, request: { system: mapEditSystem, prompt: prompt(input), schema }, check: (raw) => checkEdit(raw, map.value, utterance.value) };
+  },
+};
+
 export const LLM_TASKS: Readonly<Record<string, LlmTask>> = Object.freeze({
   answer_extraction: answerExtraction,
   reply_classification: replyClassification,
@@ -526,4 +655,5 @@ export const LLM_TASKS: Readonly<Record<string, LlmTask>> = Object.freeze({
   generic_question: genericQuestion,
   map_synthesis: mapSynthesis,
   guardrail_check: guardrailCheck,
+  map_edit: mapEdit,
 });
