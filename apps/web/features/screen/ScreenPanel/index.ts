@@ -5,11 +5,26 @@ export interface ScreenPanelOptions {
   readonly capture: ScreenCapture;
   /** Supplied by the session owner; never derive an independent epoch here. */
   readonly session: () => CaptureSession;
+  /** Route lifecycle through the canonical bridge when the app shell mounts it. */
+  readonly controller?: ScreenPanelController;
+}
+
+export interface ScreenPanelController {
+  start(session: CaptureSession): void | Promise<void>;
+  pause(): void | Promise<void>;
+  resume(): void | Promise<void>;
+  stop(): void | Promise<void>;
 }
 
 /** A dependency-free DOM adapter that can be mounted inside the host's React effect. */
 export function mountScreenPanel(root: HTMLElement, options: ScreenPanelOptions): () => void {
   const { capture } = options;
+  const controller: ScreenPanelController = options.controller ?? {
+    start: (session) => capture.start(session),
+    pause: () => capture.pause(),
+    resume: () => { capture.resume(); },
+    stop: () => capture.stop(),
+  };
   const panel = document.createElement('section');
   panel.className = 'screen-panel';
   panel.setAttribute('aria-label', 'Screen sharing and privacy');
@@ -65,9 +80,17 @@ export function mountScreenPanel(root: HTMLElement, options: ScreenPanelOptions)
     target.addEventListener(event, handler);
     cleanup.push(() => target.removeEventListener(event, handler));
   }
-  function run(action: () => void) {
+  function run(action: () => void | Promise<void>) {
     error.textContent = '';
-    try { action(); } catch { error.textContent = 'Unable to apply this change. Check the mask coordinates and capture state.'; }
+    try {
+      // Invoke synchronously so start() preserves the getDisplayMedia user gesture.
+      const result = action();
+      void Promise.resolve(result).catch(() => {
+        error.textContent = 'Unable to apply this change. Check the mask coordinates and capture state.';
+      });
+    } catch {
+      error.textContent = 'Unable to apply this change. Check the mask coordinates and capture state.';
+    }
   }
   function addMask(rect: Omit<PrivacyMask, 'id'>) {
     let id: string;
@@ -130,20 +153,20 @@ export function mountScreenPanel(root: HTMLElement, options: ScreenPanelOptions)
   }));
 
   listen(button('start'), 'click', () => {
-    error.textContent = '';
     // This must stay in the trusted click handler, before any awaited operation.
-    try { void capture.start(options.session()).catch(() => { error.textContent = 'Stop the current capture before starting again.'; }); }
-    catch { error.textContent = 'A valid session is required before sharing.'; }
+    run(() => controller.start(options.session()));
   });
-  listen(button('pause'), 'click', () => capture.pause());
-  listen(button('resume'), 'click', () => run(() => { capture.resume(); }));
-  listen(button('stop'), 'click', () => capture.stop());
+  listen(button('pause'), 'click', () => run(() => controller.pause()));
+  listen(button('resume'), 'click', () => run(() => controller.resume()));
+  listen(button('stop'), 'click', () => run(() => controller.stop()));
   listen(button('edit'), 'click', () => run(() => capture.beginMaskReview()));
   listen(button('confirm'), 'click', () => run(() => {
     const revision = snapshot.geometry?.revision;
-    if (revision === undefined || !capture.confirmMasks(revision) || !capture.resume()) {
+    if (revision === undefined || !capture.confirmMasks(revision)) {
       error.textContent = 'The source changed or is unavailable. Check masks again before sharing.';
+      return;
     }
+    return controller.resume();
   }));
   listen(button('add'), 'click', () => run(() => {
     const value = (key: string) => Number(panel.querySelector<HTMLInputElement>(`[data-coordinate="${key}"]`)!.value) / 100;
@@ -174,7 +197,12 @@ export function mountScreenPanel(root: HTMLElement, options: ScreenPanelOptions)
   return () => {
     clearDrag();
     cleanup.forEach((unsubscribe) => unsubscribe());
+    // Unmount is a privacy boundary: close local capture synchronously even if
+    // an external transport controller throws, rejects, or never settles.
     capture.stop();
+    if (options.controller) {
+      try { void Promise.resolve(controller.stop()).catch(() => {}); } catch { /* Local capture is already closed. */ }
+    }
     capture.canvas.remove();
     panel.remove();
   };

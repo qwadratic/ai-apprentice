@@ -1,7 +1,8 @@
 import type { ApiModule } from './app.ts';
-import { agentModule } from '../agent/index.ts';
-import { opsModule } from '../ops/index.ts';
-// Owners register explicit wrappers here. Published screen/index.mjs needs registerWebRoute, service and authorize.
-// Modules remain absent until real dependencies exist; see docs/web-foundation.md.
-// ops first: it must see the raw signed body before any other module could add a body parser.
-export const modules: ApiModule[] = [opsModule, agentModule];
+import {agentModule, authorize} from '../agent/index.ts';
+import {opsModule} from '../ops/index.ts';
+import {createScreenModule} from './screen-module.ts';
+
+const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? '').split(',').map(value => value.trim()).filter(Boolean);
+// Preserve the raw signed deploy route before feature module registration.
+export const modules: ApiModule[] = [opsModule, agentModule, createScreenModule({authorize, allowedOrigins, env: process.env})];
