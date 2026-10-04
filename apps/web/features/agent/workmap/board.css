@@ -196,6 +196,10 @@
 .wm-col { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
 .wm-col--side > section { display: flex; flex-direction: column; }
 .wm-cards { display: flex; flex-direction: column; gap: 12px; }
+/* Maps with two or more business processes: each process's cards under its title. */
+.wm-process { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.wm-col--side .wm-process + .wm-process { margin-top: 18px; }
+.wm-process__title { color: var(--wm-accent); font-size: 0.78rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; padding-bottom: 6px; border-bottom: 1px solid var(--wm-border); overflow-wrap: anywhere; }
 .wm-card {
   position: relative; background: var(--wm-surface); border: 1px solid var(--wm-border); border-radius: var(--wm-radius);
   box-shadow: var(--wm-shadow); cursor: pointer; transition: border-color 0.15s, box-shadow 0.15s;

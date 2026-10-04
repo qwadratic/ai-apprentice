@@ -1,3 +1,4 @@
+import { SCREEN_ACTIVITY_LIMITS as LIMITS } from './types.ts';
 import type { ActionCheckpoint, CheckpointReply, ScreenEvidence, ScreenObservation, ScreenStatus, SessionStart } from './types.ts';
 export class ContractValidationError extends Error {
   constructor(message: string) { super(message); this.name = 'ContractValidationError'; }
@@ -25,6 +26,35 @@ function ids(value: unknown, path: string): void {
   if (new Set(value).size !== value.length) fail(`${path} duplicates`);
 }
 function version(value: Record<string, unknown>): void { choice(value.schemaVersion, [1], 'schemaVersion'); }
+// Control characters other than tab and line breaks; the conductor drops such strings.
+const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/;
+const REGION_ID = /^[A-Za-z0-9._:-]+$/;
+function text(value: unknown, path: string, max: number, nullable = false): void {
+  if (nullable && value === null) return;
+  if (typeof value !== 'string' || !value.trim() || value.length > max || CONTROL.test(value)) fail(path);
+}
+function box(value: unknown, path: string): void {
+  if (!Array.isArray(value) || value.length !== 4 || !value.every((n) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1)) fail(path);
+  const [x, y, w, h] = value as number[];
+  // A small tolerance for float sums, the same as the conductor's.
+  if ((x as number) + (w as number) > 1.0001 || (y as number) + (h as number) > 1.0001) fail(path);
+}
+function screenActivity(f: Record<string, unknown>): void {
+  keys(f, ['app', 'surface', 'summary', 'change', 'entities', 'pendingAction', 'pendingRegionId', 'regions']);
+  text(f.app, 'app', LIMITS.app, true); text(f.surface, 'surface', LIMITS.surface); text(f.summary, 'summary', LIMITS.summary);
+  text(f.change, 'change', LIMITS.change, true); text(f.pendingAction, 'pendingAction', LIMITS.pendingAction, true);
+  if (!Array.isArray(f.entities) || f.entities.length > LIMITS.entities) fail('entities');
+  for (const entity of f.entities) text(entity, 'entity', LIMITS.entity);
+  if (!Array.isArray(f.regions) || f.regions.length > LIMITS.regions) fail('regions');
+  const regionIds = new Set<string>();
+  for (const region of f.regions) {
+    const r = record(region, 'region'); keys(r, ['id', 'label', 'box']);
+    text(r.id, 'region.id', LIMITS.regionId);
+    if (!REGION_ID.test(r.id as string) || regionIds.has(r.id as string)) fail('region.id');
+    regionIds.add(r.id as string); text(r.label, 'region.label', LIMITS.regionLabel); box(r.box, 'region.box');
+  }
+  if (f.pendingRegionId !== null && !regionIds.has(f.pendingRegionId as string)) fail('pendingRegionId');
+}
 function revisions(value: unknown, path: string): void {
   const v = record(value, path); keys(v, ['order', 'email']);
   string(v.order, `${path}.order`, true); string(v.email, `${path}.email`, true);
@@ -71,6 +101,11 @@ export function parseScreenObservation(value: unknown): ScreenObservation {
       if (typeof f.typing !== 'boolean') fail('typing'); integer(f.idleMs, 'idleMs'); integer(f.lastInputAtMs, 'lastInputAtMs');
       if (f.idleMs !== (v.timestampMs as number) - (f.lastInputAtMs as number)) fail('idleMs/lastInputAtMs mismatch');
       if (v.source !== 'workspace' || v.frameId !== null || v.sourceRevision !== null || v.entityRef !== null || (v.evidenceIds as string[]).length) fail('input_activity workspace provenance');
+      break;
+    case 'screen_activity':
+      screenActivity(f);
+      // Generic vision never names an entity and carries no workspace revision.
+      if (v.entityRef !== null || v.sourceRevision !== null) fail('screen_activity entityRef/sourceRevision');
       break;
     default: fail('kind');
   }

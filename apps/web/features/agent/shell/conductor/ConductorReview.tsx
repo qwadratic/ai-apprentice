@@ -107,6 +107,7 @@ export function ConductorReview() {
           gaps={board.gaps}
           title="Work Map"
           inlineMoment={false}
+          processes={board.processes}
           onSeek={(evidenceId) => controller.openEvidence(evidenceId)}
           onGapSelect={(gap) => controller.uiAction('answer_gap', gap.id)}
           onCardSelect={(card) => {
