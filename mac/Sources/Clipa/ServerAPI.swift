@@ -33,11 +33,13 @@ struct EncodedFrame: Sendable {
     let changedCells: Int
     /// `ProcessInfo.systemUptime` when ScreenCaptureKit delivered it.
     let captured: TimeInterval
+    /// The mouse pointer at capture (its ring is drawn on `jpeg`); nil when off the display or turned off.
+    var pointer: PointerTracker.Snapshot? = nil
 
     /// The same picture sent again later (the screen has not changed since): a new id and a new timestamp.
     func restamped(at timestampMs: Int, id: String) -> EncodedFrame {
         EncodedFrame(frameId: id, timestampMs: max(timestampMs, self.timestampMs + 1), jpeg: jpeg, width: width,
-                     height: height, changedCells: 0, captured: ProcessInfo.processInfo.systemUptime)
+                     height: height, changedCells: 0, captured: ProcessInfo.processInfo.systemUptime, pointer: pointer)
     }
 }
 
@@ -150,9 +152,11 @@ final class ServerAPI: @unchecked Sendable {
         let outcome: String
     }
 
-    /// `POST /screen/sessions/{id}/frames`: one processed JPEG frame, padded base64, generic provenance (no surface).
-    func uploadFrame(sessionId: String, token: String, generation: Int, captureGeneration: Int, frame: EncodedFrame) async throws -> FrameReply {
-        let payload: [String: Any] = [
+    /// `POST /screen/sessions/{id}/frames`: one processed JPEG frame, padded base64, generic provenance (no surface),
+    /// and the optional `pointer` hint `{x, y, dwellMs, trail: [[x, y, msAgo]]}` when `withPointer`.
+    func uploadFrame(sessionId: String, token: String, generation: Int, captureGeneration: Int, frame: EncodedFrame,
+                     withPointer: Bool = true) async throws -> FrameReply {
+        var payload: [String: Any] = [
             "generation": generation,
             "frameId": frame.frameId,
             "timestampMs": frame.timestampMs,
@@ -161,6 +165,7 @@ final class ServerAPI: @unchecked Sendable {
             "data": frame.jpeg.base64EncodedString(),
             "provenance": ["surface": NSNull(), "sourceRevision": NSNull(), "captureGeneration": captureGeneration] as [String: Any],
         ]
+        if withPointer, let pointer = frame.pointer { payload["pointer"] = pointer.payload }
         let (status, json) = try await call(try request("/screen/sessions/\(sessionId)/frames", method: "POST", token: token,
                                                         body: try Self.json(payload)))
         let outcome = (json["outcome"] as? String) ?? Self.errorCode(json)

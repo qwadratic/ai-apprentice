@@ -37,6 +37,8 @@ final class FrameUploader {
     private var wake: Task<Void, Never>?
     private var retries = 0
     private var resent = 0
+    /// Off once a server refuses frames with the pointer hint (a server older than the hint): frames go without it.
+    private var sendPointer = true
 
     init(api: ServerAPI, session: AgentSession, clock: SessionClock, interval: TimeInterval, log: SessionLog) {
         self.api = api
@@ -93,11 +95,12 @@ final class FrameUploader {
         let session = self.session
         let generation = self.generation
         let captureGeneration = self.captureGeneration
+        let withPointer = self.sendPointer
         Task { [weak self] in
             var outcome = "network"
             do {
                 let reply = try await api.uploadFrame(sessionId: session.id, token: session.token, generation: generation,
-                                                      captureGeneration: captureGeneration, frame: frame)
+                                                      captureGeneration: captureGeneration, frame: frame, withPointer: withPointer)
                 outcome = reply.outcome
             } catch let error as APIError {
                 outcome = error.description
@@ -139,6 +142,12 @@ final class FrameUploader {
             }
         case "accepted", "duplicate":
             resent = 0
+        case "invalid_request" where sendPointer && frame.pointer != nil:
+            // An older server takes no pointer hint: the same frame goes again without it, and so do the next ones.
+            stats.failed += 1
+            sendPointer = false
+            log.write("pointer_hint_off", ["reason": outcome])
+            if pending == nil, active { pending = frame }
         case "network":
             stats.failed += 1
             if pending == nil, active, retries < 2 {

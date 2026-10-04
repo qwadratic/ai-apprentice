@@ -58,8 +58,8 @@
   top: 0;
   z-index: 5;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  grid-template-areas: "brand rail tools";
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  grid-template-areas: "brand links rail tools";
   align-items: center;
   gap: 6px 20px;
   padding: 8px 20px 6px;
@@ -73,6 +73,12 @@
 .apprentice-shell .as-logo svg { display: block; flex: none; height: 64px; width: auto; }
 .apprentice-shell .as-header__tools { grid-area: tools; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
 .apprentice-shell a.as-btn--link { display: inline-flex; align-items: center; text-decoration: none; color: inherit; }
+/* Videos and the download: quiet links next to the logo, apart from Clipa's controls on the right. */
+.apprentice-shell .as-header__links { grid-area: links; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding-left: 14px; border-left: 1px solid var(--as-border); }
+.apprentice-shell .as-hlink { display: inline-flex; align-items: center; gap: 6px; color: var(--as-muted); text-decoration: none; font-size: 0.86rem; line-height: 1.5; white-space: nowrap; }
+.apprentice-shell .as-hlink span { font-size: 0.72rem; opacity: 0.8; }
+.apprentice-shell .as-hlink:hover { color: inherit; text-decoration: underline; }
+.apprentice-shell .as-hlink:focus-visible { outline: 3px solid var(--as-focus); outline-offset: 2px; border-radius: 4px; }
 
 /* Visible to screen readers only. */
 .apprentice-shell .as-sr {
@@ -821,7 +827,7 @@
 
 /* ---- Narrow screens --------------------------------------------------------- */
 @media (max-width: 1100px) {
-  .apprentice-shell .as-header { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "brand tools" "rail rail"; }
+  .apprentice-shell .as-header { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-areas: "brand links tools" "rail rail rail"; }
   .apprentice-shell .as-rail { width: 100%; }
 }
 @media (max-width: 900px) {
@@ -836,6 +842,8 @@
   /* The header scrolls away on a phone; Clipa then waits in the corner until the rail is back on screen. */
   .apprentice-shell .as-header { position: static; padding: 8px 12px 4px; gap: 4px 8px; }
   .apprentice-shell .as-logo svg { height: 44px; }
+  .apprentice-shell .as-header { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "brand tools" "links links" "rail rail"; }
+  .apprentice-shell .as-header__links { flex-direction: row; flex-wrap: wrap; gap: 4px 14px; padding-left: 0; border-left: 0; }
   .apprentice-shell .as-header__tools { gap: 6px; }
   .apprentice-shell .as-header__tools .as-btn { padding: 6px 10px; font-size: 0.88rem; }
   .apprentice-shell .as-rail { --as-seat: 46px; --as-node: 26px; }

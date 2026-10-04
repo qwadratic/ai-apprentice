@@ -1,5 +1,7 @@
 // Runtime configuration and the sliding-window limiter for the agent API module.
 import type { Request } from 'express';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 export type Json = Record<string, unknown>;
 export const isRecord = (v: unknown): v is Json => typeof v === 'object' && v !== null && !Array.isArray(v);
 export type LogFields = Record<string, unknown>;
@@ -26,6 +28,12 @@ export interface AgentOptions {
   publicWebUrl?: string;
   /** Work Maps on disk (confirmed maps and the last built one), so a restart keeps them. Default: env AGENT_MAPS_FILE, else /var/lib/apprentice/maps.json; '' keeps them in memory only. */
   mapsFile?: string;
+  /** Voice-over cache (GET /api/agent/voiceover/:id). Default: {env MEDIA_DIR, else /var/lib/apprentice}/voiceover. */
+  voiceoverDir?: string;
+  /** The whitelist of voice-over lines. Default: agent/voiceover/lines.json next to this file. */
+  voiceoverLinesFile?: string;
+  /** Voice ids per role, over the defaults. Default: env ELEVENLABS_VOICEOVER_VOICES (JSON {narrator:"id",...}). */
+  voiceoverVoices?: Record<string, string>;
   fetch?: FetchFn;
   now?: () => number;
   log?: Logger;
@@ -89,6 +97,10 @@ export interface AgentConfig {
   publicWebUrl: string;
   /** The Work Map file; '' when maps stay in memory only. */
   mapsFile: string;
+  voiceoverDir: string;
+  voiceoverLinesFile: string;
+  /** Overrides only; roles without one use the voice-over defaults. */
+  voiceoverVoices: Record<string, string>;
   limits: Limits;
   timing: Timing;
   fetch: FetchFn;
@@ -104,6 +116,21 @@ function positiveInt(env: NodeJS.ProcessEnv, name: string, fallback: number, log
   if (/^\s*\d+\s*$/.test(raw) && Number.isSafeInteger(n) && n > 0) return n;
   log({ level: 'warn', msg: 'invalid agent limit in environment; using the default', name, default: fallback });
   return fallback;
+}
+
+/** ELEVENLABS_VOICEOVER_VOICES: a JSON object of role -> voice id; anything else is ignored with a warning (no value logged). */
+function parseVoices(raw: string | undefined, log: Logger): Record<string, string> {
+  if (raw === undefined || raw.trim() === '') return {};
+  try {
+    const v: unknown = JSON.parse(raw);
+    if (isRecord(v)) {
+      const out: Record<string, string> = {};
+      for (const [k, id] of Object.entries(v)) if (typeof id === 'string' && /^[A-Za-z0-9]{8,64}$/.test(id)) out[k] = id;
+      return out;
+    }
+  } catch { /* fall through */ }
+  log({ level: 'warn', msg: 'invalid ELEVENLABS_VOICEOVER_VOICES; using the default voices' });
+  return {};
 }
 
 export function resolveConfig(options: AgentOptions = {}, env: NodeJS.ProcessEnv = process.env): AgentConfig {
@@ -156,6 +183,9 @@ export function resolveConfig(options: AgentOptions = {}, env: NodeJS.ProcessEnv
     fastModel: options.fastModel ?? env.AGENT_FAST_MODEL ?? 'claude-haiku-4-5-20251001',
     publicWebUrl: options.publicWebUrl ?? (env.PUBLIC_WEB_URL || 'https://qwadratic.github.io/clipa/'),
     mapsFile: (options.mapsFile ?? env.AGENT_MAPS_FILE ?? '/var/lib/apprentice/maps.json').trim(),
+    voiceoverDir: options.voiceoverDir ?? join(env.MEDIA_DIR || '/var/lib/apprentice', 'voiceover'),
+    voiceoverLinesFile: options.voiceoverLinesFile ?? fileURLToPath(new URL('./voiceover/lines.json', import.meta.url)),
+    voiceoverVoices: options.voiceoverVoices ?? parseVoices(env.ELEVENLABS_VOICEOVER_VOICES, log),
     limits, timing,
     fetch: options.fetch ?? ((input, init) => fetch(input, init)),
     now: options.now ?? Date.now,

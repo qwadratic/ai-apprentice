@@ -40,6 +40,8 @@ final class ClipaController {
     let voice = VoiceAgent()
     let api: ServerAPI
     let streamer: ScreenStreamer
+    /// Nil when `pointer_marker` is off.
+    let pointer: PointerTracker?
 
     private(set) var menuBar: MenuBarController?
     private(set) var stage: Stage = .idle
@@ -70,8 +72,10 @@ final class ClipaController {
 
     init() {
         api = ServerAPI(config: config)
+        let tracker: PointerTracker? = config.pointerMarker ? PointerTracker() : nil
+        pointer = tracker
         streamer = ScreenStreamer(settings: ScreenStreamer.Settings(
-            fps: config.fps, maxWidth: config.maxWidth, jpegQuality: config.jpegQuality))
+            fps: config.fps, maxWidth: config.maxWidth, jpegQuality: config.jpegQuality), pointer: tracker)
     }
 
     var isIdle: Bool { stage == .idle }
@@ -352,6 +356,7 @@ final class ClipaController {
             uploader.captureGeneration = captureGeneration
             uploader.active = true
             try await streamer.start(clock: clock)
+            pointer?.start(display: streamer.displayFrame)
             screenState = "streaming"
             log.write("screen_start", ["generation": uploader.generation, "size": "\(Int(streamer.outputSize.width))x\(Int(streamer.outputSize.height))"])
             conductor?.send(["type": "share", "state": "capturing", "reason": NSNull()])
@@ -375,6 +380,7 @@ final class ClipaController {
     func stopScreen(command: String, reason: String?, session: AgentSession?, uploader: FrameUploader?) async {
         uploader?.active = false
         uploader?.dropPending()
+        pointer?.stop()
         await streamer.stop()
         screenState = command == "pause" ? "paused (off the record)" : "off"
         guard let session, let uploader else { return }
@@ -392,6 +398,7 @@ final class ClipaController {
         log.write("screen_error", ["error": reason])
         screenState = reason
         uploader?.active = false
+        pointer?.stop()
         if isLive && !offTheRecord {
             conductor?.send(["type": "share", "state": "unavailable", "reason": "capture_stopped"])
         }

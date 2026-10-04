@@ -3,6 +3,7 @@ import type {ProcessedFrame, ScreenMediaType} from './evidence-store.ts';
 import {EvidenceError, normalizeFrame} from './evidence-store.ts';
 import type {FrameUpload, ScreenSessionHandle} from './session-transport.ts';
 import {ScreenSessionHub, SessionTransportError} from './session-transport.ts';
+import {parsePointerHint} from './pointer.ts';
 import type {VisionSurface} from '../../../packages/screen/vision/queue.ts';
 
 const json = (body: unknown, status = 200): Response => Response.json(body, {status, headers: {'cache-control': 'no-store'}});
@@ -49,7 +50,8 @@ export function createScreenHandlers({hub, allowOrigin, maxBodyBytes = 12_000_00
     }),
     frames: authenticated(async (request, _context, session) => {
       const body = record(await readJson(request, maxBodyBytes));
-      exactKeys(body, ['generation', 'frameId', 'timestampMs', 'processed', 'mediaType', 'data', 'provenance']);
+      const frameKeys = ['generation', 'frameId', 'timestampMs', 'processed', 'mediaType', 'data', 'provenance'];
+      exactKeys(body, frameKeys, [...frameKeys, 'pointer']);
       const data = encodedFrame(body.data); if (data.length % 4 !== 0) throw new RequestError('invalid_request');
       const bytes = Buffer.from(data, 'base64'); if (bytes.toString('base64') !== data) throw new RequestError('invalid_request');
       const provenance = parseProvenance(body.provenance);
@@ -57,7 +59,9 @@ export function createScreenHandlers({hub, allowOrigin, maxBodyBytes = 12_000_00
         timestampMs: safeInteger(body.timestampMs), processed: body.processed,
         mediaType: mediaType(body.mediaType), bytes});
       const generation = safeInteger(body.generation);
-      const outcome = hub.offer(session, {generation, frame, provenance});
+      // Optional, from the macOS app: a malformed pointer hint is dropped, never a reason to refuse the frame.
+      const pointer = parsePointerHint(body.pointer);
+      const outcome = hub.offer(session, {generation, frame, provenance, pointer});
       const ok = ['accepted', 'duplicate', 'sampled_out'].includes(outcome);
       return json({ok, outcome, sessionId: session.sessionId, generation, frameId: frame.frameId},
         outcome === 'accepted' ? 202 : ok ? 200 : outcome === 'invalid' ? 400 : 409);

@@ -8,6 +8,13 @@ import { ToneMenu } from './ToneMenu.tsx';
 /** The latest macOS build, published by macos-build.yml on every push to main under one fixed release tag. */
 export const MAC_DOWNLOAD_URL = 'https://github.com/qwadratic/clipa/releases/download/clipa-macos-latest/Clipa.dmg';
 
+/** The Vite base path (`/clipa/` on Pages). Node tests render this file without import.meta.env, hence the fallback. */
+const BASE_URL: string = import.meta.env?.BASE_URL ?? '/';
+/** The submission videos, served from apps/web/public/videos. */
+/** The product demo: the story of the three stages on the customer_07 case (about a minute, synthetic data, AI voice). */
+export const DEMO_VIDEO_URL = `${BASE_URL}videos/clipa-story.mp4`;
+export const TECH_VIDEO_URL = `${BASE_URL}videos/clipa-tech.mp4`;
+
 interface HeaderProps {
   debugOpen: boolean;
   onToggleDebug: () => void;
@@ -15,7 +22,7 @@ interface HeaderProps {
   headerRef?: Ref<HTMLElement>;
 }
 
-/** The header: the Clipa wordmark, the journey rail (the mode switcher), the macOS download, Off the record, Lead me through, Clipa's tone and Debug. */
+/** The header: the Clipa wordmark, the videos and the macOS download, the journey rail (the mode switcher), then Clipa's controls: the microphone, Lead me through, her tone and Debug. */
 export function Header({ debugOpen, onToggleDebug, headerRef }: HeaderProps) {
   const { controller } = useShell();
   const offRecord = useShellState((s) => s.offRecord);
@@ -29,12 +36,23 @@ export function Header({ debugOpen, onToggleDebug, headerRef }: HeaderProps) {
         <span className="as-sr">Learns your judgment, then teaches it</span>
       </div>
 
+      {/* Things to watch and download, apart from the controls that steer Clipa. */}
+      <nav className="as-header__links" aria-label="Videos and downloads">
+        <a className="as-hlink" href={DEMO_VIDEO_URL} target="_blank" rel="noopener noreferrer" title="The product in about a minute">
+          <span aria-hidden="true">▶</span> Demo video
+        </a>
+        <a className="as-hlink" href={TECH_VIDEO_URL} target="_blank" rel="noopener noreferrer" title="How it is built, with the live product running, in about a minute">
+          <span aria-hidden="true">▶</span> Tech video
+        </a>
+        <a className="as-hlink" href={MAC_DOWNLOAD_URL} title="Clipa for macOS: open the disk image and drag Clipa to Applications. Not notarized: on the first launch, System Settings > Privacy & Security > Open Anyway.">
+          <span aria-hidden="true">↓</span> macOS app
+        </a>
+      </nav>
+
       <JourneyRail />
 
+      {/* Clipa's controls. */}
       <div className="as-header__tools">
-        <a className="as-btn as-btn--link" href={MAC_DOWNLOAD_URL} title="Clipa for macOS: open the disk image and drag Clipa to Applications. Not notarized: on the first launch, System Settings > Privacy & Security > Open Anyway.">
-          macOS app
-        </a>
         {offRecord ? (
           <button type="button" className="as-btn as-btn--off is-on" aria-pressed onClick={() => controller.backOnRecord()}>
             Back on record

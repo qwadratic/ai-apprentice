@@ -1,0 +1,33 @@
+{
+  "durationSec": 22,
+  "title": "How the screen becomes knowledge",
+  "subtitle": "Four layers, one example: the customer_07 email",
+  "exampleLabel": "Example: customer_07, synthetic data",
+  "layers": [
+    {
+      "name": "Capture",
+      "caption": "A frame every 1.5 s from the shared window, masked in the browser.",
+      "example": "Frame 41: email draft, template image attached"
+    },
+    {
+      "name": "Vision",
+      "caption": "Each frame becomes one typed observation, linked to its frame as evidence.",
+      "example": "email_draft: attachments 0, body has address and time"
+    },
+    {
+      "name": "Changes",
+      "caption": "Consecutive observations are compared and the change gets a name.",
+      "example": "attachment_removed + body_text_added"
+    },
+    {
+      "name": "Knowledge",
+      "caption": "Answers and changes become the Work Map: steps, reasons, scope.",
+      "example": "Rule: customer_07 gets the details as text"
+    }
+  ],
+  "question": {
+    "ask": "You removed the template image and typed the details. Why for this customer?",
+    "answer": "He asked to get them as text."
+  },
+  "footer": "Source: backlog doc-11. The question and the answer are an invented example."
+}
