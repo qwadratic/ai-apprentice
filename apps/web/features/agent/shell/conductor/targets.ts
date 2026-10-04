@@ -24,10 +24,14 @@ const esc = (value: string): string => value.replace(/["\\]/g, '\\$&');
 export function uiSelectors(target: UiTarget): string[] {
   const name = esc(target.name);
   const list: string[] = [];
-  if (target.mode) list.push(`[${TARGET_ATTR}="${name}"][data-mode="${esc(target.mode)}"]`);
+  if (target.mode) {
+    const mode = esc(target.mode);
+    list.push(`[${TARGET_ATTR}="${name}"][data-mode="${mode}"]`);
+    // A stage of the journey rail by its mode: the rail's own "next" mark may name another stage than this cue.
+    if (target.name === 'mode_tab') list.push(`#as-tab-${mode}`, `[${TARGET_ATTR}="stage-${mode}"]`);
+  }
   list.push(`[${TARGET_ATTR}="${name}"]`);
-  if (target.name === 'mode_tab' && target.mode) list.push(`#as-tab-${esc(target.mode)}`);
-  if (target.name === 'start') list.push('.as-session .as-row .as-btn--primary');
+  if (target.name === 'start') list.push('.as-session .as-btn--primary');
   return list;
 }
 

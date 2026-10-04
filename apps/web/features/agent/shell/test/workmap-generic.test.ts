@@ -81,8 +81,8 @@ function faceRig(options: { voice?: boolean; busy?: boolean; now?: number | null
     speak: (text) => { if (options.voice === false) return false; spoken.push(text); return true; },
     context: (text) => { contexts.push(text); },
     personBusy: () => options.busy === true,
-    bubble: () => {},
-    point: (t) => { pointed.push(t); },
+    present: (_text, t) => { if (t !== undefined) pointed.push(t); },
+    guide: () => {},
     pose: () => {},
     log: () => {},
     sessionNow: () => (options.now === undefined ? 0 : options.now),
@@ -128,7 +128,7 @@ test('face: a newer spoken cue interrupts the one still being said', () => {
 
 test('targets: UI selectors with mode and fallbacks; region boxes map onto the preview canvas', () => {
   assert.deepEqual(uiSelectors({ kind: 'ui', name: 'mode_tab', mode: 'review' }), [
-    '[data-clipa-target="mode_tab"][data-mode="review"]', '[data-clipa-target="mode_tab"]', '#as-tab-review',
+    '[data-clipa-target="mode_tab"][data-mode="review"]', '#as-tab-review', '[data-clipa-target="stage-review"]', '[data-clipa-target="mode_tab"]',
   ]);
   assert.deepEqual(boxRect({ left: 100, top: 50, width: 400, height: 200 }, [0.5, 0.25, 0.25, 0.5]), { left: 300, top: 100, width: 100, height: 100 });
   const canvas = { getBoundingClientRect: () => ({ left: 10, top: 20, width: 200, height: 100 }) };

@@ -22,6 +22,7 @@ function conductorRig(options: { linkStatus?: number } = {}) {
   const presenter = new FakePresenter();
   const brain = new ScriptedBrain();
   const pointed: Array<Target | null> = [];
+  const guides: Array<{ phase: string; step: string; text: string } | null> = [];
   const api: AgentApi = createAgentApi({ base: 'https://api.example.invalid', fetch, now: clock.now, newId: () => 'legacy' });
   const memory = new Map<string, string>();
   const deps: ControllerDeps = {
@@ -30,14 +31,18 @@ function conductorRig(options: { linkStatus?: number } = {}) {
     createSampleSource: () => new SampleObservationSource(clock.now, timers, 'neutral'),
     presenter, now: clock.now, perfNow: () => timers.now, timers, isHidden: () => false,
     storage: { get: (k) => memory.get(k) ?? null, set: (k, v) => { memory.set(k, v); } },
-    conductor: { base: 'https://api.example.invalid', version: 'web-test', pointAt: (t) => pointed.push(t) },
+    conductor: {
+      base: 'https://api.example.invalid', version: 'web-test',
+      present: (_text, target) => { if (target !== undefined) pointed.push(target); },
+      guide: (step) => { guides.push(step); },
+    },
   };
   const controller = new ShellController(deps);
   /** Every conductor event posted so far, in order. */
   const events = (): Array<{ seq: number; event: Record<string, unknown> }> =>
     c.calls.filter((x) => x.url.endsWith('/events')).flatMap((x) => (x.body as { events: Array<{ seq: number; event: Record<string, unknown> }> }).events);
   const sessionPosts = (): number => rest.calls.filter((x) => x.url.endsWith('/api/agent/sessions') && x.method === 'POST').length;
-  return { controller, timers, voice, presenter, brain, pointed, conductor: c, rest, events, sessionPosts };
+  return { controller, timers, voice, presenter, brain, pointed, guides, conductor: c, rest, events, sessionPosts };
 }
 
 async function booted(options: { join?: string; page?: 'review' | 'teach'; linkStatus?: number; lastCueSeq?: number } = {}) {
@@ -220,6 +225,7 @@ test('a guide cue shows its line and points at its UI target; a cancel clears it
   await settle();
   assert.equal(rig.presenter.bubble, 'Share your whole screen.');
   assert.deepEqual(rig.pointed.at(-1), { kind: 'ui', name: 'share' });
+  assert.deepEqual(rig.guides.at(-1), { phase: 'share', step: 'welcome', text: 'Share your whole screen.' });
   rig.conductor.streams[0]?.push(sseCue(cue(2, { type: 'cancel', cueId: 'c1-abcdef12' })));
   await settle();
   assert.equal(rig.controller.conductorStore.getState().line, null);

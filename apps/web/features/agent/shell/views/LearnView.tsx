@@ -32,8 +32,8 @@ export function LearnView() {
       <ConductorLine />
       {leads && (
         <p className="as-note" data-testid="learn-conductor-hint">
-          Share your whole screen, start Learn and work in any app. Clipa watches quietly and asks only at a natural pause: never while
-          you type or talk. Answer by voice; Reflect then shows the map she made of your steps and rules.
+          Press Start Show, share your whole screen and work in any app. Clipa watches quietly and asks only at a natural pause: never
+          while you type or talk. Answer by voice; Reflect then shows the map she made of your steps and rules.
         </p>
       )}
       {!leads && !brain.wired && (

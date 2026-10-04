@@ -44,8 +44,8 @@ export function ConductorReview() {
       </p>
       {board === null && (
         <p className="as-empty" data-testid="conductor-no-map">
-          No map yet. Run Show first (share your screen, start Learn and work), then start Reflect: Clipa builds the map from what she saw
-          and heard.
+          No map yet. Run Show first (press Start Show, share your screen and work), then press Start Reflect: Clipa builds the map from
+          what she saw and heard.
         </p>
       )}
 

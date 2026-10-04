@@ -1,12 +1,13 @@
 // Wires the real world (browser fetch, timers, ElevenLabs, localStorage, the Clipa motion director) into the controller.
-import { createClipaDirector, estimateSpeechMs } from '../clipa/src/index.ts';
+import { createClipaDirector } from '../clipa/src/index.ts';
+import type { ClipaTarget } from '../clipa/src/index.ts';
 import '../../demo-workspace/workspace.css';
 import { createDemoWorkspaceAdapter } from './slots/demo-workspace-adapter.ts';
 import type { WorkspaceAdapter } from './slots/workspace-adapter.ts';
 import { createAgentApi } from './api.ts';
 import type { FetchLike } from './api.ts';
 import { AgentBrain } from './brain/agent-brain.ts';
-import { createDirectorPresenter } from './clipa/director-presenter.ts';
+import { POINT_HOLD_MS, createDirectorPresenter } from './clipa/director-presenter.ts';
 import { InputGuard, watchPageInput } from './clipa/input-guard.ts';
 import { createClipaStore } from './clipa/presenter.ts';
 import type { ClipaStore } from './clipa/presenter.ts';
@@ -14,6 +15,8 @@ import { resolveClipaTarget } from './clipa/targets.ts';
 import { API_BASE } from './config.ts';
 import { readJoinParams, withoutJoinParams } from './conductor/join.ts';
 import type { Target } from './conductor/protocol.ts';
+import type { ConductorLine } from './conductor/store.ts';
+import type { BrainDecision } from './brain/types.ts';
 import { CONDUCTOR_SURFACE, clipaHint, resolveTarget as resolveConductorTarget } from './conductor/targets.ts';
 import { ShellController } from './controller.ts';
 import type { ControllerTimers, KeyValueStorage } from './controller.ts';
@@ -47,6 +50,8 @@ export interface ShellRuntime {
 
 /** The web app's version in the conductor hello. */
 export const WEB_FACE_VERSION = 'web-1.1';
+/** Clipa stays beside a region of the screen preview this long: it is what the question or warning is about. */
+const REGION_HOLD_MS = 9000;
 
 const browserTimers: ControllerTimers = {
   setTimeout: (callback, ms) => window.setTimeout(callback, ms),
@@ -103,7 +108,9 @@ export function createRuntime(): ShellRuntime {
   let lastInputAt: number | null = null;
   let onTyping: () => void = () => {};
   const stopInputClock = watchPageInput({ noteInput: () => { lastInputAt = Date.now(); onTyping(); } }, document);
-  // Conductor targets the director flies to: the hint names the target, this map holds its box (regions move with the preview).
+  // Conductor targets the director flies to: the hint names the target, this map holds it (a region's box is read from the
+  // live preview when she flies, so it follows the preview). UI names the conductor resolver does not find fall back to the
+  // rail's resolver (data-clipa-target names and its fallbacks).
   const pointed = new Map<string, Target>();
   const director = createClipaDirector({
     root: document.body,
@@ -111,7 +118,8 @@ export function createRuntime(): ShellRuntime {
     resolveTarget: (target) => {
       if (target.surface === CONDUCTOR_SURFACE) {
         const t = target.hint === undefined ? undefined : pointed.get(target.hint);
-        return t === undefined ? null : resolveConductorTarget(document, t);
+        if (t === undefined) return null;
+        return resolveConductorTarget(document, t) ?? (t.kind === 'ui' ? resolveClipaTarget(document, { surface: 'ui', hint: t.name }) : null);
       }
       return resolveClipaTarget(document, target);
     },
@@ -119,21 +127,41 @@ export function createRuntime(): ShellRuntime {
     onLog: (entry) => note('CLIPA', `${entry.kind}: ${entry.message}`),
   });
   const presenter = createDirectorPresenter({ store, director, guard });
-  const pointAt = (target: Target | null): void => {
-    if (target === null) { presenter.setTarget(null); return; }
+  const toClipaTarget = (target: Target): ClipaTarget => {
     const hint = clipaHint(target);
     if (pointed.size > 50) pointed.clear();
     pointed.set(hint, target);
-    const rect = resolveConductorTarget(document, target);
-    presenter.setTarget(rect === null ? null : { x: rect.left, y: rect.top, width: rect.width, height: rect.height });
-    void director.point({ surface: CONDUCTOR_SURFACE, hint });
+    return { surface: CONDUCTOR_SURFACE, hint };
   };
-  // A conductor line in the floating Clipa's bubble. Beside a target she keeps pointing and only the bubble carries the words;
-  // the mouth moves for about as long as the line takes to say.
-  const speakLine = (text: string): void => {
-    const clean = text.trim();
-    if (clean === '') return;
-    void director.speak(clean, { durationMs: estimateSpeechMs(clean) + 2000 });
+  /** Beside a conductor target in the pointing pose (a region a little longer: it is what a question is about). */
+  const pointAt = (target: Target | null): void => {
+    if (target === null) return;
+    presenter.pointAt(toClipaTarget(target), target.kind === 'region' ? REGION_HOLD_MS : POINT_HOLD_MS);
+  };
+  /** A conductor line: she flies beside the target (or stands up on the rail) and shows it in her bubble while it is said. */
+  const say = (text: string, target?: Target | null): void => {
+    const line = text.trim();
+    if (line === '') { presenter.say(''); return; }
+    presenter.speakAt(line, target ? toClipaTarget(target) : undefined);
+  };
+  /**
+   * One motion per cue (controller ConductorOptions.present): a line with its target, or only a target, or only a line. A
+   * warning flies to its target in the warning pose (the director's WARN sequence; it preempts whatever she is doing).
+   */
+  const present = (text: string | null, target: Target | null | undefined, kind?: ConductorLine['kind']): void => {
+    const line = text?.trim() ?? '';
+    if (kind === 'warn' && line !== '') {
+      const warn: BrainDecision = {
+        decision: 'WARN', topic: 'guardrail', kind: 'guardrail', whyNow: 'the conductor warned before a pending action', evidenceIds: [],
+        utterance: { text: line }, expectsAnswer: false, clipa: { state: 'warning', ...(target ? { target: toClipaTarget(target) } : {}) },
+      };
+      presenter.say(line);
+      presenter.play?.(warn);
+      return;
+    }
+    if (line !== '') { say(line, target); return; }
+    if (text === '') presenter.say('');
+    if (target) pointAt(target);
   };
   // `?conductor=off` keeps the in-browser brain in the lead (the fallback); otherwise the page is a face of the conductor.
   const query = new URLSearchParams(window.location.search);
@@ -157,7 +185,13 @@ export function createRuntime(): ShellRuntime {
     isHidden: () => document.hidden,
     storage: browserStorage,
     lastInputAt: () => lastInputAt,
-    ...(conductorOn ? { conductor: { base: API_BASE, version: WEB_FACE_VERSION, pointAt, say: speakLine } } : {}),
+    ...(conductorOn ? {
+      conductor: {
+        base: API_BASE, version: WEB_FACE_VERSION, present,
+        // The rail marks the guide's stage as next and shows its line under the rail.
+        guide: (step) => store.setGuide?.(step),
+      },
+    } : {}),
   });
   note = (type, text) => controller.note(type, text);
   onTyping = () => controller.noteTyping();
@@ -176,10 +210,7 @@ export function createRuntime(): ShellRuntime {
     workspace: createDemoWorkspaceAdapter(),
     live,
     pointAt,
-    say: (text) => {
-      presenter.say(text);
-      speakLine(text);
-    },
+    say: (text) => say(text),
     dispose() {
       live?.dispose();
       stopWatching();

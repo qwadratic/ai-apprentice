@@ -28,7 +28,7 @@ export function TeachView() {
       <ConductorLine />
       {leads && (
         <p className="as-note" data-testid="teach-conductor-hint">
-          Share your screen, start Teach and work on your case in any app. Clipa reads the expert&apos;s confirmed map and speaks up
+          Press Start Pass it on, share your screen and work on your case in any app. Clipa reads the expert&apos;s confirmed map and speaks up
           before a step that one of the expert&apos;s rules covers. She warns; she never blocks another app.
         </p>
       )}

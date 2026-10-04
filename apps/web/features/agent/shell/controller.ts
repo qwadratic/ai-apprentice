@@ -16,7 +16,9 @@ import type { FaceHost } from './conductor/face.ts';
 import { linkSession } from './conductor/join.ts';
 import type { Activity, ClientEvent, ClipaPose, ConductorPersona, ShareState, Target, UiAction } from './conductor/protocol.ts';
 import { createConductorStore } from './conductor/store.ts';
-import type { ConductorStore } from './conductor/store.ts';
+import type { ConductorLine, ConductorStore } from './conductor/store.ts';
+
+type ConductorLineKind = ConductorLine['kind'];
 import { SessionLimits } from './limits.ts';
 import type { LimitTimers } from './limits.ts';
 import { EventUploader } from './log/uploader.ts';
@@ -71,10 +73,13 @@ export interface ConductorOptions {
   base: string;
   /** The web app's version, sent in the hello. */
   version: string;
-  /** Clipa flies to a conductor target, or home for null (the director, through runtime.ts). */
-  pointAt?(target: Target | null): void;
-  /** The floating Clipa shows this line in her bubble ('' clears it). The card's copy goes through the presenter. */
-  say?(text: string): void;
+  /**
+   * One motion of the floating Clipa for a cue (runtime.ts drives the director): `text` is her line ('' clears the bubble, null
+   * keeps it), said beside `target` (null: no target, undefined: she stays where she is).
+   */
+  present?(text: string | null, target: Target | null | undefined, kind?: ConductorLineKind): void;
+  /** The conductor's journey step for the rail (its `guide` cue), or null to clear it. */
+  guide?(step: { phase: string; step: string; text: string } | null): void;
 }
 
 /** The conductor's pose as the shell's Clipa state, for the poses that the voice signals do not already show. */
@@ -490,11 +495,12 @@ export class ShellController {
       speak: (text, maxChars) => this.speakLine(text, maxChars),
       context: (text) => this.sendContext(text, this.voice),
       personBusy: () => this.activitySent === 'typing' || this.speech.isSpeaking(this.deps.perfNow()),
-      bubble: (text) => {
-        this.deps.presenter.say(text);
-        this.deps.conductor?.say?.(text);
+      present: (text, target, kind) => {
+        // The presenter's store keeps the text for the line under the rail; the floating Clipa says it beside the target.
+        if (text !== null) this.deps.presenter.say(text);
+        this.deps.conductor?.present?.(text, target, kind);
       },
-      point: (target) => this.pointAt(target),
+      guide: (step) => this.deps.conductor?.guide?.(step),
       pose: () => this.syncClipa(),
       log: (type, text) => this.log('sys', type, text),
       sessionNow: () => (this.conductorStore.getState().linked || this.journey === null ? null : this.journeyTime()),
@@ -511,11 +517,6 @@ export class ShellController {
     if (sent === null) return false;
     this.log('sent', 'USER_MSG', sent);
     return true;
-  }
-
-  /** Clipa points at a conductor target: the presenter gets the rectangle, the director (runtime.ts) flies there. */
-  private pointAt(target: Target | null): void {
-    this.deps.conductor?.pointAt?.(target);
   }
 
   /** A line for the debug log from outside the controller (the Clipa director's refusals). */

@@ -7,7 +7,8 @@ import type { TeachCaseId } from '../screen/sample-scenarios.ts';
 export const MODES = ['learn', 'review', 'teach'] as const;
 export type Mode = (typeof MODES)[number];
 
-export const MODE_LABELS: Record<Mode, string> = { learn: 'Learn', review: 'Review', teach: 'Teach' };
+/** The visible stage names of the journey (Show, Reflect, Pass it on); in code the modes stay learn, review, teach. */
+export const MODE_LABELS: Record<Mode, string> = { learn: 'Show', review: 'Reflect', teach: 'Pass it on' };
 
 export const PERSONAS = ['strict', 'plain', 'thorough', 'quiet'] as const;
 export type Persona = (typeof PERSONAS)[number];

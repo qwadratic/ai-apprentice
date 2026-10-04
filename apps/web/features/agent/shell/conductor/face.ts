@@ -17,10 +17,13 @@ export interface FaceHost {
   context(text: string): void;
   /** The person types or talks right now. */
   personBusy(): boolean;
-  /** Clipa's bubble; '' clears it. */
-  bubble(text: string): void;
-  /** Where Clipa points; null nowhere. */
-  point(target: Target | null): void;
+  /**
+   * One Clipa motion: `text` is her line ('' clears the bubble, null keeps it) and `target` where she goes (null: nowhere,
+   * undefined: she stays). A line with a target is said beside it; `kind` warn is said in the warning pose.
+   */
+  present(text: string | null, target: Target | null | undefined, kind?: ConductorLine['kind']): void;
+  /** The journey step of a guide cue, for the rail (null clears it). */
+  guide(step: { phase: string; step: string; text: string } | null): void;
   pose(pose: ClipaPose): void;
   log(type: string, text: string): void;
   /** The conductor's session time now, when this page knows it exactly (its own session), else null. */
@@ -82,15 +85,30 @@ export class ConductorFace {
     this.store.set({ said: said.length > MAX_SAID ? said.slice(said.length - MAX_SAID) : said });
   }
 
+  private bubbleText(line: ConductorLine | null): string {
+    if (line === null) return '';
+    return line.text.length > BUBBLE_MAX_CHARS ? `${line.text.slice(0, BUBBLE_MAX_CHARS - 1)}…` : line.text;
+  }
+
+  /** A line and where it points, as one motion of Clipa (the target is set first, so the bubble opens beside it). */
+  private show(line: ConductorLine | null, target: Target | null | undefined, cueId: string | null): void {
+    if (target !== undefined) {
+      this.targetCueId = target === null ? null : cueId;
+      this.store.set({ target });
+    }
+    this.store.set({ line });
+    this.host.present(this.bubbleText(line), target, line?.kind);
+  }
+
   private setLine(line: ConductorLine | null): void {
     this.store.set({ line });
-    this.host.bubble(line === null ? '' : line.text.length > BUBBLE_MAX_CHARS ? `${line.text.slice(0, BUBBLE_MAX_CHARS - 1)}…` : line.text);
+    this.host.present(this.bubbleText(line), undefined);
   }
 
   private setTarget(target: Target | null, cueId: string | null): void {
     this.targetCueId = target === null ? null : cueId;
     this.store.set({ target });
-    this.host.point(target);
+    this.host.present(null, target);
   }
 
   private setRegions(regions: Region[], cueId: string | null): void {
@@ -126,9 +144,9 @@ export class ConductorFace {
   /** Off the record or the end of the page: whatever is on screen goes, and a cue being spoken is reported interrupted. */
   clear(): void {
     if (this.speaking !== null) this.finish(this.speaking.cueId, 'interrupted');
-    this.setLine(null);
     this.setRegions([], null);
-    this.setTarget(null, null);
+    this.show(null, null, null);
+    this.host.guide(null);
   }
 
   onCue(env: CueEnvelope): void {
@@ -174,10 +192,10 @@ export class ConductorFace {
     if (expired) { this.finish(env.cueId, 'skipped'); return; }
     switch (cue.type) {
       case 'guide': {
-        // Point first, then the line: the bubble then opens beside the target.
-        this.setTarget(cue.target, env.cueId);
         if (cue.target?.kind === 'region') this.setRegions([{ regionId: cue.target.regionId, label: cue.target.label, box: cue.target.box, evidenceId: cue.target.evidenceId }], env.cueId);
-        this.setLine({ cueId: env.cueId, kind: 'guide', text: cue.text, step: cue.step || null });
+        // The rail marks the stage the step belongs to as next (and answers `mode_tab`), then Clipa says the line beside its target.
+        this.host.guide({ phase: cue.phase, step: cue.step, text: cue.text });
+        this.show({ cueId: env.cueId, kind: 'guide', text: cue.text, step: cue.step || null }, cue.target, env.cueId);
         if (cue.speak && !this.host.personBusy() && this.speakCue(env.cueId, cue.text) === 'speaking') return;
         this.finish(env.cueId, 'shown');
         return;
@@ -189,9 +207,9 @@ export class ConductorFace {
         const withBox = cue.regions.filter((r) => r.box !== null);
         this.setRegions(withBox, env.cueId);
         const first = withBox[0] ?? null;
-        this.setTarget(first === null ? null : { kind: 'region', ...first }, env.cueId);
+        this.show({ cueId: env.cueId, kind: cue.type, text: cue.text, step: null }, first === null ? null : { kind: 'region', ...first }, env.cueId);
+        // After the motion has started: the warning pose then belongs to it instead of a warning in place.
         if (cue.type === 'warn') { this.store.set({ pose: 'warn' }); this.host.pose('warn'); }
-        this.setLine({ cueId: env.cueId, kind: cue.type, text: cue.text, step: null });
         if (this.speakCue(env.cueId, cue.text) === 'no_voice') this.finish(env.cueId, 'shown');
         return;
       }
@@ -225,9 +243,12 @@ export class ConductorFace {
 
   private cancel(cueId: string): void {
     const s = this.store.getState();
-    if (s.line?.cueId === cueId) this.setLine(null);
     if (s.regionsCueId === cueId) this.setRegions([], null);
-    if (this.targetCueId === cueId) this.setTarget(null, null);
+    const line = s.line?.cueId === cueId;
+    const target = this.targetCueId === cueId;
+    if (line && target) this.show(null, null, null);
+    else if (line) this.setLine(null);
+    else if (target) this.setTarget(null, null);
     if (this.speaking?.cueId === cueId) this.finish(cueId, 'interrupted');
   }
 }
