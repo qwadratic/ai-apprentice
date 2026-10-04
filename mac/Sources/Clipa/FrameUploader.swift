@@ -27,7 +27,7 @@ final class FrameUploader {
     private(set) var stats = Stats()
 
     private let api: ServerAPI
-    private let session: AgentSession
+    let session: AgentSession
     private let clock: SessionClock
     private let interval: TimeInterval
     private let log: SessionLog

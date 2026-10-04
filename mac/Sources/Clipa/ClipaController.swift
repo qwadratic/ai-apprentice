@@ -50,11 +50,13 @@ final class ClipaController {
     var clock: SessionClock?
     var conductor: ConductorClient?
     var uploader: FrameUploader?
-    var screenGeneration = 0
     var captureGeneration = 0
     var screenState = "off"
     var voiceRetries = 0
     var endTimeout: Task<Void, Never>?
+    var screenChain: Task<Void, Never>?
+    /// Incremented on every start and end, so a slow start of an earlier stage cannot take over a later one.
+    var stageCounter = 0
 
     // The face (see ClipaController+Face.swift).
     var speaking: SpeakingCue?
@@ -157,6 +159,8 @@ final class ClipaController {
 
     func startStage(_ persona: Persona) {
         guard isIdle else { return }
+        stageCounter += 1
+        let token = stageCounter
         stage = .starting(persona)
         offTheRecord = false
         voiceRetries = 0
@@ -166,15 +170,15 @@ final class ClipaController {
         overlay.say("Starting \(persona.stageName)...")
         menuBar?.refresh()
         log.write("stage_starting", ["stage": persona.stageName])
-        Task { await self.runStart(persona) }
+        Task { await self.runStart(persona, token: token) }
     }
 
-    private func runStart(_ persona: Persona) async {
+    private func runStart(_ persona: Persona, token: Int) async {
         do {
             let sentAt = Date().timeIntervalSince1970 * 1000
             let (session, serverNow) = try await api.createSession()
             let receivedAt = Date().timeIntervalSince1970 * 1000
-            guard stage == .starting(persona) else { return }
+            guard stage == .starting(persona), token == stageCounter else { return }
             let offset = serverNow.map { $0 - (sentAt + receivedAt) / 2 } ?? 0
             let clock = SessionClock.start(serverOffsetMs: offset)
             self.session = session
@@ -194,14 +198,15 @@ final class ClipaController {
             overlay.clearLine(after: 2)
             menuBar?.refresh()
 
-            await startScreen()
+            screenStep { await $0.startScreen() }
             await startVoice()
         } catch {
+            guard token == stageCounter else { return }
             log.write("stage_error", ["error": String(describing: error)])
             overlay.say("I couldn't start \(persona.stageName): \(error)", warning: true)
             overlay.clearLine(after: 10)
-            await teardown()
             stage = .idle
+            teardown()
             overlay.setPresence(.dot)
             menuBar?.refresh()
         }
@@ -212,11 +217,15 @@ final class ClipaController {
         case .idle, .ending:
             return
         case .starting:
+            stageCounter += 1
             stage = .idle
-            Task { await teardown() }
+            teardown()
+            overlay.clearLine(after: 0)
+            overlay.setPresence(.dot)
             menuBar?.refresh()
             return
         case let .live(persona):
+            stageCounter += 1
             stage = .ending(persona)
             if offTheRecord {
                 // Back on the record for the hand-over only: the session end itself is not private.
@@ -229,10 +238,8 @@ final class ClipaController {
             overlay.setPresence(.peek)
             overlay.say(persona == .expert ? "Done. I'm opening Reflect in your browser..." : "Done. I'm opening your summary...")
             log.write("stage_end", ["stage": persona.stageName])
-            Task {
-                voice.disconnect()
-                await stopScreen(command: "stop", reason: nil)
-            }
+            voice.disconnect()
+            queueScreenStop(command: "stop", reason: nil)
             // The conductor answers the end with `open_web`; wait for it, then close the cue stream.
             endTimeout?.cancel()
             endTimeout = Task { [weak self] in
@@ -266,9 +273,10 @@ final class ClipaController {
         menuBar?.refresh()
     }
 
-    private func teardown() async {
+    /// Closes everything of the current stage; the screen stop is queued behind any screen step still running.
+    private func teardown() {
         voice.disconnect()
-        await stopScreen(command: "stop", reason: nil)
+        queueScreenStop(command: "stop", reason: nil)
         conductor?.close()
         conductor = nil
         session = nil
@@ -293,21 +301,29 @@ final class ClipaController {
             overlay.setPresence(.dot)
             overlay.say("Off the record: I'm not watching or listening.")
             overlay.clearLine(after: 5)
-            Task { await stopScreen(command: "pause", reason: "off_record") }
+            queueScreenStop(command: "pause", reason: "off_record")
         } else {
             overlay.setDimmed(false)
             overlay.say("Back on the record.")
             overlay.clearLine(after: 4)
             conductor?.send(["type": "activity", "state": idle.state.rawValue])
-            Task {
-                await startScreen()
-                await startVoice()
-            }
+            screenStep { await $0.startScreen() }
+            Task { await startVoice() }
         }
         menuBar?.refresh()
     }
 
     // MARK: - Screen
+
+    /// Screen start, pause, resume and stop run one after another, so the server generations stay in order.
+    func screenStep(_ step: @escaping @MainActor (ClipaController) async -> Void) {
+        let previous = screenChain
+        screenChain = Task { [weak self] in
+            await previous?.value
+            guard let self else { return }
+            await step(self)
+        }
+    }
 
     func startScreen() async {
         guard let session, let clock, isLive, !offTheRecord else { return }
@@ -321,22 +337,21 @@ final class ClipaController {
         }
         do {
             if let uploader {
-                screenGeneration = try await api.screenLifecycle(sessionId: session.id, token: session.token,
-                                                                 generation: screenGeneration, command: "resume", reason: nil)
-                uploader.generation = screenGeneration
+                uploader.generation = try await api.screenLifecycle(sessionId: session.id, token: session.token,
+                                                                    generation: uploader.generation, command: "resume", reason: nil)
             } else {
-                screenGeneration = try await api.screenStart(sessionId: session.id, token: session.token, epochMs: clock.epochMs)
+                let generation = try await api.screenStart(sessionId: session.id, token: session.token, epochMs: clock.epochMs)
                 let uploader = FrameUploader(api: api, session: session, clock: clock, interval: config.uploadInterval, log: log)
-                uploader.generation = screenGeneration
+                uploader.generation = generation
                 self.uploader = uploader
             }
-            guard isLive, !offTheRecord, let uploader else { return }
+            guard isLive, !offTheRecord, let uploader, uploader.session.id == session.id else { return }
             captureGeneration += 1
             uploader.captureGeneration = captureGeneration
             uploader.active = true
             try await streamer.start(clock: clock)
             screenState = "streaming"
-            log.write("screen_start", ["generation": screenGeneration, "size": "\(Int(streamer.outputSize.width))x\(Int(streamer.outputSize.height))"])
+            log.write("screen_start", ["generation": uploader.generation, "size": "\(Int(streamer.outputSize.width))x\(Int(streamer.outputSize.height))"])
             conductor?.send(["type": "share", "state": "capturing", "reason": NSNull()])
         } catch {
             screenState = "error: \(error)"
@@ -347,16 +362,25 @@ final class ClipaController {
         }
     }
 
-    func stopScreen(command: String, reason: String?) async {
+    /// Queues a pause or stop of the current stage's stream. The session and the uploader are taken now, because the
+    /// stage may be torn down before the step runs; the generation is read when it runs (earlier steps change it).
+    func queueScreenStop(command: String, reason: String?) {
+        let session = self.session
+        let uploader = self.uploader
+        screenStep { await $0.stopScreen(command: command, reason: reason, session: session, uploader: uploader) }
+    }
+
+    func stopScreen(command: String, reason: String?, session: AgentSession?, uploader: FrameUploader?) async {
         uploader?.active = false
         uploader?.dropPending()
         await streamer.stop()
         screenState = command == "pause" ? "paused (off the record)" : "off"
-        guard let session, uploader != nil else { return }
+        guard let session, let uploader else { return }
         do {
-            screenGeneration = try await api.screenLifecycle(sessionId: session.id, token: session.token,
-                                                             generation: screenGeneration, command: command, reason: reason)
-            uploader?.generation = screenGeneration
+            let next = try await api.screenLifecycle(sessionId: session.id, token: session.token,
+                                                     generation: uploader.generation, command: command, reason: reason)
+            uploader.generation = next
+            log.write("screen_\(command)", ["generation": next])
         } catch {
             log.write("screen_error", ["error": String(describing: error), "command": command])
         }

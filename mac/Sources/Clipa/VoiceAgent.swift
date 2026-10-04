@@ -58,6 +58,9 @@ final class VoiceAgent {
         let id = connection
         self.role = role
         self.microphone = microphone
+        ignoreAudioUpTo = -1 // event ids start again in a new conversation
+        vadHighAt = 0
+        vadStartedAt = 0
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 60
         let session = URLSession(configuration: configuration)
