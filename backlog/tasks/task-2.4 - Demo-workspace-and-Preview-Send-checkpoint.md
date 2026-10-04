@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@kigulx'
 created_date: '2026-10-03 21:16'
-updated_date: '2026-10-04 03:00'
+updated_date: '2026-10-04 03:12'
 labels:
   - stream-a
   - workspace
@@ -47,6 +47,8 @@ Create the assigned isolated worktree from the published assignment revision. Im
 Integrate canonical workspace with real ScreenBridge runtime on pinned PR21: current vision registry, input activity, checkpoint dispatch/reply, and a working workspace page. Preserve reviewed PR21 and B sources; use distinct file ownership for parallel agents.
 
 Resolve PR33 review: split bounded vision acquisition (15s) from checkpoint reply deadline (4s), expose acquisition state, preserve app off-record after failed resume, reject restarted timelines under a reused session ID, and pin the mount epoch. Verify each with focused regressions before publishing the combined fix.
+
+Fix newly reproduced alternating-surface vision starvation: release the displaced waiting frame fingerprint before accepting its replacement, preserve valid duplicate suppression, and add deterministic queue regressions. Prior PR33 privacy/session/deadline fixes passed B delta review; do not reopen them.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -59,4 +61,6 @@ Canonical doc-7 follow-up applied to the PR12 candidate: the workspace consumes 
 Runtime wiring recovered and merged with published Screen runtime 0acb4f4. createRuntimeWorkspace mounts capture and workspace together, forwards current vision observations and scoped input activity, correlates checkpoints, preserves app-owned off-record state, and clears workspace off-record state before first capture when recording resumes. Verified with the apps/web production build.
 
 Resolved PR33 review: Preview acquires current evidence for at most 15s with a visible acquisition state, then starts the independent 4s reply deadline at dispatch. App resume failure preserves off-record; stale failures cannot affect replacement sessions. Reusing a started session ID is rejected before the picker; mount and product page keep one epoch, preventing heartbeat clock jumps. Combined verification: web typecheck, 98 screen/workspace tests passed with one optional browser test skipped, production build passed. Runtime branch remains In Progress pending merge and live B shell validation.
+
+B accepted the previous PR33 deadline, privacy and session fixes. Fixed the newly reproduced vision starvation: replacing a pending frame now releases its matching per-surface fingerprint before registering the replacement. Deterministic regression verifies alternating order/email recovery, same-surface new-digest retention, and completed-frame duplicate suppression. Focused vision queue tests 12/12 and repository-pinned TS7 root typecheck pass; no repeated unrelated suite.
 <!-- SECTION:NOTES:END -->
