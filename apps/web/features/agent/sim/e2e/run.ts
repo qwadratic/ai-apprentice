@@ -2,7 +2,7 @@
 //
 //   node apps/web/features/agent/sim/e2e/run.ts                      the synthetic expert does the Learn task (default)
 //   SIM_E2E_PERSONA=newhire node .../run.ts                          the synthetic new hire does Teach T1
-//   SIM_E2E_OUT=/some/dir node .../run.ts                            where the video and report.json go (default: .e2e-out/ next to this file)
+//   SIM_E2E_OUT=/some/dir node .../run.ts                            parent folder: each run writes to a new sim-e2e-<persona>-<time>/ in it (default: .e2e-out/ next to this file, wiped per run)
 //   SIM_E2E_MODE=auto|headed|headless node .../run.ts                how the browser runs (default auto, see below)
 //   SIM_E2E_LAG=5000 node .../run.ts                                 the vision lag the persona leaves room for (default 0: the stub reads the DOM)
 //
@@ -199,8 +199,11 @@ async function main(): Promise<void> {
   const persona = (process.env['SIM_E2E_PERSONA'] ?? 'expert').toLowerCase().replace(/[-_ ]/g, '') === 'newhire' ? 'newhire' : 'expert';
   const here = dirname(fileURLToPath(import.meta.url));
   const webRoot = join(here, '..', '..', '..', '..');
-  const outDir = process.env['SIM_E2E_OUT'] ?? join(here, '.e2e-out');
-  rmSync(outDir, { recursive: true, force: true });
+  // SIM_E2E_OUT is a parent the caller owns: each run writes into its own new subfolder there and never
+  // deletes anything else. Only the default .e2e-out/ next to this file is wiped between runs.
+  const parent = process.env['SIM_E2E_OUT'];
+  const outDir = parent ? join(parent, `sim-e2e-${persona}-${new Date().toISOString().replace(/[:.]/g, '-')}`) : join(here, '.e2e-out');
+  if (!parent) rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });
 
   const pw = loadPlaywright();
