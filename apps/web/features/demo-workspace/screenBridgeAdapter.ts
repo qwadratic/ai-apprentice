@@ -10,6 +10,7 @@ export type ObservationRegistryRequest = {
   sessionId: string;
   revisions: OpaqueRevisions;
   signal: AbortSignal;
+  timeoutMs?: number;
 };
 
 /** Trusted capture/vision registry. It returns published observations, never DOM facts. */
@@ -32,6 +33,7 @@ export type ScreenBridgeCheckpointAdapterOptions = {
   getSessionEpochMs(sessionId: string): number | undefined;
   nowEpochMs?: () => number;
   createCheckpointId?: () => string;
+  acquisitionTimeoutMs?: number;
 };
 
 function nonempty(value: string, name: string): void {
@@ -82,7 +84,7 @@ export function createScreenBridgeCheckpointAdapter(options: ScreenBridgeCheckpo
   const nowEpochMs = options.nowEpochMs ?? Date.now;
   const createCheckpointId = options.createCheckpointId ?? (() => `workspace-checkpoint-${++checkpointSequence}`);
   return {
-    async check(scope: VersionScope, signal: AbortSignal) {
+    async check(scope: VersionScope, signal: AbortSignal, onDispatch?: () => void) {
       signal.throwIfAborted();
       nonempty(scope.sessionId, 'sessionId');
       nonempty(scope.revisions.order, 'order revision');
@@ -95,6 +97,7 @@ export function createScreenBridgeCheckpointAdapter(options: ScreenBridgeCheckpo
           sessionId: scope.sessionId,
           revisions: structuredClone(scope.revisions),
           signal,
+          timeoutMs: options.acquisitionTimeoutMs ?? 15_000,
         }),
         scope.sessionId,
         options.contract,
@@ -116,6 +119,8 @@ export function createScreenBridgeCheckpointAdapter(options: ScreenBridgeCheckpo
         action: 'send',
       }, scope.sessionId, observed);
 
+      onDispatch?.();
+      signal.throwIfAborted();
       const reply = options.contract.parseCheckpointReply(await options.handleCheckpoint(checkpoint));
       signal.throwIfAborted();
       if (reply.checkpointId !== checkpoint.id) throw new Error('Agent reply belongs to another checkpoint.');

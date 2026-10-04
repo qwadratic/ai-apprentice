@@ -72,14 +72,15 @@ export function mountDemoWorkspace(container: HTMLElement, workspace: WorkspaceC
       }
       if (!state.draft.attachments.length) view('attachments').textContent = 'No attachments.';
     }
-    const titles = { idle: 'Preview required', pending: 'Checking…', clear: 'Clear', warn: 'Warning', unknown: 'Not verified · unknown', error: 'Not verified · check failed' };
+    const titles = { idle: 'Preview required', acquiring: 'Acquiring screen evidence…', pending: 'Checking…', clear: 'Clear', warn: 'Warning', unknown: 'Not verified · unknown', error: 'Not verified · check failed' };
     view('check-panel').dataset.status = state.check.status; view('check-title').textContent = titles[state.check.status];
     view('check-message').textContent = state.check.status === 'idle' ? 'Check the current draft before sending. Any change requires a new Preview.'
-      : state.check.status === 'pending' ? 'Waiting for current screen observations and the agent response. You can still edit; edits cancel this check.' : state.check.message;
+      : state.check.status === 'acquiring' ? 'Waiting for current order and email observations. You can still edit; edits cancel this check.'
+      : state.check.status === 'pending' ? 'Current screen evidence acquired. Waiting for the agent reply.' : state.check.message;
     view('evidence').textContent = 'evidenceIds' in state.check && state.check.evidenceIds.length ? `Evidence: ${state.check.evidenceIds.join(', ')}` : '';
     view('ack-panel').hidden = !['warn', 'unknown'].includes(state.check.status) || !!state.sent;
     element<HTMLInputElement>('[data-field="ack"]').checked = state.acknowledged;
-    button('preview').disabled = state.offRecord || state.check.status === 'pending' || !!state.sent;
+    button('preview').disabled = state.offRecord || state.check.status === 'acquiring' || state.check.status === 'pending' || !!state.sent;
     button('send').disabled = !workspace.canSend(); button('attach').disabled = !!state.sent || !!state.draft.attachments.length;
     for (const name of ['order-customer', 'items', 'address', 'window', 'recipient', 'subject', 'body']) field(name).disabled = !!state.sent;
     for (const remove of view('attachments').querySelectorAll('button')) remove.disabled = !!state.sent;

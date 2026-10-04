@@ -16,8 +16,9 @@ function controlled() {
   const signals: AbortSignal[] = [];
   const scopes: unknown[] = [];
   const port: CheckpointPort = {
-    check(scope, signal) {
+    check(scope, signal, onDispatch) {
       scopes.push(structuredClone(scope)); signals.push(signal);
+      onDispatch?.();
       const reply = deferred<CheckOutcome>(); replies.push(reply); return reply.promise;
     },
   };
@@ -105,6 +106,29 @@ test('timeout aborts stalled work; its late response cannot authorize sending', 
   const fixture = controlled(); const model = make(fixture.port, 15);
   await model.preview(); assert.equal(model.getState().check.status, 'error'); assert.equal(fixture.signals[0]!.aborted, true);
   fixture.replies[0]!.resolve(clear); await tick(); assert.equal(model.canSend(), false); model.dispose();
+});
+
+test('evidence acquisition may exceed four seconds without consuming the separate reply deadline', async () => {
+  let dispatched = false;
+  const model = createWorkspace({
+    sessionId: 'session-1', acquisitionTimeoutMs: 5_000, replyTimeoutMs: 15, now: () => 1234,
+    checkpoint: {
+      async check(_scope, signal, onDispatch) {
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(resolve, 4_100);
+          signal.addEventListener('abort', () => { clearTimeout(timer); reject(signal.reason); }, {once: true});
+        });
+        onDispatch?.(); dispatched = true;
+        return clear;
+      },
+    },
+  });
+  const preview = model.preview();
+  assert.equal(model.getState().check.status, 'acquiring');
+  await preview;
+  assert.equal(dispatched, true);
+  assert.equal(model.getState().check.status, 'clear');
+  model.dispose();
 });
 
 test('no agent, rejected response and malformed response are technical errors', async () => {

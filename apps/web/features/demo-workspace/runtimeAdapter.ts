@@ -63,14 +63,14 @@ export function createCheckpointAdapter(options: CheckpointAdapterOptions): Runt
       handle.publishActivity(structuredClone(activity));
     },
     checkpoint: {
-      async check(scope, signal) {
+      async check(scope, signal, onDispatch) {
         assertActive();
         if (activeSignal) throw new Error('A workspace checkpoint is already pending.');
         if (latestScope && !sameScope(latestScope, scope)) throw new Error('Workspace checkpoint scope is stale.');
         if (!latestScope) syncScope(scope);
         const combined = AbortSignal.any([signal, lifetime.signal]);
         activeSignal = combined;
-        try { return await canonical.check(scope, combined); }
+        try { return await canonical.check(scope, combined, onDispatch); }
         finally { activeSignal = undefined; }
       },
     },

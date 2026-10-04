@@ -6,10 +6,11 @@ export type VersionScope = { sessionId: string; taskGeneration: number; draftRev
 export type CheckOutcome = { status: 'clear' | 'warn' | 'unknown'; message: string; evidenceIds: string[] };
 // This local dependency-injection port is not a second ScreenBridge contract.
 export type CheckpointPort = {
-  check(scope: VersionScope, signal: AbortSignal): Promise<CheckOutcome>;
+  check(scope: VersionScope, signal: AbortSignal, onDispatch?: () => void): Promise<CheckOutcome>;
 };
 export type CheckState =
   | { status: 'idle' }
+  | { status: 'acquiring'; requestId: number }
   | { status: 'pending'; requestId: number }
   | ({ status: 'clear' | 'warn' | 'unknown'; requestId: number } & Omit<CheckOutcome, 'status'>)
   | { status: 'error'; message: string };
@@ -20,7 +21,8 @@ export type WorkspaceState = {
   ticket: { summary: string; status: 'open' | 'resolved' };
 };
 type Options = {
-  sessionId: string; checkpoint?: CheckpointPort; cases?: readonly DemoCase[]; timeoutMs?: number;
+  sessionId: string; checkpoint?: CheckpointPort; cases?: readonly DemoCase[];
+  acquisitionTimeoutMs?: number; replyTimeoutMs?: number; timeoutMs?: number;
   now?: () => number; onInputActivity?: (activity: WorkspaceActivity) => void; activityClock?: ActivityClock;
   createRevision?: () => string;
 };
@@ -122,15 +124,23 @@ export function createWorkspace(options: Options) {
       cancel();
       emit();
     }
-    const timer = setTimeout(() => finish({ status: 'error', message: 'Check timed out. Preview again before sending.' }), options.timeoutMs ?? 4_000);
+    const acquisitionTimeoutMs = options.acquisitionTimeoutMs ?? 15_000;
+    const replyTimeoutMs = options.replyTimeoutMs ?? options.timeoutMs ?? 4_000;
+    const timer = setTimeout(() => finish({ status: 'error', message: 'Timed out acquiring current screen evidence. Preview again.' }), acquisitionTimeoutMs);
     active = { id, scope, abort, timer, done: complete };
-    state.check = { status: 'pending', requestId: id };
+    state.check = { status: 'acquiring', requestId: id };
     state.acknowledged = false;
     emit();
     // Detached work is bounded by completion/timeout; an adapter may ignore abort.
     void (async () => {
       try {
-        const reply = await port.check(structuredClone(scope), abort.signal);
+        const reply = await port.check(structuredClone(scope), abort.signal, () => {
+          if (!current() || state.check.status !== 'acquiring') return;
+          clearTimeout(active!.timer);
+          active!.timer = setTimeout(() => finish({ status: 'error', message: 'Agent reply timed out. Preview again before sending.' }), replyTimeoutMs);
+          state.check = { status: 'pending', requestId: id };
+          emit();
+        });
         if (!current()) return;
         if (!validOutcome(reply)) throw new Error('The agent returned an invalid check result.');
         finish({ ...structuredClone(reply), requestId: id });
