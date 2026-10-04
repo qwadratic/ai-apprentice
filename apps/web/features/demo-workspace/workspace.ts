@@ -36,7 +36,8 @@ function validOutcome(value: CheckOutcome): boolean {
 
 export function createWorkspace(options: Options) {
   const cases = options.cases ?? demoCases;
-  if (!options.sessionId.trim() || !cases.length) throw new Error('A session and at least one case are required.');
+  const first = cases[0];
+  if (!options.sessionId.trim() || !first) throw new Error('A session and at least one case are required.');
   const now = options.now ?? Date.now;
   const activity = createInputActivityReporter(options.onInputActivity, options.activityClock);
   let checkpoint = options.checkpoint;
@@ -44,7 +45,6 @@ export function createWorkspace(options: Options) {
   let requestSequence = 0;
   let active: { id: number; scope: VersionScope; abort: AbortController; timer: ReturnType<typeof setTimeout>; done: () => void } | undefined;
   const listeners = new Set<(state: WorkspaceState) => void>();
-  const first = cases[0];
   let state: WorkspaceState = {
     scope: { sessionId: options.sessionId, taskGeneration: 0, draftRevision: 0 }, caseId: first.id,
     order: structuredClone(first.order), draft: structuredClone(first.draft), offRecord: false, check: { status: 'idle' }, acknowledged: false,

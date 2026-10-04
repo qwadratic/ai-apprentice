@@ -39,7 +39,7 @@ test('typing heartbeat every 2 s, idle after 2 s silence, idle tail stops at 10 
   timer.advance(1000); // Two seconds since the last actual input: enter idle.
   timer.advance(8000); // End the bounded idle tail.
   assert.deepEqual(events.map(event => [event.at, event.activity.typing, event.activity.idleMs]), [
-    [3000, true, 0], [5000, true, 0], [6000, false, 2000], [8000, false, 4000],
+    [3000, true, 0], [5000, true, 1000], [6000, false, 2000], [8000, false, 4000],
     [10000, false, 6000], [12000, false, 8000], [14000, false, 10000],
   ]);
   assert.equal(timer.pending().length, 0); timer.advance(30000); assert.equal(events.length, 7);
@@ -60,11 +60,11 @@ test('surface changes are explicit and restarting from idle emits typing immedia
 test('pause and dispose suppress saved timer callbacks; resume never replays activity', () => {
   const timer = fakeClock(); const events: WorkspaceActivity[] = [];
   const reporter = createInputActivityReporter(activity => events.push(activity), timer.clock);
-  reporter.input('email'); const cancelled = timer.pending()[0].callback;
+  reporter.input('email'); const cancelled = timer.pending()[0]!.callback;
   reporter.pause(); reporter.input('ticket'); cancelled(); timer.advance(20000);
   assert.equal(events.length, 1); assert.equal(timer.pending().length, 0);
   reporter.resume(); timer.advance(20000); assert.equal(events.length, 1);
-  reporter.input('order'); const disposed = timer.pending()[0].callback;
+  reporter.input('order'); const disposed = timer.pending()[0]!.callback;
   reporter.dispose(); disposed(); reporter.resume(); reporter.input('ticket'); timer.advance(20000);
   assert.equal(events.length, 2); assert.equal(timer.pending().length, 0);
 });
@@ -72,10 +72,10 @@ test('pause and dispose suppress saved timer callbacks; resume never replays act
 test('reset and session changes clear the previous task activity without reporting it', () => {
   const timer = fakeClock(); const events: WorkspaceActivity[] = [];
   const workspace = createWorkspace({ sessionId: 'first', activityClock: timer.clock, onInputActivity: event => events.push(event) });
-  workspace.inputActivity('order'); const oldTask = timer.pending()[0].callback;
+  workspace.inputActivity('order'); const oldTask = timer.pending()[0]!.callback;
   workspace.reset('spare-new'); oldTask(); timer.advance(20000);
   assert.equal(events.length, 1); assert.equal(workspace.getState().draft.customerRef, 'customer_12');
-  workspace.inputActivity('email'); const oldSession = timer.pending()[0].callback;
+  workspace.inputActivity('email'); const oldSession = timer.pending()[0]!.callback;
   workspace.setSession('second'); oldSession(); timer.advance(20000);
   assert.equal(events.length, 2); assert.equal(timer.pending().length, 0); workspace.dispose();
 });

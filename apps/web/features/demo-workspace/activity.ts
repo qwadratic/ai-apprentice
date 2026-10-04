@@ -45,7 +45,7 @@ export function createInputActivityReporter(onActivity?: (activity: WorkspaceAct
     timer = clock.setTimer(() => {
       if (!enabled || disposed || scheduledGeneration !== generation || lastInputAt === undefined) return;
       const elapsed = Math.max(0, clock.now() - lastInputAt);
-      emit(elapsed < intervalMs, elapsed < intervalMs ? 0 : elapsed);
+      emit(elapsed < intervalMs, elapsed);
       arm();
     }, Math.max(0, due - now));
   }
