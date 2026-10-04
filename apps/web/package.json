@@ -7,10 +7,12 @@
     "dev": "vite --host 127.0.0.1",
     "typecheck": "tsc --noEmit",
     "build": "vite build",
-    "preview": "vite preview --host 127.0.0.1"
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "node --test \"features/agent/shell/test/*.test.ts\""
   },
   "dependencies": {
     "@apprentice/contracts": "0.0.0",
+    "@elevenlabs/client": "1.26.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
