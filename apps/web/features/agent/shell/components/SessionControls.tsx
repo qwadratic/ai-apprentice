@@ -20,7 +20,7 @@ export function SessionControls() {
   const busy = phase === 'starting' || phase === 'ending';
 
   return (
-    <section className="as-card" aria-labelledby="as-controls-title">
+    <section className="as-card as-session" aria-labelledby="as-controls-title">
       <h2 className="as-card__title" id="as-controls-title">Session</h2>
 
       {offRecord && (
