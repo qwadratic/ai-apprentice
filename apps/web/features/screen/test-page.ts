@@ -27,6 +27,7 @@ pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
 <section id="result"><h2>Latest validated ScreenObservation</h2><p id="count">No observations received.</p><pre id="observation"></pre><button id="evidence" disabled>Load processed evidence</button><div id="media"></div></section>
 <section><h2>Lifecycle</h2><pre id="events"></pre></section>`;
 const element = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+element<HTMLInputElement>('api').value = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000';
 let dispose: (() => void) | undefined;
 let latest: ScreenObservation | undefined;
 let count = 0;

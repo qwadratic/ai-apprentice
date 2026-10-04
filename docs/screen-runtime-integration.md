@@ -10,7 +10,7 @@ The API requires absolute `DATABASE_PATH` and `MEDIA_DIR`, an existing parent di
 
 Supply `RUNNER_URL` and `RUNNER_TOKEN` only to the API process through the approved server environment. Never put either value in Vite configuration, browser fields, URLs, screenshots, or logs. Without them the upload produces `runner_unconfigured`; it cannot produce a successful observation.
 
-Open `http://127.0.0.1:5173/screen-test.html` in Chrome. The test page uses `http://127.0.0.1:8000` as the API origin by default.
+Open `http://127.0.0.1:5173/screen-test.html` in Chrome. The test page uses `VITE_API_BASE` when configured and otherwise defaults to `http://127.0.0.1:8000`. The release workflow sets it to the VM API and publishes the page under `/ai-apprentice/app/screen-test.html`.
 
 1. Open the synthetic order link in another tab or window. It contains no real customer data.
 2. Prepare a B session. This calls the real `/api/agent/sessions` route before the screen picker gesture.
@@ -38,4 +38,4 @@ An explicit synthetic PNG error-path check confirmed upload `202`, zero observat
 
 B confirmed the all-routes agent-token authorization model. B also confirmed that no SSH/tunnel path is currently available and the VM agent has stopped. The supported real-run path is a reviewed merge/deployment together with the TASK-4.5 switch to the composed API; localhost browser use against that VM also needs an approved Origin. Direct SSH from the coordinator Mac was denied. The available in-app browser did not open localhost and an automated Chrome surface was unavailable, so the OS picker and real browser-to-runner pass remain unverified until completed manually or through an approved browser surface.
 
-The integration passed root `npm run check` on Node 22: strict type checking, package and screen tests, and the production build including both test pages. One optional real-browser capture test was skipped. The bridge integration test uses actual screen hub/handlers/service and an explicitly mocked VisionRunner; it does not prove live vision.
+After merging main `01e326d`, the integration passed root `npm run check` on Node 22: strict type checking, 150 passing tests, and the production build including both test pages. The human authorized the one B regression-test migration; B production code remains identical to main. One optional real-browser capture test was skipped. The bridge integration test uses actual screen hub/handlers/service and an explicitly mocked VisionRunner; it does not prove live vision.

@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@kigulx'
 created_date: '2026-10-03 21:15'
-updated_date: '2026-10-04 01:31'
+updated_date: '2026-10-04 01:38'
 labels:
   - stream-a
   - infra
@@ -53,4 +53,6 @@ Publication branch codex/task-2.1-foundation-pr is based on main f315f54 and car
 Local runtime integration on main 9d95185 consumes capture 8614db6 + bc7d5b3 + 9c50cc7 + bb5cf68, vision a0c195d, and B API 5270c67 (now merged upstream). Implemented B-authorized screen composition with SQLite/file Evidence; local HTTP health reports agent+screen, session and screen start return 201, pause/stop 200. Synthetic missing-runner error-path returns upload202, observations0, runner_unconfigured. B confirmed all-route B auth; real runner cannot be reached locally because VM agent/SSH tunnel is unavailable. Real smoke requires reviewed publication/deploy plus TASK-4.5 API switch. Runtime privacy/lifecycle corrections and full check are still underway; task remains In Progress.
 
 Runtime review resolved lifecycle generation/cursor mismatches, serialized intrinsic backend pause, gated uploads until resume acknowledgement, stale-operation epochs, app-owned off-record latch, and post-stop Evidence. Bridge actual hub/handler/service integration test passes with explicit mock VisionRunner; API tests 18/18. Root npm run check on Node22 passed including production screen-test and fixture pages; one optional browser test skipped. Live vision and OS picker remain unverified, no publication or deployment performed.
+
+Merged origin/main 01e326d locally preserving B production code. Human explicitly approved adapting the one legacy B screen authorization regression test; assertions401/403/202 preserved through actual screen module/hub. Updated test page for current B session response and browser start-click epoch, plus release VITE_API_BASE. Final root check on Node22: 150 passed, 1 optional browser test skipped; strict typechecks and production build passed. Local HTTP smoke on updated B API: session201, screen201, authenticated originless poll200, stop200, test page200. Awaiting human publication permission and existing B exact-head review/deploy; real vision/OS picker/voice sequence not claimed complete.
 <!-- SECTION:NOTES:END -->
