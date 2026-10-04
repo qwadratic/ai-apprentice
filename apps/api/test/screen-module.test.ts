@@ -9,7 +9,9 @@ import {DatabaseSync} from 'node:sqlite';
 import {createApi} from '../src/app.ts';
 import {createScreenModule} from '../src/screen-module.ts';
 import {createScreenRuntime} from '../src/screen-runtime.ts';
-import type {VisionRunner} from '../screen/index.ts';
+import {createMemoryEvidenceStore, ScreenSessionHub} from '../screen/index.ts';
+import type {ScreenService, VisionRunner} from '../screen/index.ts';
+import type {ScreenStatus} from '@apprentice/contracts';
 
 const origin = 'https://screen.test';
 const bearer = 'synthetic-agent-session-token';
@@ -109,6 +111,31 @@ test('persisted Evidence remains authorized after runtime restart without a capt
   assert.equal((await fetch(`${url.replace('/saved-session/', '/other-session/')}/asset`, {headers})).status, 403);
 });
 
+test('starting sessions does not refresh abandoned session activity while pruning tokens', async (t) => {
+  let now = 0;
+  const evidence = createMemoryEvidenceStore();
+  const hub = new ScreenSessionHub(context => ({
+    start() {}, pause() {}, resume() {}, stop() {},
+    snapshot: () => ({state: 'capturing', sessionId: context.sessionId, generation: 1, active: 0, queued: 0, sequence: 0}),
+    offer: () => 'accepted', evidence,
+  } satisfies ScreenService), parseStatus, () => now, 3, 2, 100, 1_000);
+  const app = await createApi({allowedOrigins: [origin], modules: [createScreenModule({
+    allowedOrigins: [origin], hub,
+    authorize: request => request.headers.get('authorization') === `Bearer ${bearer}`,
+  })]});
+  const server = app.listen(0, '127.0.0.1'); t.after(() => close(server));
+  const base = await serverUrl(server);
+  const headers = {origin, authorization: `Bearer ${bearer}`, 'content-type': 'application/json'};
+  const start = async (sessionId: string): Promise<Response> => await fetch(`${base}/screen/sessions/${sessionId}/start`, {
+    method: 'POST', headers, body: JSON.stringify({sessionEpochMs: now, clientGeneration: 1}),
+  });
+
+  assert.equal((await start('a')).status, 201);
+  now = 40; assert.equal((await start('b')).status, 201);
+  now = 80; assert.equal((await start('c')).status, 201);
+  now = 101; assert.equal((await start('d')).status, 201);
+});
+
 test('environment-backed screen module fails closed without storage configuration', async () => {
   const module = createScreenModule({allowedOrigins: [origin], authorize: async () => true, env: {}});
   await assert.rejects(createApi({modules: [module]}), /DATABASE_PATH is required/);
@@ -122,4 +149,10 @@ async function serverUrl(server: Server): Promise<string> {
 }
 async function close(server: Server): Promise<void> {
   await new Promise<void>(resolve => server.close(() => resolve()));
+}
+function parseStatus(value: unknown): ScreenStatus {
+  const item = value as ScreenStatus;
+  if (item.schemaVersion !== 1 || typeof item.sessionId !== 'string' ||
+    !['capturing', 'paused', 'stopped', 'error'].includes(item.state)) throw new Error('invalid status');
+  return structuredClone(item);
 }

@@ -196,7 +196,7 @@ test('idle started and paused sessions release capacity while recently active se
     start() {}, pause() {}, resume() {}, stop() { stopped.push(context.sessionId); },
     snapshot: () => ({state: 'capturing', sessionId: context.sessionId, generation: 1, active: 0, queued: 0, sequence: 0}),
     offer: () => 'accepted', evidence,
-  }), parseStatus, () => now, 2, 2, 100);
+  }), parseStatus, () => now, 2, 2, 100, 100);
   const started = hub.start('started', 0, 1);
   const paused = hub.start('paused', 0, 1);
   const pausedRecord = hub.authenticate('paused', paused.sessionToken);
