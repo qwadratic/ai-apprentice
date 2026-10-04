@@ -177,7 +177,7 @@ jobs:
       contents: read
       pages: read # configure-pages
     env:
-      # The one directory that is published: the launch page at its root, the web app (stream A + B) under app/
+      # The one directory that is published: the web app (stream A + B) at its root, the status page under status/
       # and deploy.json at the root (the VM's DEPLOY_SOURCE=pages mode reads <pages>/deploy.json).
       SITE_DIR: _site
     steps:
@@ -212,7 +212,7 @@ jobs:
             apps/web/features/agent/launchpad/package-lock.json
       - name: Build the web app (stream A scaffold + stream B shell) for Pages
         env:
-          WEB_BASE_PATH: /ai-apprentice/app/
+          WEB_BASE_PATH: /ai-apprentice/
           VITE_API_BASE: https://apprentice.exe.xyz
         run: |
           set -euo pipefail
@@ -225,15 +225,20 @@ jobs:
           npm ci
           npm run typecheck
           npm run build
-      # The web app stays under app/ until the product shell replaces A's debug view (A asked not to put a
-      # mock-only scaffold at the public root); then the two swap places.
-      - name: Assemble the site (launch page at the root, web app under app/)
+      # The product is what a judge opens: the web app at the site root. The status page (deploy status, PR
+      # queue) moves to status/, and app/ keeps a redirect for links that point at the old location.
+      - name: Assemble the site (web app at the root, status page under status/)
         run: |
           set -euo pipefail
           rm -rf "$SITE_DIR"
-          mkdir -p "$SITE_DIR/app"
-          cp -R apps/web/features/agent/launchpad/dist/. "$SITE_DIR/"
-          cp -R apps/web/dist/. "$SITE_DIR/app/"
+          mkdir -p "$SITE_DIR/status" "$SITE_DIR/app"
+          cp -R apps/web/dist/. "$SITE_DIR/"
+          cp -R apps/web/features/agent/launchpad/dist/. "$SITE_DIR/status/"
+          # Old app/ links (app/, app/screen-test.html, ...) redirect to the same page at the root.
+          for page in "$SITE_DIR"/*.html; do
+            name=$(basename "$page"); target="../$name"; [ "$name" = index.html ] && target="../"
+            printf '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=%s"><link rel="canonical" href="%s"><title>AI Apprentice</title><a href="%s">Moved: open the page</a>\n' "$target" "$target" "$target" > "$SITE_DIR/app/$name"
+          done
           find "$SITE_DIR" -type f | sort
       # Anthropic keys, ElevenLabs keys (sk_ + hex) and any api-key/xi-api-key assignment of a long literal.
       # A bare "api-key" grep would flag the app's own header-redaction code, so only assigned values count.

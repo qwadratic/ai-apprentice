@@ -24,6 +24,6 @@ export const VM_HEALTH_URL = `${API_BASE}/ops/vm-health`;
 export const OPS_STATUS_URL = `${API_BASE}/ops/deploy/status`;
 
 // Written next to this page by release.yml: {"sha": "<40 hex>", "at": "<ISO time>", "run": "<run url>"}.
-export const DEPLOY_JSON_URL = './deploy.json';
+export const DEPLOY_JSON_URL = '../deploy.json'; // the status page lives under status/, deploy.json at the site root
 
 export const FETCH_TIMEOUT_MS = 5000;
