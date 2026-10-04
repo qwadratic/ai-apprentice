@@ -5,6 +5,7 @@ status: In Progress
 assignee:
   - '@qwadratic'
 created_date: '2026-10-04 02:12'
+updated_date: '2026-10-04 02:13'
 labels:
   - stream-b
   - infra
@@ -21,8 +22,8 @@ When main moves while a release run is in progress, pages-build and deploy-vm fa
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 On run_attempt 1, a run whose sha is superseded mid-run ends green with a notice, and deploy-vm does not request a deploy
-- [ ] #2 A re-run of an older run still fails and never publishes or deploys the older sha
+- [ ] #1 On run_attempt 1, a run whose sha is superseded mid-run ends green with a notice; Pages and the VM get its sha together, and the newer run, queued in the release concurrency group, moves both next
+- [ ] #2 A re-run (run_attempt > 1) of an older run still fails and never publishes or deploys the older sha
 - [ ] #3 actionlint is clean
 <!-- AC:END -->
 
