@@ -20,7 +20,7 @@ Our running example is `customer_07`. For this one customer the expert writes th
 Three stages on one rail, with Clipa as the guide: [Show](#show) → [Reflect](#reflect) → [Pass it on](#pass-it-on). By voice, say "That's it" to end a stage. The header switch **Lead me through** lets Clipa move to the next stage herself. Turn it off and she only proposes it.
 
 > [!NOTE]
-> The Show, Reflect, warning and Trust clips are recorded runs of the live app. Screen events and answers in them were posted as text (marked "Simulated input · synthetic data"). Voice was off ("Voice offline"), so the bubbles are text, not audio. The hero is an intro animation and the fix clip is an illustration.
+> The Show, Reflect, warning and Trust clips are recorded runs of the live app. Screen events and answers in them were posted as text (marked "Simulated input · synthetic data"). Voice was off ("Voice offline"), so the bubbles are text, not audio. The hero is an intro animation and the fix clip is an illustration. Clipa's wording was tightened after the recording: questions are now at most 10 words, and a warning is one line with the fix and the expert's reason.
 
 ### Show
 
@@ -30,22 +30,22 @@ The expert works as usual. Clipa stays quiet while they type or talk, and asks o
 <sub>Clipa: "I know this one: Delivery update for customer_07. I will only ask about what is different."<br>An on-screen tag marks the 10 s pause as sped up. Then she asks: "What determines whether you put customer_07's delivery address and time window in the email text or leave them in the attachment?"</sub></p>
 
 - No questions while the expert types, talks or is away, and none while Clipa is speaking. At most 4 per 10 minutes.
-- One narrow question about a reason, a limit or an exception behind something visible. Never about what the screen already shows.
+- One short question (at most 10 words) about a reason, a limit or an exception behind something visible. Never about what the screen already shows.
 
 ### Reflect
 
-When Show ends, the Work Map is already being built. Clipa asks about what is still open, reads back what she understood, and the expert confirms or corrects it.
+When Show ends, the Work Map is already being built. Reflect opens on one rule card: the expert's words, the rule they give, its exception. Clipa asks about what is still open (up to three short points), reads the rule back, and the expert confirms or corrects it.
 
 <p align="center"><img src="docs/media/reflect-map.gif" width="720" alt="Clipa reads back the rule, the expert presses Confirm and the map turns confirmed"><br>
 <sub>Clipa's teach-back: "...Their request requires the address and delivery time window in the email text, and applies only to them..." The banner reads "Here is what I understood. Confirm it or correct it." After Confirm it changes to "The map is confirmed. A new hire can start Pass it on now." The badge turns from "Map v3 · draft" to "Map v3 · confirmed".</sub></p>
 
 - The answer becomes a rule for this customer only, with its exception: the details go in the email text, and an image is fine when the details are also in text.
-- The teach-back is short (at most 60 words). The expert corrects a detail by voice, for example "it is the delivery time window, not only the date", then confirms by voice or with the Confirm button.
+- The teach-back is short (at most 35 words) and covers only the rules: for whom, what to do, the reason in the expert's words, the exception. The expert corrects a detail by voice, for example "it is the delivery time window, not only the date", then confirms by voice or with the Confirm button.
 - Every step and rule links to its screen moment (evidence id and time range, no video replay yet) and to the expert's own words.
 
 ### Pass it on
 
-A new hire works a case the expert never showed. Clipa steps in before a rule is broken, in the expert's name. She asks the new hire to think instead of just saying no.
+A new hire works a case the expert never showed. Clipa steps in before a rule is broken, in the expert's name. The current build says the fix and the reason in one line (see the illustration below). The recorded run shows an earlier wording that asks.
 
 <p align="center"><img src="docs/media/pass-warning.gif" width="720" alt="Clipa turns orange and warns before Send"><br>
 <sub>New order ORD-2057, image only. Clipa: "This is Delivery update for customer_07. I will step in if one of the expert's rules applies."<br>With the pointer on Send demo email she warns: "The expert would stop here before sending and ask: why do you think this draft is ready to send?"</sub></p>
@@ -93,14 +93,14 @@ flowchart LR
 ## Try it
 
 > [!NOTE]
-> Use Chrome or Edge on a desktop. The app needs screen sharing (`getDisplayMedia`) and the microphone.
+> Use Chrome or Edge on a desktop. The app needs screen sharing (`getDisplayMedia`) and the microphone. After you stop, a question or warning can take 15–20 s: the screen is read about 11 s behind. Full script: [docs/pitch/demo-script.md](docs/pitch/demo-script.md).
 
 1. Open the [live app](https://qwadratic.github.io/clipa/) and allow the microphone when asked.
-2. **Show.** Press **Start Show** and share your whole screen, as Clipa asks. Draw masks over anything private, then press **Confirm masks and share**.
-3. In the **Demo workspace** pick the demo case **Practice order · customer_07**. Write the delivery address and time window into the email body as text. Then stop typing: at the pause Clipa asks why. Answer out loud.
-4. Say "That's it". Clipa moves to **Reflect** (say yes if she only proposes it). Answer what is still open, correct one detail of the teach-back by voice or with **Send correction**, then confirm by voice or press **Confirm**.
-5. **Pass it on.** Press **Start Pass it on** and share your screen. Pick **New order · customer_07 · attachment** (ORD-2057, image only) and move to **Send demo email**. Clipa warns first. Add the details as text: a text-plus-image draft gets no warning.
-6. Pick **Order · customer_03**. The same kind of email gets no warning.
+2. **Show.** Press **Start Show** and share your screen when Clipa asks. Draw masks over anything private, then press **Confirm masks and share**.
+3. In the **Demo workspace** pick **Practice order · customer_07**. Press **Remove image** and type the delivery address and window into the message. Then stop: hands off the keyboard, silent. Clipa asks one short why-question. Answer in a sentence, for example "Their phone blocks images. I write the delivery details in the email."
+4. Say "That's it". Clipa moves to **Reflect** by herself (say yes if she only proposes it). Answer her points, correct one detail of the read-back by voice or with **Send correction**, then say "Yes, that's right" or press **Confirm**.
+5. **Pass it on** opens after Reflect. Press **Start Pass it on** and share your screen. It opens on **New order · customer_07 · attachment** (ORD-2057, image only). Type one line, keep the image and stop: Clipa warns before Send. Then type the address and window into the message. Skip **Preview & check** for now: it runs without the confirmed map.
+6. Pick **Order · customer_03**, keep the image only, type a line and stop: Clipa stays quiet. Say "That's it" to end.
 
 ## Against the brief
 
@@ -181,7 +181,7 @@ flowchart LR
 - Off the record stops screen and voice. It does not recall what was already sent. "Start" records the session's events, transcript and audio on our server, and a session ends after 10 minutes.
 - Masks cover the screen, not speech. Fixed rectangles do not follow scrolling text, there are no masks on macOS frames, and there is no automatic PII redaction.
 - Each step and rule links to its screen moment by evidence id and time. A video replay of that moment is not wired into the Work Map yet.
-- The recorded runs used the Codex CLI engine of the model runner, because our Claude quota ran out. That engine is slower at vision.
+- The recorded runs used the Codex CLI engine of the model runner, because our Claude quota ran out. That engine reads the screen about 11 s behind, so a question or warning can come 15–20 s after you stop.
 
 ## Bonus: Clipa for macOS
 
