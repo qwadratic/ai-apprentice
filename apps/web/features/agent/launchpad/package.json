@@ -1,0 +1,16 @@
+{
+  "name": "@apprentice/launchpad",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Team launch page: TypeScript sources compiled by tsc into dist/ (the Pages site root; the agent lab is published under lab/).",
+  "engines": { "node": ">=22.22" },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p . && tsc --noEmit -p scripts",
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-static.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "typescript": "~7.0.2"
+  }
+}
