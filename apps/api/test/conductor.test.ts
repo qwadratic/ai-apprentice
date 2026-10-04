@@ -239,7 +239,7 @@ test('Teach: a pending action is checked fast, and the warning names the expert\
   const r = rig({ guardrail_check: () => ok({ status: 'warn', guardrailId: 'g1', message: 'Your lead would stop here. Why?', regionIds: ['r-to'] }) }, maps, 'hire-1');
   await r.send(hello('web', 'new_hire', 'expert-session'));
   await r.send({ type: 'session', mode: 'teach', live: true, reason: null });
-  assert.ok(cueOf(r.cues, 'context').some((c) => c.text.includes('budget above 300')));
+  assert.equal(cueOf(r.cues, 'context').length, 0, 'no learned workflow is sent to voice before screen recognition');
   await r.send(obs('n1', 'Budget set to 450.', { pendingAction: 'Submit' }));
   await r.advance(RULES.urgentSettleMs + 10);
   const warn = cueOf(r.cues, 'warn')[0];
@@ -483,4 +483,44 @@ test('routes: the Mac hands over with a single-use code; the web joins the same 
   const body = await r.json() as { lastCueSeq: number };
   assert.ok(body.lastCueSeq > 5, 'the web joined the Mac\'s conductor, not a new one');
   ac.abort();
+});
+
+
+test('routes: status authenticates the session and exposes the current baseline without transcript text', async (t) => {
+  const h = await start(t);
+  const session = await issue(h.base);
+  const other = await issue(h.base);
+  const url = `${h.base}/api/agent/conductor/${session.sessionId}/status`;
+  const headers = { Origin: ORIGIN, ...bearer(session.token) };
+  assert.equal((await fetch(url, { headers: { Origin: ORIGIN } })).status, 401);
+  assert.equal((await fetch(url, { headers: { Origin: ORIGIN, ...bearer(other.token) } })).status, 401);
+  assert.equal((await fetch(url, { headers: { Origin: 'https://evil.example', ...bearer(session.token) } })).status, 403);
+  const initial = await fetch(url, { headers });
+  assert.equal(initial.status, 200);
+  assert.equal(initial.headers.get('cache-control'), 'no-store');
+  const initialBody = await initial.json() as { ok: boolean; status: { baseline: { status: string } } };
+  assert.equal(initialBody.ok, true);
+  assert.equal(initialBody.status.baseline.status, 'empty');
+  for (const id of ['g1', 'g2']) h.agent.observeScreen(session.sessionId, {
+    id, kind: 'screen_activity', timestampMs: 1000, evidenceIds: [`ev-${id}`],
+    facts: { app: 'Gmail', surface: 'compose', summary: 'Synthetic customer invoice reply', change: null, pendingAction: null, regions: [] },
+  });
+  const read = async () => {
+    const response = await fetch(url, { headers });
+    assert.equal(response.status, 200);
+    return await response.json() as { status: { baseline: { status: string; appId: string | null; profileId: string | null; evidence: { observationIds: string[] } } } };
+  };
+  const candidate = (await read()).status.baseline;
+  assert.equal(candidate.status, 'candidate');
+  assert.equal(candidate.appId, 'gmail');
+  assert.equal(candidate.profileId, 'baseline.gmail-ticket-reply');
+  assert.deepEqual(candidate.evidence.observationIds, ['g1', 'g2']);
+  h.agent.observeScreen(session.sessionId, {
+    id: 'unknown', kind: 'screen_activity', timestampMs: 1100, evidenceIds: ['ev-unknown'],
+    facts: { app: null, surface: 'unknown', summary: 'Unknown workspace', change: null, pendingAction: null, regions: [] },
+  });
+  const suspended = (await read()).status.baseline;
+  assert.equal(suspended.status, 'suspended');
+  assert.equal(suspended.appId, null);
+  assert.equal(suspended.profileId, null);
 });

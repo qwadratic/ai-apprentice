@@ -2,6 +2,7 @@
 // One conductor serves every face of the session: the web app (the whole journey) and the macOS app (a lighter face
 // that hands over to the web). Pure apart from the injected clock, LLM call, id source and web link, so tests drive it
 // with a fake clock and fake tasks.
+import { BaselineProfileSelector, baselinePromptContext } from '../../../../packages/screen/baseline/profiles.ts';
 import type { GenericQuestionOutput, GuardrailCheckOutput, MapEditOutput, MapSynthesisOutput, ProcessMatchOutput, ReplyOutput } from '../llm-tasks.ts';
 import type { TaskResult } from '../llm.ts';
 import { GUIDE, OPEN_WEB, detectLanguage } from './lines.ts';
@@ -42,14 +43,14 @@ export const RULES = {
   keepTurns: 200,
 } as const;
 
-export interface ConfirmedMap { sessionId: string; map: MapSynthesisOutput; confirmedAt: number }
-
-/** Confirmed maps, shared by all sessions of this server: Teach reads the expert's map. One team, one demo server. */
-/** Two generic observations of one screen: the same app, surface and control about to be used. */
+/** Free-text paraphrases on a generic frame do not restart the user's pause. */
 function sameScreen(a: SeenObservation, b: SeenObservation): boolean {
   return a.kind === 'screen_activity' && b.kind === 'screen_activity' && a.app === b.app && a.surface === b.surface && a.pendingAction === b.pendingAction;
 }
 
+export interface ConfirmedMap { sessionId: string; map: MapSynthesisOutput; confirmedAt: number }
+
+/** Confirmed maps, shared by all sessions of this server: Teach reads the expert's map. One team, one demo server. */
 export class MapRegistry {
   private readonly bySession = new Map<string, ConfirmedMap>();
   private latest: ConfirmedMap | null = null;
@@ -136,11 +137,19 @@ export class Conductor {
 
   private readonly observations: SeenObservation[] = [];
   private readonly turns: Turn[] = [];
+  private readonly baseline = new BaselineProfileSelector();
+  private baselinedSession = false;
+  private contextRevision = 0;
+  private contextWhere: string | null = null;
+  private readonly contextObservationIds = new Set<string>();
+  private readonly contextTurns: Turn[] = [];
+  private readonly contextAskedTexts: string[] = [];
+  private readonly baselineProvenance: NonNullable<MapSynthesisOutput['baselineProvenance']> = { observations: [], turns: [] };
+  private questionContext: NonNullable<MapSynthesisOutput['baselineProvenance']>['turns'][number] | null = null;
   private pendingChange = false;
   private pendingTeachCheck = false;
   private urgentTeachCheck = false;
   private prefetch: Prefetch | null = null;
-  private readonly askedTexts: string[] = [];
   private readonly askTimes: number[] = [];
   private lastAskAt = -Infinity;
   private lastTeachCheckAt = -Infinity;
@@ -164,6 +173,7 @@ export class Conductor {
   private active: ActiveCue | null = null;
   private readonly listeners = new Set<(cue: CueEnvelope) => void>();
   private inflight: AbortController | null = null;
+  private inflightTask: string | null = null;
   private lastQuiet: { reason: string; at: number } | null = null;
   private readonly guided = new Set<string>();
   lastSeenAt: number;
@@ -288,6 +298,7 @@ export class Conductor {
       case 'off_record':
         if (e.on === this.offRecord) return;
         this.offRecord = e.on;
+        this.resetLiveContext();
         if (e.on) {
           this.inflight?.abort();
           this.inflight = null;
@@ -363,31 +374,97 @@ export class Conductor {
     if (this.offRecord) return;
     // The same observation can arrive twice (from the screen module and from a client that forwards it): keep the first.
     if (this.observations.some((x) => x.id === o.id)) return;
-    const last = this.observations[this.observations.length - 1];
-    const lastScreen = [...this.observations].reverse().find((x) => x.kind !== 'input_activity');
+    const last = [...this.observations].reverse().find((item) => item.kind !== 'input_activity');
     this.observations.push(o);
     if (this.observations.length > RULES.keepObservations) this.observations.splice(0, this.observations.length - RULES.keepObservations);
     if (o.kind === 'input_activity') return;
-    const changed = o.change !== null || last === undefined || last.summary !== o.summary || last.surface !== o.surface;
-    // A generic screen's summary and change are the vision model's free text, reworded on every frame of the same screen
-    // (a blinking caret is enough for a new frame every 1.5 s). Only another app, surface or pending control is a new
-    // screen: it restarts the pause and drops the question being prepared. A reworded frame does neither, or the pause
-    // would never come and every prepared question would be dropped.
-    const moved = o.kind !== 'screen_activity' ? changed : lastScreen === undefined || !sameScreen(lastScreen, o);
-    if (changed) {
+    const where = `${o.app ?? ''}|${o.surface}`;
+    const moved = this.contextWhere !== null && this.contextWhere !== where;
+    if (moved) {
+      this.invalidateLiveContext(true);
+      this.contextObservationIds.clear();
+      this.contextTurns.length = 0;
+      this.contextAskedTexts.length = 0;
+    }
+    this.contextWhere = where;
+    this.contextObservationIds.add(o.id);
+    const retainedIds = new Set(this.observations.map((item) => item.id));
+    for (const id of this.contextObservationIds) if (!retainedIds.has(id)) this.contextObservationIds.delete(id);
+    const before = this.baseline.current();
+    const current = this.baseline.observe(o);
+    // A same-app navigation may retain the prior confirming frame; keep those evidence refs in the live input.
+    for (const id of current.evidence.observationIds) this.contextObservationIds.add(id);
+    if (current.candidate) this.baselinedSession = true;
+    const baselineChanged = before.status !== current.status || before.appId !== current.appId || before.candidate?.appId !== current.candidate?.appId;
+    this.baselineProvenance.observations.push({
+      observationId: o.id, appId: current.candidate?.appId ?? current.appId,
+      profileId: current.candidate?.profileId ?? current.profileId, evidenceIds: o.evidenceIds.slice(0, 8),
+    });
+    this.baselineProvenance.observations.splice(0, Math.max(0, this.baselineProvenance.observations.length - RULES.keepObservations));
+    const changed = moved || baselineChanged || o.change !== null || last === undefined || last.summary !== o.summary || last.surface !== o.surface || last.app !== o.app;
+    const newScreen = moved || baselineChanged || last === undefined || (o.kind === 'screen_activity' ? !sameScreen(last, o) : changed);
+    if (changed || newScreen) {
       this.pendingChange = true;
-      this.latestChangeId = o.id;
-      if (moved) {
+      if (newScreen) {
+        // Keep PR60's generic-screen pause semantics; app/profile transitions always invalidate the old task.
+        this.invalidateLiveContext(false);
         this.lastChangeAt = now;
-        // A question being prepared for an older screen is out of date.
-        if (this.prefetch?.status === 'running' && this.prefetch.basis !== o.id && this.liveMode === 'learn') this.inflight?.abort();
+        this.latestChangeId = o.id;
       }
+      // A negative match describes the earlier moment, not every future observation in this surface.
+      if (!this.recognized && this.inflightTask !== 'process_match') this.recognizedFor = null;
     }
     if (changed || o.pendingAction !== null) this.pendingTeachCheck = true;
     if (o.pendingAction !== null) this.urgentTeachCheck = true;
   }
 
+  /** Invalidate only live decisions; a Review map may still be synthesizing in the background. */
+  private invalidateLiveContext(clearProcess: boolean): void {
+    this.contextRevision++;
+    if (this.liveMode === 'learn' || this.liveMode === 'teach') {
+      if (this.inflightTask === 'process_match') {
+        this.recognizedFor = null;
+        this.lastRecognitionAt = -Infinity;
+      }
+      this.inflight?.abort();
+      this.inflight = null;
+    }
+    this.prefetch = null;
+    this.pendingSay = null;
+    this.questionContext = null;
+    if ((this.liveMode === 'learn' || this.liveMode === 'teach') && (this.active?.type === 'ask' || this.active?.type === 'warn')) this.cancelActive();
+    if (clearProcess) {
+      if (this.recognized && this.liveMode === 'teach' && !this.offRecord) {
+        this.emit({ type: 'context', text: '[map] The visible context changed. No current expert process is recognized. Do not apply earlier process rules; wait for a new recognized process.' });
+      }
+      this.recognized = null;
+      this.recognizedFor = null;
+      this.lastRecognitionAt = -Infinity;
+      this.lastTeachCheckAt = -Infinity;
+      this.pendingTeachCheck = false;
+      this.urgentTeachCheck = false;
+    }
+  }
+
+  private resetLiveContext(): void {
+    this.invalidateLiveContext(true);
+    this.baseline.reset();
+    this.contextWhere = null;
+    this.contextObservationIds.clear();
+    this.contextTurns.length = 0;
+    this.contextAskedTexts.length = 0;
+    this.pendingChange = false;
+    this.latestChangeId = null;
+  }
+
   private onSession(mode: Mode, live: boolean, reason: string | null): void {
+    if (live || this.liveMode === mode) {
+      if (!(live && mode === 'review' && this.mapPrefetch)) {
+        this.inflight?.abort();
+        this.inflight = null;
+      }
+      this.resetLiveContext();
+    }
     if (live) {
       this.liveMode = mode;
       this.selectedMode = mode;
@@ -420,6 +497,19 @@ export class Conductor {
   private onTranscript(role: 'expert' | 'agent', text: string): void {
     const turn: Turn = { role, text: text.slice(0, 1000), atMs: this.sessionTime() };
     this.turns.push(turn);
+    this.contextTurns.push(turn);
+    if (this.contextTurns.length > RULES.keepTurns) this.contextTurns.splice(0, this.contextTurns.length - RULES.keepTurns);
+    if (role === 'expert') {
+      const current = this.baseline.current();
+      const provenance = this.questionContext ?? {
+        atMs: turn.atMs, appId: current.candidate?.appId ?? current.appId,
+        profileId: current.candidate?.profileId ?? current.profileId,
+        observationIds: [...current.evidence.observationIds], evidenceIds: [...current.evidence.evidenceIds], questionId: null,
+      };
+      this.baselineProvenance.turns.push({ ...provenance, atMs: turn.atMs });
+      this.baselineProvenance.turns.splice(0, Math.max(0, this.baselineProvenance.turns.length - RULES.keepTurns));
+      this.questionContext = null;
+    }
     if (this.turns.length > RULES.keepTurns) this.turns.splice(0, this.turns.length - RULES.keepTurns);
     if (role !== 'expert') return;
     this.lastBusyAt = this.deps.now();
@@ -501,19 +591,12 @@ export class Conductor {
     const budget = this.learnBudget(now);
     if (budget === 'used') { this.quiet('question budget used up for now'); return; }
     const basis = this.latestChangeId;
-    // A question prepared for an earlier frame of the same generic screen still fits it.
-    const ready = this.prefetch && this.prefetch.status !== 'running' && (this.prefetch.basis === basis || this.sameScreenIds(this.prefetch.basis, basis)) ? this.prefetch : null;
+    const ready = this.prefetch && this.prefetch.basis === basis && this.prefetch.status !== 'running' ? this.prefetch : null;
     if (ready && budget === 'ok' && this.paused(now)) { this.sayQuestion(ready); return; }
     const settled = now - this.lastChangeAt >= RULES.settleMs;
     const nearlyAllowed = now - this.lastAskAt >= RULES.learnMinGapMs - 10_000;
     if (settled && nearlyAllowed && this.inflight === null && (!this.prefetch || this.prefetch.basis !== basis)) void this.prepareQuestion(basis);
     else if (budget === 'soon' && this.paused(now)) this.quiet('asked recently');
-  }
-
-  private sameScreenIds(a: string, b: string): boolean {
-    const x = this.observations.find((o) => o.id === a);
-    const y = this.observations.find((o) => o.id === b);
-    return x !== undefined && y !== undefined && sameScreen(x, y);
   }
 
   private tickReview(now: number): void {
@@ -528,7 +611,8 @@ export class Conductor {
   private teachRules(): LearnedRule[] {
     const library = this.deps.maps.library(this.mapFrom);
     const first = this.recognized ? library.find((p) => p.key === this.recognized?.key) : undefined;
-    const ordered = first ? [first, ...library.filter((p) => p !== first)] : library;
+    // Baseline apps require a recognized current workflow; app identity alone is not expert knowledge.
+    const ordered = this.baselinedSession ? (first ? [first] : []) : first ? [first, ...library.filter((p) => p !== first)] : library;
     return ordered.flatMap((p) => p.rules.map((r) => ({ ...r, condition: ordered.length > 1 ? `[${p.title}] ${r.condition}` : r.condition }))).slice(0, 10);
   }
 
@@ -547,7 +631,8 @@ export class Conductor {
   /** Recognise once the screen shows something, and again when the person moves to another app or surface. */
   private shouldRecognize(now: number): boolean {
     if (!RULES.recognizeProcesses) return false;
-    const latest = [...this.observations].reverse().find((o) => o.kind !== 'input_activity');
+    if (this.baselinedSession && this.baseline.current().status !== 'candidate') return false;
+    const latest = [...this.observations].reverse().find((o) => o.kind !== 'input_activity' && this.contextObservationIds.has(o.id));
     if (!latest || now - this.lastChangeAt < RULES.settleMs) return false;
     const where = `${latest.app ?? ''}|${latest.surface}`;
     if (where === this.recognizedFor || now - this.lastRecognitionAt < 4000) return false;
@@ -557,9 +642,10 @@ export class Conductor {
   /** process_match: silent on any failure or doubt (no line is said); a late answer for an ended stage is dropped. */
   private async recognize(): Promise<void> {
     const mode = this.liveMode;
+    const revision = this.contextRevision;
     const library = this.deps.maps.library(this.mapFrom);
-    const observations = this.genericObservations(6);
-    const latest = [...this.observations].reverse().find((o) => o.kind !== 'input_activity');
+    const observations = this.genericObservations(6, true);
+    const latest = [...this.observations].reverse().find((o) => o.kind !== 'input_activity' && this.contextObservationIds.has(o.id));
     if (!latest || library.length === 0 || observations.length === 0) return;
     this.recognizedFor = `${latest.app ?? ''}|${latest.surface}`;
     this.lastRecognitionAt = this.deps.now();
@@ -567,10 +653,13 @@ export class Conductor {
       processes: library.map((p) => ({ id: p.key, title: p.title.slice(0, 120), summary: p.summary.slice(0, 300), steps: p.steps.slice(0, 10).map((x) => x.slice(0, 300)), rules: p.rules.slice(0, 8).map((r) => `when ${r.condition}, ${r.requiredAction}`.slice(0, 400)) })),
       observations,
     });
-    if (this.offRecord || this.liveMode !== mode || !out || out.processId === null || out.confidence < RULES.processConfidence) return;
+    if (revision !== this.contextRevision || this.offRecord || this.liveMode !== mode || !out || out.processId === null || out.confidence < RULES.processConfidence) return;
     const match = library.find((p) => p.key === out.processId);
     if (!match || match.key === this.recognized?.key) return;
     this.recognized = match;
+    if (this.liveMode === 'teach') {
+      this.emit({ type: 'context', text: `[map] The expert's confirmed rules for ${match.title}: ${match.rules.map((g) => `when ${g.condition}, ${g.requiredAction}`).join('; ') || 'none'}. Do not state them unless the app asks.`.slice(0, 2000) });
+    }
     this.pendingSay = this.liveMode === 'learn'
       ? `I know this one: ${match.title}. I will only ask about what is different.`
       : `This is ${match.title}. I will step in if one of the expert's rules applies.`;
@@ -589,6 +678,7 @@ export class Conductor {
   private async run<T>(task: string, body: unknown): Promise<T | null> {
     const controller = new AbortController();
     this.inflight = controller;
+    this.inflightTask = task;
     try {
       const r = await this.deps.llm(task, body, controller.signal);
       if (controller.signal.aborted || !r.ok) return null;
@@ -597,24 +687,25 @@ export class Conductor {
       // A thrown call is a failed call: the caller falls back, and nothing rejects into the void (a crash on a live server).
       return null;
     } finally {
-      if (this.inflight === controller) this.inflight = null;
+      if (this.inflight === controller) { this.inflight = null; this.inflightTask = null; }
     }
   }
 
-  private genericObservations(max: number): Array<Record<string, unknown>> {
-    return this.observations.filter((o) => o.kind !== 'input_activity').slice(-max).map((o) => ({
+  private genericObservations(max: number, current = false): Array<Record<string, unknown>> {
+    return this.observations.filter((o) => o.kind !== 'input_activity' && (!current || this.contextObservationIds.has(o.id))).slice(-max).map((o) => ({
       id: o.id, atMs: o.atMs, app: o.app, surface: o.surface.slice(0, 120), summary: o.summary.slice(0, 400), change: o.change, pendingAction: o.pendingAction,
       regions: o.regions.map((r) => ({ id: r.regionId, label: r.label })),
     }));
   }
 
-  private transcript(max: number, cut = 1000): Turn[] {
-    return this.turns.slice(-max).map((t) => ({ role: t.role, text: t.text.slice(0, cut), atMs: t.atMs }));
+  private transcript(max: number, cut = 1000, current = false): Turn[] {
+    return (current ? this.contextTurns : this.turns).slice(-max).map((t) => ({ role: t.role, text: t.text.slice(0, cut), atMs: t.atMs }));
   }
 
   /** Regions by id, looked up in the named observations first and then in the newest ones. */
-  private regionsFor(observationIds: readonly string[], regionIds: readonly string[]): Region[] {
-    const pool = [...this.observations.filter((o) => observationIds.includes(o.id)), ...[...this.observations].reverse()];
+  private regionsFor(observationIds: readonly string[], regionIds: readonly string[], current = false): Region[] {
+    const observations = this.observations.filter((o) => !current || this.contextObservationIds.has(o.id));
+    const pool = [...observations.filter((o) => observationIds.includes(o.id)), ...[...observations].reverse()];
     if (regionIds.length === 0) {
       const named = pool.find((o) => observationIds.includes(o.id) && o.regions.length > 0);
       return named ? named.regions.slice(0, 1) : [];
@@ -633,13 +724,13 @@ export class Conductor {
   }
 
   private async prepareQuestion(basis: string): Promise<void> {
-    const observations = this.genericObservations(8);
+    const observations = this.genericObservations(8, true);
     if (observations.length === 0) { this.pendingChange = false; return; }
     const entry: Prefetch = { basis, status: 'running', out: null };
     this.prefetch = entry;
     this.pose('think');
     const out = await this.run<GenericQuestionOutput>('generic_question', {
-      observations, transcript: [...this.knownContext(), ...this.transcript(this.recognized ? 15 : 16)], asked: this.askedTexts.slice(-20).map((a) => a.slice(0, 300)), language: this.language,
+      observations, transcript: [...this.knownContext(), ...this.transcript(this.recognized ? 15 : 16, 1000, true)], baselineContext: baselinePromptContext(this.baseline.current()), asked: this.contextAskedTexts.slice(-20).map((a) => a.slice(0, 300)), language: this.language,
     });
     if (this.prefetch !== entry) return; // superseded or reset
     entry.status = out ? 'ready' : 'failed';
@@ -658,17 +749,28 @@ export class Conductor {
     let regionIds = entry.out?.regionIds ?? [];
     if (entry.status === 'failed') {
       // The route failed: a plain question about the latest change, if there is one.
-      const latest = [...this.observations].reverse().find((o) => o.change !== null);
+      const latest = [...this.observations].reverse().find((o) => o.change !== null && this.contextObservationIds.has(o.id));
       if (latest) { text = `I saw: ${latest.change} What made you do that?`; topic = 'reason'; obsIds = [latest.id]; regionIds = []; }
     }
     if (text === null) { this.quiet('nothing on screen worth asking about yet'); return; }
-    const regions = this.regionsFor(obsIds, regionIds);
-    this.askedTexts.push(text);
+    obsIds = obsIds.filter((id) => this.contextObservationIds.has(id));
+    const regions = this.regionsFor(obsIds, regionIds, true);
+    this.contextAskedTexts.push(text);
+    if (this.contextAskedTexts.length > 20) this.contextAskedTexts.shift();
     this.askTimes.push(now);
     this.lastAskAt = now;
     this.presence('full', regions[0] ? 'target' : 'corner');
     if (regions[0]) this.emit({ type: 'point', target: { kind: 'region', ...regions[0] } });
-    this.emit({ type: 'ask', questionId: `q${this.askTimes.length}-${this.seq + 1}`, text, topic, regions, evidenceIds: this.evidenceFor(obsIds) }, { ttlMs: RULES.askTtlMs });
+    const questionId = `q${this.askTimes.length}-${this.seq + 1}`;
+    const current = this.baseline.current();
+    const scopedIds = obsIds.filter((id) => this.contextObservationIds.has(id));
+    this.questionContext = {
+      atMs: this.sessionTime(), appId: current.candidate?.appId ?? current.appId,
+      profileId: current.candidate?.profileId ?? current.profileId,
+      observationIds: scopedIds.length ? scopedIds : [...current.evidence.observationIds],
+      evidenceIds: scopedIds.length ? this.evidenceFor(scopedIds) : [...current.evidence.evidenceIds], questionId,
+    };
+    this.emit({ type: 'ask', questionId, text, topic, regions, evidenceIds: this.evidenceFor(scopedIds) }, { ttlMs: RULES.askTtlMs });
   }
 
   /** As soon as Show ends, the map is built in the background, so Reflect opens with it ready. */
@@ -677,10 +779,11 @@ export class Conductor {
   private prefetchMap(): void {
     const observations = this.genericObservations(40);
     if (observations.length === 0 || this.mapPrefetch || this.review.phase === 'confirmed') return;
+    const provenance = this.provenanceSnapshot();
     this.mapPrefetch = (async () => {
       const map = await this.run<MapSynthesisOutput>('map_synthesis', { observations, transcript: this.transcript(60, 600), correction: null, previousTeachBack: null });
       if (map && !this.offRecord && this.review.phase !== 'confirmed') {
-        this.review = { phase: 'idle', map: { ...map, comments: [] }, version: this.review.version, gapIndex: 0, awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false };
+        this.review = { phase: 'idle', map: { ...map, baselineProvenance: provenance, comments: [] }, version: this.review.version, gapIndex: 0, awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false };
         this.freshMap = true;
       }
     })().catch(() => undefined).finally(() => { this.mapPrefetch = null; });
@@ -695,6 +798,7 @@ export class Conductor {
     }
     const observations = this.genericObservations(40);
     const turns = this.transcript(60, 600);
+    const provenance = this.provenanceSnapshot();
     if (this.review.map && this.freshMap) {
       // Built in the background after Show: go straight to the open points.
       this.freshMap = false;
@@ -712,12 +816,17 @@ export class Conductor {
     const map = await this.run<MapSynthesisOutput>('map_synthesis', { observations, transcript: turns, correction: null, previousTeachBack: null });
     if (this.offRecord || this.liveMode !== 'review') return;
     if (!map) { this.review.phase = 'idle'; this.quiet('could not build the map; try Review again'); this.pose('idle'); return; }
-    this.publishMap({ ...map, comments: [] }, false);
+    this.publishMap({ ...map, baselineProvenance: provenance, comments: [] }, false);
     if (map.gaps.length > 0) { this.review.phase = 'gaps'; this.guide('gaps', 'web'); }
     else this.readTeachBack();
   }
 
+  private provenanceSnapshot(): NonNullable<MapSynthesisOutput['baselineProvenance']> {
+    return structuredClone(this.baselineProvenance);
+  }
+
   private publishMap(map: ConductorMap, confirmed: boolean, bump = true): void {
+    map = { ...map, baselineProvenance: map.baselineProvenance ?? this.provenanceSnapshot() };
     this.review.map = map;
     if (bump) this.review.version++;
     this.emit({ type: 'map', version: this.review.version, map, confirmed });
@@ -742,6 +851,7 @@ export class Conductor {
 
   private async resynthesize(correction: string | null): Promise<void> {
     const previous = this.review.map?.teachBack ?? null;
+    const provenance = this.provenanceSnapshot();
     const comments = this.review.map?.comments ?? [];
     this.review.phase = 'building';
     this.review.awaiting = null;
@@ -751,7 +861,7 @@ export class Conductor {
     });
     if (this.offRecord || this.liveMode !== 'review') return;
     this.review.editFailed = false;
-    if (map) this.publishMap({ ...map, comments }, false);
+    if (map) this.publishMap({ ...map, baselineProvenance: provenance, comments }, false);
     if (!this.review.map) { this.review.phase = 'idle'; return; }
     this.readTeachBack();
   }
@@ -805,7 +915,7 @@ export class Conductor {
       const { map, applied } = applyEdits(before, out.operations, utterance, this.sessionTime());
       if (applied === 0) continue;
       const confirmed = this.review.phase === 'confirmed';
-      this.publishMap({ ...map, teachBack: out.teachBack ?? map.teachBack }, confirmed);
+      this.publishMap({ ...map, baselineProvenance: this.provenanceSnapshot(), teachBack: out.teachBack ?? map.teachBack }, confirmed);
       if (confirmed && this.review.map) this.deps.maps.confirm(this.sessionId, this.review.map, this.deps.now()); // the expert's own words keep it confirmed
       if (out.reply) this.emit({ type: 'say', text: out.reply });
       if (rereadTeachBack && !confirmed) { this.readTeachBack(); rereadTeachBack = false; }
@@ -828,21 +938,22 @@ export class Conductor {
     this.presence('dot');
     const library = this.deps.maps.library(this.mapFrom);
     if (library.length === 0) { this.guide('no_map'); return; }
-    this.emit({ type: 'context', text: `[map] The expert's confirmed rules: ${library.flatMap((p) => p.rules.map((g) => `[${p.title}] when ${g.condition}, ${g.requiredAction}`)).join('; ') || 'none'}. Do not state them unless the app asks.`.slice(0, 2000) });
+    // Rule context is sent only after recognizing a current process; the library may span unrelated apps.
     this.guideOnce('work');
   }
 
   private async checkGuardrails(rules: LearnedRule[]): Promise<void> {
+    const revision = this.contextRevision;
     this.pendingTeachCheck = false;
     this.urgentTeachCheck = false;
     this.lastTeachCheckAt = this.deps.now();
-    const observations = this.genericObservations(6);
+    const observations = this.genericObservations(6, true);
     if (observations.length === 0) return;
     const guardrails = rules.slice(0, 10).map((g) => ({
       id: g.id, condition: g.condition.slice(0, 300), requiredAction: g.requiredAction.slice(0, 300), reason: g.reason?.slice(0, 400) ?? null, quote: g.quote?.slice(0, 600) ?? null,
     }));
-    const out = await this.run<GuardrailCheckOutput>('guardrail_check', { guardrails, observations, transcript: this.transcript(8), language: this.language });
-    if (this.offRecord || this.liveMode !== 'teach' || !out) return;
+    const out = await this.run<GuardrailCheckOutput>('guardrail_check', { guardrails, observations, transcript: this.transcript(8, 1000, true), language: this.language });
+    if (revision !== this.contextRevision || this.offRecord || this.liveMode !== 'teach' || !out) return;
     if (out.status === 'unknown' && out.message) { this.quiet(out.message); return; }
     if (out.status !== 'warn' || !out.guardrailId || !out.message) return;
     const latest = observations[observations.length - 1];
@@ -851,7 +962,7 @@ export class Conductor {
     if (this.warned.has(key)) return;
     this.warned.add(key);
     const rule = rules.find((g) => g.id === out.guardrailId);
-    const regions = this.regionsFor([latestId], out.regionIds);
+    const regions = this.regionsFor([latestId], out.regionIds, true);
     this.pose('warn');
     this.presence('full', regions[0] ? 'target' : 'corner');
     if (regions[0]) this.emit({ type: 'point', target: { kind: 'region', ...regions[0] } });
@@ -863,7 +974,7 @@ export class Conductor {
     return {
       persona: this.persona, clients: this.kinds(), language: this.language, selectedMode: this.selectedMode, liveMode: this.liveMode, offRecord: this.offRecord,
       sharing: this.sharing, observations: this.observations.length, turns: this.turns.length, asked: this.askTimes.length, review: this.review.phase,
-      mapVersion: this.review.version, cues: this.seq, busy: this.inflight !== null,
+      mapVersion: this.review.version, cues: this.seq, busy: this.inflight !== null, baseline: this.baseline.current(),
     };
   }
 }

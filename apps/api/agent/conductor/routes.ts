@@ -107,6 +107,7 @@ export function createConductorHub(rt: AgentRuntime): ConductorHub {
 export function registerConductorRoutes(app: Express, rt: AgentRuntime, hub: ConductorHub): void {
   const { config, store } = rt;
   const eventsLimited = makeLimiter({ perMinute: 600 }, config.now);
+  const statusLimited = makeLimiter({ perMinute: 60 }, config.now);
   const streamsLimited = makeLimiter({ perMinute: 30 }, config.now);
   const linkLimited = makeLimiter({ perMinute: 10 }, config.now);
   const streams = new Map<string, number>();
@@ -119,6 +120,13 @@ export function registerConductorRoutes(app: Express, rt: AgentRuntime, hub: Con
     if (!store.check(req.get('Authorization'), id).ok) { reply(res, 401, { ok: false, error: 'unauthorized' }); return null; }
     return id;
   };
+
+  // Authenticated diagnostics expose selector identity and bounded evidence without transcript text.
+  app.get('/api/agent/conductor/:id/status', (req, res) => {
+    const id = gate(req, res, statusLimited);
+    if (id === null) return;
+    reply(res, 200, { ok: true, status: hub.forSession(id).status() }, { 'Cache-Control': 'no-store' });
+  });
 
   app.post('/api/agent/conductor/:id/events', async (req, res) => {
     const id = gate(req, res, eventsLimited);
