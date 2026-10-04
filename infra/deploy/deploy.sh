@@ -32,7 +32,7 @@ set -euo pipefail
 
 DEPLOY_SOURCE="${DEPLOY_SOURCE:-pages}"
 DEPLOY_REF="${DEPLOY_REF:-main}"
-DEPLOY_JSON_URL="${DEPLOY_JSON_URL:-https://qwadratic.github.io/ai-apprentice/deploy.json}"
+DEPLOY_JSON_URL="${DEPLOY_JSON_URL:-https://qwadratic.github.io/clipa/deploy.json}"
 # Keep only what deploy needs; never hand secrets to install or build scripts.
 for v in ELEVENLABS_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY RUNNER_TOKEN API_TOKEN DEPLOY_WEBHOOK_SECRET; do unset "$v"; done
 export COREPACK_ENABLE_DOWNLOAD_PROMPT=0 CI=1

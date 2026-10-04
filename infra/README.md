@@ -142,7 +142,7 @@ Other sources, for manual use: `sudo systemctl start apprentice-deploy.service` 
 | `DEPLOY_WEBHOOK_SECRET` | ops | HMAC key for `POST /ops/deploy`; the same value is the Actions secret `DEPLOY_WEBHOOK_SECRET` |
 | `DEPLOY_SOURCE` | deploy | `pages` (default): the sha in `deploy.json`; `ref`: `origin/$DEPLOY_REF` |
 | `DEPLOY_REF` | deploy | default `main`; used with `DEPLOY_SOURCE=ref` |
-| `DEPLOY_JSON_URL` | deploy | default `https://qwadratic.github.io/ai-apprentice/deploy.json` |
+| `DEPLOY_JSON_URL` | deploy | default `https://qwadratic.github.io/clipa/deploy.json` |
 | `SESSIONS_DIR` | agent module | default `/var/lib/apprentice/sessions` (not in the env file; set in the unit if needed) |
 | `SIGNED_URL_REQUIRE_SESSION`, `AGENT_*`, `SIGNED_URL_*`, `EVENTS_BYTES_PER_HOUR`, `SESSIONS_WARN_BYTES`, `SESSIONS_ROTATE_BYTES` | agent module | session-token requirement for the signed URL, rate limits and disk thresholds, all optional; see `apps/api/agent/config.ts` |
 | `DEBUG_ENDPOINTS` | placeholder only | `1` enables `GET /debug/sse`; ignored by apps/api |
