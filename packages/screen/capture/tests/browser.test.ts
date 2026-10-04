@@ -104,6 +104,8 @@ test('Chromium: real canvas/PNG/processed stream pixels, panel masks, lifecycle 
       window.capture = new ScreenCapture({
         runtime: { ...browserCaptureRuntime(), getDisplayMedia: async (options: unknown) => { window.requests.push(options); return raw; } },
         frameIntervalMs: 100, renderIntervalMs: 15,
+        // Lossless native-size frames: this test compares exact mask and preview pixels.
+        frameEncoding: { maxWidth: Infinity, jpegQuality: null },
         onFrame: (frame: BrowserFrame, lease: BrowserLease) => { window.framesReceived.push(frame); window.leases.push(lease); },
       });
       window.unmount = mountScreenPanel(document.querySelector('#panel'), {

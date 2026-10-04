@@ -7,7 +7,7 @@ import {
   parseSessionStart,
 } from '@apprentice/contracts';
 import {ScreenCapture} from '../capture/ScreenCapture.js';
-import type {CaptureProvenance, CaptureRuntime, FrameLease, ProcessedFrame} from '../capture/ScreenCapture.js';
+import type {CaptureProvenance, CaptureRuntime, FrameEncoding, FrameLease, ProcessedFrame} from '../capture/ScreenCapture.js';
 
 type Fetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 type Timer = ReturnType<typeof setTimeout>;
@@ -21,6 +21,8 @@ export interface ScreenBridgeRuntimeOptions {
   readonly captureRuntime?: CaptureRuntime;
   readonly pollIntervalMs?: number;
   readonly frameIntervalMs?: number;
+  /** Size and JPEG quality of frames sent to vision; defaults in DEFAULT_FRAME_ENCODING (capture). */
+  readonly frameEncoding?: Partial<FrameEncoding>;
 }
 
 export interface ScreenBridgeRuntime {
@@ -108,6 +110,7 @@ class Runtime implements ScreenBridgeRuntime {
     this.capture = new ScreenCapture({
       ...(options.captureRuntime ? {runtime: options.captureRuntime} : {}),
       ...(options.frameIntervalMs ? {frameIntervalMs: options.frameIntervalMs} : {}),
+      ...(options.frameEncoding ? {frameEncoding: options.frameEncoding} : {}),
       snapshotProvenance: () => ({surface: options.surface?.() ?? null, sourceRevision: options.sourceRevision()}),
       onFrame: (frame, lease) => this.#upload(frame, lease),
     });
@@ -279,7 +282,7 @@ class Runtime implements ScreenBridgeRuntime {
     const data = base64(new Uint8Array(await frame.image.arrayBuffer()));
     if (!active.serverReady || !this.#current(active) || this.#offRecord || !lease.isCurrent()) return;
     const response = await this.#request(active, 'frames', {generation: active.serverGeneration, frameId: frame.frameId,
-      timestampMs: frame.timestampMs, processed: true, mediaType: 'image/png', data,
+      timestampMs: frame.timestampMs, processed: true, mediaType: frameMediaType(frame.image), data,
       provenance: {...frame.provenance, captureGeneration: frame.generation}});
     const body = await jsonRecord(response); exactKeys(body, ['ok', 'outcome', 'sessionId', 'generation', 'frameId']);
     if (body.sessionId !== active.session.sessionId || body.frameId !== frame.frameId || body.generation !== active.serverGeneration ||
@@ -528,6 +531,10 @@ function exactKeys(value: Record<string, unknown>, required: readonly string[], 
 }
 function integer(value: unknown, path: string, min: number): number { if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < min) throw new TransportError(`invalid_${path}`); return value; }
 function token(value: unknown): string { if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{20,}$/.test(value)) throw new TransportError('invalid_session_token'); return value; }
+/** The encoder's actual output: a browser that cannot encode JPEG returns PNG instead. */
+function frameMediaType(image: Blob): 'image/png' | 'image/jpeg' | 'image/webp' {
+  return image.type === 'image/jpeg' || image.type === 'image/webp' ? image.type : 'image/png';
+}
 function base64(bytes: Uint8Array): string { let result = ''; for (let offset = 0; offset < bytes.length; offset += 0x8000) result += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000)); return btoa(result); }
 function isAbort(error: unknown): boolean { return error instanceof Error && error.name === 'AbortError'; }
 function transportReason(error: unknown): string { return error instanceof TransportError ? error.code : 'screen_transport_failed'; }

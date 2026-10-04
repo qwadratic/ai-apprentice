@@ -1,7 +1,7 @@
 import path from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 import {parseScreenObservation, parseScreenStatus} from '@apprentice/contracts';
-import {ScreenSessionHub, createFileEvidenceStore, createRunnerClient, createScreenService} from '../screen/index.ts';
+import {ScreenSessionHub, createFileEvidenceStore, createRunnerClient, createScreenService, parseVisionFrames} from '../screen/index.ts';
 import type {EvidenceMetadataRepository, ScreenEvidenceRecord, ScreenEvidenceStore, VisionRunner} from '../screen/index.ts';
 
 export interface ScreenRuntimeOptions {
@@ -21,8 +21,10 @@ export function createScreenRuntime(options: ScreenRuntimeOptions): ScreenRuntim
   const runner = options.runner ?? createRunnerClient({env: options.env});
   // VISION_GENERIC=off reads a frame with no known surface as before screen_activity (workspace kinds only).
   const genericVision = options.env?.VISION_GENERIC !== 'off';
+  // VISION_FRAMES: recent frames per generic vision call, the analysed one last (1..4, default 3; 1 = one frame as before).
+  const storyboard = {frames: parseVisionFrames(options.env?.VISION_FRAMES)};
   const hub = new ScreenSessionHub(({publish, onEvent}) => createScreenService({
-    runner, evidence, publish, onEvent, parseObservation: parseScreenObservation, genericVision,
+    runner, evidence, publish, onEvent, parseObservation: parseScreenObservation, genericVision, storyboard,
   }), parseScreenStatus);
   return {hub, evidence, close: () => database.close()};
 }

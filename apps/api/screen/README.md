@@ -52,9 +52,49 @@ visible-only rules of the workspace path, which stay unchanged:
   sees it, because that parser (also applied by the browser to polled
   observations) rejects it. NaN, negative values and values above 1 still
   reject the frame.
-- The model sees one frame, so `change` is null unless the pixels show direct
-  evidence of a change; the conductor also treats a changed summary or surface
-  as a change.
+- With one frame, `change` is null unless the pixels show direct evidence of a
+  change. With a storyboard (below), `change` says what visibly changed across
+  the frames. The conductor restarts its pause only on another app, surface or
+  pending control, never on a reworded summary.
+
+### Storyboards: the last frames in one call
+
+One frame cannot show motion, and with the Codex runner a vision call takes
+about 16 s, so observations trail the screen. A generic call therefore sees
+the analysed frame plus the frames just before it, oldest first, and the prompt
+(`genericStoryboardPrompt`) says so: describe only the latest frame (every
+field, region and box refers to it) and set `change` to what visibly changed
+across the frames, else null.
+
+- `VISION_FRAMES` (API env): images per generic call, the analysed frame
+  included. Default 3, clamped to 1..4 (the runner takes at most four images);
+  a value that is not an integer gives the default. `VISION_FRAMES=1` sends
+  exactly the one-frame request from before (prompt and system hash-pinned in
+  `vision-storyboard.test.ts`), and nothing is kept in memory.
+- The ring (`storyboard.ts`) is per session and holds the last K frames the
+  queue accepted for the generic surface key: bytes and capture time only, in
+  memory, never on disk. It is cleared on start, pause (off the record is a
+  pause), resume and stop, and when the hub ends the session. A duplicate frame
+  (same pixels) is not stored again; it only marks the newest frame as still
+  visible at that time.
+- Earlier frames last seen more than 10 s before the analysed frame are left
+  out (`storyboard.maxAgeMs`), and earlier frames are added only while all
+  images stay within 4 MB (`storyboard.maxBytes`; the ring drops its oldest
+  frames past that too). A skipped frame ends the run, so the images stay
+  consecutive. The analysed frame is always sent.
+- Latency first: the queue is unchanged, so there is still one call at a time
+  and the newest pending frame wins; a storyboard only adds images to the call
+  that would run anyway. Evidence is still the analysed (latest) frame only.
+- Workspace frames (order, email, ticket) never enter the ring: one image and
+  the pinned prompt, system and schema, exactly as before.
+
+The web capture keeps image tokens in check: a shared screen with no workspace
+surface is scaled to at most 960 px wide and sent as JPEG 0.5
+(`DEFAULT_FRAME_ENCODING` in `packages/screen/capture`, overridable through the
+`frameEncoding` option of the capture or the bridge runtime), so three such
+frames cost about what one full-resolution retina frame did. The scaling copies
+the processed canvas after the masks are painted. Workspace surface frames stay
+native-size PNG unless `applyTo: 'all'` is set.
 
 Visible `entities` are descriptive strings, not customer identities. The
 conductor keeps app, surface, summary, change, pendingAction and regions;
@@ -62,8 +102,9 @@ conductor keeps app, surface, summary, change, pendingAction and regions;
 separate question inputs, so the summary should carry the question-relevant
 visible facts and each relevant region needs a label.
 
-`vision-generic.test.ts`, `vision-contract.test.ts` and
-`screen-activity.test.ts` cover the generic path. The last one runs one
+`vision-generic.test.ts`, `vision-contract.test.ts`,
+`vision-storyboard.test.ts` and `screen-activity.test.ts` cover the generic
+path. The last one runs one
 processed frame per app (Gmail, Sheets, Maps and an unknown app) through the
 hub, evidence store and conductor to a question at a pause, with evidence and
 region cues, no question while the expert types and no observation after
