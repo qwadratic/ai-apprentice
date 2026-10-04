@@ -40,17 +40,17 @@ export const WORKSPACE_VISION_SCHEMA: Readonly<Record<string, unknown>> = Object
 const SCREEN_ACTIVITY_BRANCH = Object.freeze({type: 'object', required: ['outcome', 'kind', 'facts'], additionalProperties: false,
   properties: {outcome: {const: 'observation'}, kind: {const: 'screen_activity'}, facts: {type: 'object',
     required: ['app', 'surface', 'summary', 'change', 'entities', 'pendingAction', 'pendingRegionId', 'regions'], additionalProperties: false,
-    properties: {app: {type: ['string', 'null'], description: 'app or site'},
+    properties: {app: {type: ['string', 'null'], description: 'app or site named by visible branding, else null'},
       surface: {type: 'string', minLength: 1, description: 'what is open'},
       summary: {type: 'string', minLength: 1, description: '1-2 sentences of what is visible'},
       change: {type: ['string', 'null'], description: 'visible sign of a change, else null'},
       entities: {type: 'array', maxItems: LIMITS.entities, items: {type: 'string'}, description: 'short visible items: names, amounts, cells, subjects'},
       pendingAction: {type: ['string', 'null'], description: 'control about to be used, else null'},
-      pendingRegionId: {type: ['string', 'null'], description: 'region id of that control, else null'},
+      pendingRegionId: {type: ['string', 'null'], description: 'id of that control\'s region in regions, else null'},
       regions: {type: 'array', maxItems: LIMITS.regions, items: {type: 'object', required: ['id', 'label', 'box'],
-        additionalProperties: false, properties: {id: {type: 'string', description: 'r1, r2, ...'}, label: {type: 'string'},
+        additionalProperties: false, properties: {id: {type: 'string', description: 'unique: r1, r2, ...'}, label: {type: 'string'},
           box: {type: 'array', minItems: 4, maxItems: 4, items: {type: 'number', minimum: 0, maximum: 1},
-            description: '[x, y, w, h], 0..1 of the frame'}}}}}}}});
+            description: '[x, y, width, height], 0..1 of the processed frame; x + width <= 1 and y + height <= 1'}}}}}}}});
 /** Every kind: a frame with no known surface (a shared screen of any app) is read with this schema. */
 export const VISION_RESULT_SCHEMA: Readonly<Record<string, unknown>> = Object.freeze({
   $schema: 'http://json-schema.org/draft-07/schema#', oneOf: [...WORKSPACE_BRANCHES, SCREEN_ACTIVITY_BRANCH, INCOMPLETE_BRANCH],
@@ -129,17 +129,19 @@ function parseTicket(value: unknown): TicketFacts {
     status: facts.status as TicketFacts['status'], summary: facts.summary};
 }
 // Generic facts are normalised rather than rejected where that is safe: text is trimmed and clipped to the
-// contract limits, empty optional text becomes null, and region ids that are not plain ids are renumbered.
-// A wrong structure, a bad box or too many regions still rejects the frame.
+// contract limits, empty optional text becomes null, repeated entities are dropped, region ids that are not plain
+// or unique ids are renumbered, and a box that runs past the right or bottom edge is cut at the edge, so the
+// canonical parser, which rejects such a box, never sees it. A wrong structure, a box value that is not a number
+// in 0..1 or too many regions still rejects the frame.
 function parseScreenActivity(value: unknown): ScreenActivityFacts {
   const facts = exactRecord(value, ['app', 'surface', 'summary', 'change', 'entities', 'pendingAction', 'pendingRegionId', 'regions']);
   const surface = clipText(facts.surface, LIMITS.surface); const summary = clipText(facts.summary, LIMITS.summary);
   if (!surface || !summary || !Array.isArray(facts.entities) || !Array.isArray(facts.regions) ||
     facts.regions.length > LIMITS.regions) throw new VisionContractError('invalid_model_output');
-  const entities = facts.entities.map(entity => {
+  const entities = [...new Set(facts.entities.map(entity => {
     if (typeof entity !== 'string') throw new VisionContractError('invalid_model_output');
     return clipText(entity, LIMITS.entity);
-  }).filter((entity): entity is string => entity !== null).slice(0, LIMITS.entities);
+  }).filter((entity): entity is string => entity !== null))].slice(0, LIMITS.entities);
   // Model id (trimmed) -> kept id, for pendingRegionId; the first region with an id wins.
   const ids = new Map<string, string>(); const regions: ScreenRegion[] = [];
   for (const [index, raw] of facts.regions.entries()) {

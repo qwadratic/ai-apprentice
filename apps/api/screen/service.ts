@@ -17,12 +17,15 @@ export const defaultVisionPrompt = 'Describe the currently visible order, email 
 // A frame with no known surface: a shared screen of any app. Workspace frames keep the prompt and schema above.
 export const genericVisionPrompt = `Describe the visible screen using only visible pixels.
 Return order_view, email_draft or ticket only for the demo workspace, whose cards are headed "source order", "compose email" and "record outcome".
-Any other readable app or website is screen_activity. pendingAction is the control under the pointer or in focus (for example a hovered Send button), else null; pendingRegionId is its region.
-Give up to 6 regions with short ids (r1, r2, ...): the fields and controls the person is working with.
+Any other readable app or website is screen_activity. pendingAction is the control under the pointer or in focus (for example a hovered Send button), else null; pendingRegionId is the id of its region in regions, else null.
+Give up to 6 regions with short unique ids (r1, r2, ...): the fields and controls the person is working with.
+Each box is [x, y, width, height] normalised 0..1 to the processed frame, with x + width <= 1 and y + height <= 1.
+You see one frame: change is null unless the pixels show direct evidence of a change.
 Return incomplete only when the frame is unreadable.`;
 export const genericVisionSystem = `${visibleOnlySystem}
+Identify the app only from visible branding; otherwise app is null. Do not infer from the DOM, other tabs or hidden application state.
 Masked, blurred or blacked-out areas are private: never read, guess or describe what is under them.
-Never invent text that is not visible; leave a field null or empty instead.`;
+Never invent or guess text that is not visible or not readable; leave a field null or empty instead.`;
 const surfaceLabels: Readonly<Record<'order' | 'email' | 'ticket', string>> = {
   order: 'order view', email: 'email draft', ticket: 'support ticket',
 };
