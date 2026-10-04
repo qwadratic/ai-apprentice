@@ -23,6 +23,7 @@ function assertStrict(node: unknown, path = '$'): void {
   if (Array.isArray(node)) return node.forEach((n, i) => assertStrict(n, `${path}[${i}]`));
   if (!isRecord(node)) return;
   for (const key of BANNED) assert.equal(Object.hasOwn(node, key), false, `${path} has ${key}`);
+  if (Object.hasOwn(node, 'enum')) assert.ok(node.type !== undefined, `${path}: enum without type`);
   if (isRecord(node.properties)) {
     assert.deepEqual(node.required, Object.keys(node.properties), `${path}.required`);
     assert.equal(node.additionalProperties, false, `${path}.additionalProperties`);
@@ -48,9 +49,11 @@ test('the vision schema keeps its branches: oneOf → anyOf, const → enum, opt
   assert.equal(branches.length, 5);
   const kinds = branches.map((b) => ((b.properties as Json).kind as Json | undefined)?.enum);
   assert.deepEqual(kinds, [['order_view'], ['email_draft'], ['ticket'], ['screen_activity'], undefined]);
+  assert.deepEqual((branches[0]!.properties as Json).kind, { enum: ['order_view'], type: 'string' });
   const email = ((branches[1]!.properties as Json).facts as Json).properties as Json;
   const attachment = (email.attachments as Json).items as Json;
   assert.deepEqual(attachment.required, ['kind', 'ocrText']);
+  assert.deepEqual((attachment.properties as Json).kind, { enum: ['image', 'pdf', 'other'], type: 'string' });
   assert.deepEqual((attachment.properties as Json).ocrText, { anyOf: [{ type: 'string' }, { type: 'null' }] });
   // The generic branch: already-nullable fields stay as they are, limits are dropped, descriptions stay.
   const activity = ((branches[3]!.properties as Json).facts as Json).properties as Json;

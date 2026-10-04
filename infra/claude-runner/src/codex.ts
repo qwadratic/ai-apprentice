@@ -62,7 +62,19 @@ function convert(node: Json): Json {
   } else if (node.type === 'object' || (Array.isArray(node.type) && node.type.includes('object'))) {
     out.additionalProperties = false;
   }
+  // Strict mode wants a `type` next to every `enum` (a bare enum or a former const has none).
+  if (Array.isArray(out.enum) && out.type === undefined) {
+    const types = [...new Set(out.enum.map(jsonType))];
+    out.type = types.length === 1 ? types[0] : types;
+  }
   return out;
+}
+
+function jsonType(v: unknown): string {
+  if (v === null) return 'null';
+  if (typeof v === 'number') return Number.isInteger(v) ? 'integer' : 'number';
+  if (typeof v === 'string' || typeof v === 'boolean') return typeof v;
+  return Array.isArray(v) ? 'array' : 'object';
 }
 
 function allowsNull(s: unknown): boolean {
