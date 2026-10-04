@@ -31,6 +31,7 @@ const WORDMARK_INNER = `<g transform="translate(14 0) skewX(-14)">${wireSvg(WORD
 /** The wire "c" on a pale tile, as an SVG string for the favicon. */
 export const CLIPA_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="#e6f7f4"/><g transform="translate(9.8 -19.5) skewX(-14)">${wireSvg([C])}</g></svg>`;
 
+/** The wordmark. `height` is its size in px; the header shows it at 64 (smaller on phones through shell.css). */
 export function ClipaLogo({ height = 64 }: { height?: number }) {
   return (
     <span

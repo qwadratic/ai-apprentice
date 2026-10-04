@@ -27,19 +27,31 @@ export interface ClipaPresenter {
   noteInput?(typing: boolean): void;
 }
 
+/** The conductor's current journey step (its `guide` cue): the rail marks `phase` as next and shows `text` under it. */
+export interface ClipaGuideCue {
+  readonly phase?: string;
+  readonly step?: string;
+  readonly text?: string;
+}
+
 export interface ClipaSnapshot {
   readonly state: ClipaState;
   readonly bubble: string;
   readonly target: TargetRect | null;
+  /** Optional: set by the conductor client through setGuide; the journey rail reads it defensively (clipa/view.ts). */
+  readonly guide?: ClipaGuideCue | null;
 }
 
 /** A presenter that also exposes its state to React (useSyncExternalStore). */
 export interface ClipaStore extends ClipaPresenter {
   getSnapshot(): ClipaSnapshot;
   subscribe(listener: () => void): () => void;
+  /** The conductor's journey step for the rail, or null to clear it. */
+  setGuide?(guide: ClipaGuideCue | null): void;
 }
 
 export function createClipaStore(): ClipaStore {
+  // `guide` is absent until the conductor client sets it.
   let snapshot: ClipaSnapshot = { state: 'idle', bubble: '', target: null };
   const listeners = new Set<() => void>();
   const update = (next: ClipaSnapshot): void => {
@@ -50,6 +62,7 @@ export function createClipaStore(): ClipaStore {
     setState(state) { if (state !== snapshot.state) update({ ...snapshot, state }); },
     say(text) { if (text !== snapshot.bubble) update({ ...snapshot, bubble: text }); },
     setTarget(rect) { update({ ...snapshot, target: rect }); },
+    setGuide(guide) { update({ ...snapshot, guide }); },
     getSnapshot: () => snapshot,
     subscribe(listener) {
       listeners.add(listener);
