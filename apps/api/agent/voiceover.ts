@@ -21,7 +21,7 @@ export const DEFAULT_VOICES: Record<Exclude<VoiceRole, 'clipa'>, string> = {
 /** Clipa speaks with the interviewer agent's voice; this one is used when the agent cannot be read. */
 export const CLIPA_FALLBACK_VOICE = '21m00Tcm4TlvDq8ikWAM';
 
-const LINE_ID = /^v\d{2}$/;
+const LINE_ID = /^[vt]\d{2}$/; // v: the demo video, t: the tech video
 const MAX_TEXT = 400;
 const MAX_AUDIO = 10 * 1024 * 1024;
 const VOICE_ID = /^[A-Za-z0-9]{8,64}$/;

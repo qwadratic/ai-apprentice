@@ -81,7 +81,7 @@ if (typeof script.video !== 'string' || !Array.isArray(script.lines) || script.l
 const seen = new Set();
 for (const [i, l] of script.lines.entries()) {
   const where = `lines[${i}]${l?.id ? ` (${l.id})` : ''}`;
-  if (typeof l?.id !== 'string' || !/^v\d{2}$/.test(l.id)) die(`${where}: id must be "v" plus two digits`);
+  if (typeof l?.id !== 'string' || !/^[vt]\d{2}$/.test(l.id)) die(`${where}: id must be "v" or "t" plus two digits`);
   if (seen.has(l.id)) die(`${where}: duplicate id`);
   seen.add(l.id);
   if (!VOICES.has(l.voice)) die(`${where}: voice must be one of ${[...VOICES].join(', ')}`);

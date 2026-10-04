@@ -54,15 +54,21 @@ test('voiceover loader keeps only valid whitelisted entries', async (t) => {
   assert.equal((await loadLines(join(dir, 'missing.json'))).size, 0);
   await writeFile(file, '{not json');
   assert.equal((await loadLines(file)).size, 0);
+  // t: the tech video's lines; any other prefix is not a line.
+  await writeFile(file, JSON.stringify({ lines: [{ id: 't01', voice: 'narrator', text: 'The conductor decides when to speak.' }, { id: 'x01', voice: 'narrator', text: 'No.' }] }));
+  assert.deepEqual([...(await loadLines(file)).keys()], ['t01']);
 });
 
-test('the shipped voiceover lines file is valid: no entry is silently dropped, ids run v01, v02, ...', async () => {
+test('the shipped voiceover lines file is valid: no entry is silently dropped, ids run v01, v02, ... and t01, t02, ...', async () => {
   const { voiceoverLinesFile } = resolveConfig({ log: () => {} }, {});
   const raw = JSON.parse(await readFile(voiceoverLinesFile, 'utf8')) as { lines: unknown[] };
   const loaded = [...(await loadLines(voiceoverLinesFile)).keys()];
   assert.ok(loaded.length > 0);
   assert.equal(loaded.length, raw.lines.length, 'every shipped line passes validation');
-  assert.deepEqual(loaded, loaded.map((_, i) => `v${String(i + 1).padStart(2, '0')}`));
+  for (const prefix of ['v', 't']) {
+    const ids = loaded.filter((id) => id.startsWith(prefix));
+    assert.deepEqual(ids, ids.map((_, i) => `${prefix}${String(i + 1).padStart(2, '0')}`));
+  }
 });
 
 test('voiceover: a failed agent lookup is not retried on every public request', async (t) => {
