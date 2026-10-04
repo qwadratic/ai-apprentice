@@ -82,9 +82,8 @@
 }
 .apprentice-shell .as-brand { display: flex; flex-direction: column; min-width: 0; margin-right: auto; }
 .apprentice-shell .as-brand__name { font-weight: 700; font-size: 1.1rem; letter-spacing: 0.01em; }
-.apprentice-shell .as-logo { display: inline-flex; align-items: center; gap: 0.45rem; }
-.apprentice-shell .as-logo__mark { flex: none; display: block; }
-.apprentice-shell .as-logo__word { font-weight: 800; font-size: 1.35rem; letter-spacing: 0.01em; color: #0b5d56; line-height: 1; }
+.apprentice-shell .as-logo { display: inline-flex; align-items: center; }
+.apprentice-shell .as-logo svg { display: block; flex: none; }
 .apprentice-shell .as-brand__sub { color: var(--as-muted); font-size: 0.82rem; }
 
 .apprentice-shell .as-tabs {
