@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Conductor, MapRegistry, RULES } from '../agent/conductor/engine.ts';
-import { MAC_DONE_LINE, NUDGES, OFF_LINE, PROPOSE, RESOLVED, SHOW_LOOKS_DONE, STAGE_ABOUT, STAGE_CONFIRM, STAGE_START, detectLanguage, doneSaid, offSaid, stageAsked, stageCommand, yesSaid } from '../agent/conductor/lines.ts';
+import { GUIDE, MAC_DONE_LINE, NUDGES, OFF_LINE, OPEN_WEB, PROPOSE, RESOLVED, SHOW_LOOKS_DONE, STAGE_ABOUT, STAGE_CONFIRM, STAGE_START, detectLanguage, doneSaid, offSaid, stageAsked, stageCommand, yesSaid } from '../agent/conductor/lines.ts';
 import { demoMap } from '../agent/conductor/demo-map.ts';
 import { applyEdits } from '../agent/conductor/map-edits.ts';
 import type { ConductorMap } from '../agent/conductor/map-edits.ts';
@@ -831,7 +831,7 @@ test('done in Show: a short line, then the web starts Reflect; the end of Show s
   assert.equal(cueOf(r.cues, 'guide').length, guides, 'no "open Reflect" line: Reflect is starting');
   assert.ok(r.calls.some((c) => c.task === 'map_synthesis'), 'the map is built in the background');
   await r.send({ type: 'session', mode: 'review', live: true, reason: null });
-  assert.ok(cueOf(r.cues, 'context').some((c) => c.text === '[stage] Now in Reflect: the expert checks the map.'), 'the voice agent knows the stage');
+  assert.ok(cueOf(r.cues, 'context').some((c) => c.text === `[stage] Now in Reflect: ${STAGE_ABOUT.review}`), 'the voice agent knows the stage');
   assert.ok(cueOf(r.cues, 'context').some((c) => c.text === '[stage] Show has ended.'));
 });
 
@@ -1261,6 +1261,43 @@ test('workspace: Pass it on recognises the process once and the checks see the o
   assert.ok(check, 'the rules were checked at the pause');
   assert.deepEqual([...new Set((check.body.observations as Array<{ surface: string }>).map((o) => o.surface))].sort(), ['email draft', 'order view']);
   assert.equal(lookingAt(r.cues).length, 1);
+});
+
+// ---- the lines: the voice agent only voices what the app sends; every line stays generic --------------------------------
+test('lines: every stage tells the voice agent that the app sends the questions; the welcome and summary lines make no promise', async () => {
+  for (const mode of ['learn', 'review', 'teach'] as const) {
+    assert.match(STAGE_ABOUT[mode], /every question and warning as \[ASK\] lines/, mode);
+    assert.match(STAGE_ABOUT[mode], /beyond 'Got it\.'/, mode);
+    assert.match(STAGE_ABOUT[mode], /skip_turn/, mode);
+  }
+  // The voice agent hears it at every stage start, as a [stage] context.
+  for (const [mode, name] of [['learn', 'Show'], ['review', 'Reflect'], ['teach', 'Pass it on']] as const) {
+    const r = rig({ map_synthesis: () => ok({ ...MAP, gaps: [] }) }, new MapRegistry(), `sess-${mode}`);
+    await r.send(hello('web'), { type: 'session', mode, live: true, reason: null });
+    assert.ok(cueOf(r.cues, 'context').some((c) => c.text === `[stage] Now in ${name}: ${STAGE_ABOUT[mode]}`), mode);
+  }
+  const r = rig({});
+  await r.send(hello('web'));
+  const welcome = cueOf(r.cues, 'guide')[0];
+  assert.equal(welcome?.text, 'Press Start in Show and work as usual. I ask why at a natural pause.');
+  const maps = new MapRegistry();
+  maps.confirm('expert-session', MAP as never, 1);
+  const hire = rig({}, maps, 'hire-1');
+  await hire.send(hello('web', 'new_hire', 'expert-session'), { type: 'session', mode: 'teach', live: true, reason: null }, turn('Готово'));
+  const summary = cueOf(hire.cues, 'guide').at(-1);
+  assert.ok(summary?.step === 'summary' && summary.target === null && summary.speak === true, 'a short thanks, and no summary card to point at');
+  assert.equal(summary?.text, 'Nice work on this case.');
+});
+
+test('lines: the lines Clipa says name no scenario (they are generic, the scenario lives in the data)', () => {
+  const scenario = /customer|order|e-?mail|address|deliver|image|picture|attach|invoice|ORD-|\b07\b|as text/i;
+  const lines = [
+    ...Object.values(GUIDE).flatMap((persona) => Object.values(persona).flatMap((set) => Object.values(set).map((l) => l.text))),
+    ...Object.values(OPEN_WEB), ...NUDGES, ...Object.values(STAGE_CONFIRM), ...Object.values(STAGE_START), ...Object.values(STAGE_ABOUT), ...Object.values(PROPOSE),
+    SHOW_LOOKS_DONE, MAC_DONE_LINE, OFF_LINE, RESOLVED,
+  ];
+  assert.ok(lines.length > 40);
+  for (const line of lines) assert.doesNotMatch(line, scenario, line);
 });
 
 // ---- Pass it on: one warning per rule, then a ready line ----------------------------------------------------------------
