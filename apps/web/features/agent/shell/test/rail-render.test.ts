@@ -80,3 +80,21 @@ test('a mode change moves the seat; a live session shows on its stage; Clipa\'s 
   assert.match(html, /data-testid="clipa-line">Why did you write it as text\?</);
   assert.doesNotMatch(html, /as-stage__live/);
 });
+
+test('the conductor\'s guide (store.setGuide) marks its stage next and speaks under the rail; a live session shows on its stage', () => {
+  const store = createStore();
+  store.dispatch({ type: 'SESSION_STARTING', mode: 'learn' });
+  store.dispatch({ type: 'SESSION_READY', session: { id: 's-1', mode: 'learn', epochMs: 0, legacyRoutes: false, deadlineMs: 1, clockSkewMs: null, conversationId: null } });
+  assert.equal(store.getState().phase, 'live');
+  const clipa = createClipaStore();
+  clipa.setGuide?.({ phase: 'teach', step: 'teach_start', text: 'Hand over to the new hire.' });
+  const html = render(store, clipa);
+  assert.match(tag(html, 'as-tab-learn'), /data-status="active"/);
+  assert.match(tag(html, 'as-tab-learn'), /data-wire="live"/);
+  assert.match(html, /id="as-tab-learn"[\s\S]*?<span class="as-stage__live" aria-hidden="true">live<\/span>/);
+  assert.match(tag(html, 'as-tab-review'), /data-status="open"/);
+  assert.match(tag(html, 'as-tab-teach'), /data-status="next"/);
+  assert.match(html, /data-testid="clipa-line">Hand over to the new hire\.</);
+  clipa.setGuide?.(null);
+  assert.match(render(store, clipa), /data-testid="clipa-line">Share your screen and work as usual/);
+});

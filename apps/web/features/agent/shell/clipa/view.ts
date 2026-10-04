@@ -1,6 +1,7 @@
 // What the page shows of Clipa, read from the shell's Clipa store. The store is shared with the conductor client
 // (TASK-3.46), which may add fields, so everything beyond `state` and `bubble` is read defensively:
-//   guide?: { phase?: string; step?: string; text?: string }  the conductor's current journey step (the `guide` cue).
+//   guide?: { phase?: string; step?: string; text?: string }  the conductor's current journey step (the `guide` cue),
+//   set with store.setGuide(...) and cleared with store.setGuide(null).
 import { CLIPA_STATES } from './presenter.ts';
 import type { ClipaState } from './presenter.ts';
 
