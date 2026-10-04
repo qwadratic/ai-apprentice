@@ -1,0 +1,15 @@
+{
+  "name": "apprentice-ops",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Deploy webhook; runs with Node's built-in type stripping (node server.ts); no runtime dependencies.",
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "start": "node server.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.1",
+    "typescript": "^7.0.2"
+  }
+}

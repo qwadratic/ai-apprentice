@@ -140,6 +140,10 @@ jobs:
     permissions:
       contents: read
       pages: read # configure-pages
+    env:
+      # The one directory that is published: the launch page at its root, the lab under lab/ and deploy.json at the root
+      # (the VM's DEPLOY_SOURCE=pages mode reads <pages>/deploy.json).
+      SITE_DIR: _site
     steps:
       - uses: actions/checkout@v4
         with:
@@ -166,31 +170,68 @@ jobs:
             echo "::error::apps/web/features/agent/lab/package-lock.json is missing at $SHA. This commit predates the lab lockfile and cannot be built; pick a newer sha."
             exit 1
           fi
+      # Unlike the lab, the launch page may be absent: a rollback to a commit that predates it must still publish.
+      - name: Launch page lockfile at this commit
+        id: launchpad
+        env:
+          SHA: ${{ needs.prepare.outputs.sha }}
+        run: |
+          set -euo pipefail
+          if [ -f apps/web/features/agent/launchpad/package-lock.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::apps/web/features/agent/launchpad/package-lock.json is missing at $SHA (a rollback to a commit before the launch page). Publishing the lab at the site root and under lab/, as before."
+          fi
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: apps/web/features/agent/lab/package-lock.json
+          cache-dependency-path: |
+            apps/web/features/agent/lab/package-lock.json
+            apps/web/features/agent/launchpad/package-lock.json
       - name: Build the lab page (tsc to dist/)
         working-directory: apps/web/features/agent/lab
         run: |
           npm ci
           npm run typecheck
           npm run build
-      - name: Write deploy.json next to the site
+      - name: Build the launch page (tsc to dist/)
+        if: steps.launchpad.outputs.present == 'true'
+        working-directory: apps/web/features/agent/launchpad
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build
+      - name: Assemble the site (launch page at the root, the lab under lab/)
+        env:
+          LAUNCHPAD: ${{ steps.launchpad.outputs.present }}
+        run: |
+          set -euo pipefail
+          rm -rf "$SITE_DIR"
+          mkdir -p "$SITE_DIR/lab"
+          cp -R apps/web/features/agent/lab/dist/. "$SITE_DIR/lab/"
+          if [ "$LAUNCHPAD" = "true" ]; then
+            cp -R apps/web/features/agent/launchpad/dist/. "$SITE_DIR/"
+          else
+            # No launch page at this commit: the lab stays at the root, as before.
+            cp -R apps/web/features/agent/lab/dist/. "$SITE_DIR/"
+          fi
+          find "$SITE_DIR" -type f | sort
+      - name: Write deploy.json at the site root
         env:
           SHA: ${{ needs.prepare.outputs.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          out=apps/web/features/agent/lab/dist/deploy.json
+          out="$SITE_DIR/deploy.json"
           jq -n --arg sha "$SHA" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg run "$RUN_URL" \
             '{sha: $sha, at: $at, run: $run}' > "$out"
           cat "$out"
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: apps/web/features/agent/lab/dist
+          path: ${{ env.SITE_DIR }}
 
   pages-deploy:
     name: publish to Pages

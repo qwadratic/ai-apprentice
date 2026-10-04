@@ -1,0 +1,9 @@
+[Unit]
+Description=Deploy when the webhook writes /var/lib/apprentice/deploy-request.json
+
+[Path]
+PathChanged=/var/lib/apprentice/deploy-request.json
+Unit=apprentice-deploy-request.service
+
+[Install]
+WantedBy=multi-user.target

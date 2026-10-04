@@ -68,7 +68,7 @@ const GIT_SHA = readGitSha();
 // copy without our own service tokens and without empty credential variables.
 function childEnv(): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = { ...process.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' };
-  for (const k of ['RUNNER_TOKEN', 'API_TOKEN', 'ELEVENLABS_API_KEY']) delete env[k];
+  for (const k of ['RUNNER_TOKEN', 'API_TOKEN', 'ELEVENLABS_API_KEY', 'DEPLOY_WEBHOOK_SECRET']) delete env[k];
   for (const k of ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']) if (!nonEmpty(env[k])) delete env[k];
   return env;
 }

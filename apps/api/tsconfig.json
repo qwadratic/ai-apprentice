@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "screen/**/*.ts",
+    "agent/**/*.ts",
+    "screen/**/*.mjs",
+    "agent/**/*.mjs"
+  ]
+}
