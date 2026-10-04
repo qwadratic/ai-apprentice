@@ -1,9 +1,11 @@
 ---
 id: TASK-3.44
 title: 'Clipa Conductor on the server: events in, cues out, for web and macOS'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@qwadratic'
 created_date: '2026-10-04 04:25'
+updated_date: '2026-10-04 04:29'
 labels:
   - stream-b
 dependencies: []
