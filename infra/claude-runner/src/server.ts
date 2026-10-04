@@ -15,6 +15,7 @@ import {
   type SDKMessage,
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
+import { unwrapResult, wrapRootUnion } from './schema.js';
 
 const HOST = process.env.RUNNER_HOST || '127.0.0.1';
 const PORT = Number(process.env.RUNNER_PORT || 8787);
@@ -153,7 +154,8 @@ async function run(req: CompleteReq | VisionReq, images: VisionReq['images'] | u
     abortController: abort,
     systemPrompt: req.system ? `${SYSTEM_PROMPT}\n\n${req.system}` : SYSTEM_PROMPT,
   };
-  if (req.schema) options.outputFormat = { type: 'json_schema', schema: req.schema };
+  const output = req.schema ? wrapRootUnion(req.schema) : undefined;
+  if (output) options.outputFormat = { type: 'json_schema', schema: output.schema };
 
   let prompt: string | AsyncIterable<SDKUserMessage> = req.prompt;
   if (images) {
@@ -190,11 +192,12 @@ async function run(req: CompleteReq | VisionReq, images: VisionReq['images'] | u
     if (result.is_error) {
       return { status: 502, body: { ok: false, error: 'sdk_error', subtype: 'is_error', ms }, firstMs };
     }
-    if (req.schema) {
-      if (result.structured_output === undefined) {
+    if (output) {
+      const json = result.structured_output === undefined ? undefined : unwrapResult(result.structured_output, output.wrapped);
+      if (json === undefined) {
         return { status: 502, body: { ok: false, error: 'no_structured_output', subtype: result.subtype, ms }, firstMs };
       }
-      return { status: 200, body: { ok: true, json: result.structured_output, ms }, firstMs };
+      return { status: 200, body: { ok: true, json, ms }, firstMs };
     }
     return { status: 200, body: { ok: true, text: result.result, ms }, firstMs };
   } catch {
