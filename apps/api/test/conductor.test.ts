@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Conductor, MapRegistry, RULES } from '../agent/conductor/engine.ts';
-import { NUDGES, OFF_LINE, PROPOSE, SHOW_LOOKS_DONE, STAGE_CONFIRM, STAGE_START, detectLanguage, doneSaid, offSaid, stageAsked, yesSaid } from '../agent/conductor/lines.ts';
+import { MAC_DONE_LINE, NUDGES, OFF_LINE, PROPOSE, SHOW_LOOKS_DONE, STAGE_CONFIRM, STAGE_START, detectLanguage, doneSaid, offSaid, stageAsked, stageCommand, yesSaid } from '../agent/conductor/lines.ts';
 import { demoMap } from '../agent/conductor/demo-map.ts';
 import { applyEdits } from '../agent/conductor/map-edits.ts';
 import type { ConductorMap } from '../agent/conductor/map-edits.ts';
@@ -801,14 +801,27 @@ test('done in Show: a short line, then the web starts Reflect; the end of Show s
   assert.ok(cueOf(r.cues, 'context').some((c) => c.text === '[stage] Show has ended.'));
 });
 
-test('done in Show on macOS: the existing hand-over to the web, with no new cue types', async () => {
-  const r = rig({}, new MapRegistry(), 'mac-1');
+test('done in Show on macOS: a short line, no new cue types; the hand-over to the web follows at the Mac\'s End', async () => {
+  const r = rig({ generic_question: () => ok(QUESTION) }, new MapRegistry(), 'mac-1');
   await r.send(hello('macos'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', 'Changed.'));
   await r.send(turn('Fertig.'));
-  const open = cueOf(r.cues, 'open_web');
-  assert.equal(open[0]?.page, 'review');
+  assert.equal(said(r.cues).at(-1), MAC_DONE_LINE);
+  assert.equal(of(r.cues, 'say').at(-1)?.for, 'macos');
+  assert.equal(cueOf(r.cues, 'open_web').length, 0, 'the Mac finishes Show on open_web only while it is ending');
+  await r.send(obs('o2', 'The recipient changed.'));
+  await r.advance(RULES.learnMinGapMs + RULES.pauseMs);
+  assert.equal(of(r.cues, 'ask').length, 0, 'no more questions after done');
+  await r.send({ type: 'session', mode: 'learn', live: false, reason: 'ended' });
+  assert.equal(cueOf(r.cues, 'open_web')[0]?.page, 'review', 'End still hands over');
   assert.equal(of(r.cues, 'stage').length + of(r.cues, 'end').length, 0);
   assert.ok(r.cues.every((c) => c.for !== 'web'));
+  // A web page that joined the Mac's session does not turn the Mac's turns into web commands.
+  const joined = rig({}, new MapRegistry(), 'mac-2');
+  await joined.send(hello('macos'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', 'Changed.'));
+  await joined.sendFrom('web-1', hello('web'));
+  await joined.send(turn('Stop.'), turn("That's it."));
+  assert.ok(!said(joined.cues).includes(OFF_LINE) && of(joined.cues, 'end').length === 0);
+  assert.equal(said(joined.cues).at(-1), MAC_DONE_LINE);
 });
 
 test('done in Pass it on: the summary is said, then the session ends', async () => {
@@ -871,7 +884,7 @@ test('auto on: a long quiet after real work ends Show and starts Reflect; nudges
   });
 });
 
-test('auto on: once the map is confirmed, the handoff line, about 5 s, then Pass it on starts', async () => {
+test('auto on: once the map is confirmed, the handoff line, about 5 s, then the Pass it on tab opens (the new hire starts it)', async () => {
   const r = rig({ map_synthesis: () => ok({ ...MAP, gaps: [] }) });
   await r.send(...SHOW(), obs('o1', 'Changed.'));
   await r.send({ type: 'session', mode: 'learn', live: false, reason: 'ended' }, { type: 'session', mode: 'review', live: true, reason: null });
@@ -885,7 +898,75 @@ test('auto on: once the map is confirmed, the handoff line, about 5 s, then Pass
   await r.advance(RULES.afterHandoffMs - 100);
   assert.deepEqual(stages(r.cues), []);
   await r.advance(200);
-  assert.deepEqual(stages(r.cues), ['teach start']);
+  assert.deepEqual(stages(r.cues), ['teach'], 'opened, not started: a new person takes over there');
+});
+
+test('a waiting switch: End drops it, a new Start replaces it, and the person going on cancels one Clipa decided on herself', async () => {
+  // SHOW_LOOKS_DONE, then the person presses End during the line: no session starts by itself.
+  const ended = rig({});
+  await ended.send(...SHOW(), obs('o1', null), obs('o2', null), obs('o3', null));
+  await ended.advance(RULES.showIdleMs + 100);
+  assert.equal(said(ended.cues).at(-1), SHOW_LOOKS_DONE);
+  await ended.send({ type: 'session', mode: 'learn', live: false, reason: 'ended' });
+  await ended.advance(RULES.lineBeforeSwitchMs + 100);
+  assert.deepEqual(stages(ended.cues), []);
+  // "That's it", then End: the same.
+  const done = rig({});
+  await done.send(...SHOW(), obs('o1', 'Changed.'), turn("That's it."));
+  await done.send({ type: 'session', mode: 'learn', live: false, reason: 'ended' });
+  await done.advance(RULES.lineBeforeSwitchMs + 100);
+  assert.deepEqual(stages(done.cues), []);
+  // The person talks, types or changes the screen while Clipa says she moves on: she stays.
+  for (const goOn of [{ type: 'talking', by: 'person', active: true } as ClientEvent, { type: 'activity', state: 'typing' } as ClientEvent, obs('o4', 'Typed more of the address.')]) {
+    const r = rig({});
+    await r.send(...SHOW(), obs('o1', null), obs('o2', null), obs('o3', null));
+    await r.advance(RULES.showIdleMs + 100);
+    assert.equal(said(r.cues).at(-1), SHOW_LOOKS_DONE);
+    await r.send(goOn);
+    await r.advance(RULES.lineBeforeSwitchMs + 100);
+    assert.deepEqual(stages(r.cues), [], JSON.stringify(goOn));
+  }
+  // Turning "Lead me through" off while the line plays cancels the switch too.
+  const off = rig({});
+  await off.send(...SHOW(), obs('o1', null), obs('o2', null), obs('o3', null));
+  await off.advance(RULES.showIdleMs + 100);
+  await off.send({ type: 'auto', on: false });
+  await off.advance(RULES.lineBeforeSwitchMs + 100);
+  assert.deepEqual(stages(off.cues), []);
+  // Edits on the same surface keep Show going; a second Show needs real work of its own.
+  const edits = rig({});
+  await edits.send(...SHOW(), obs('o1', null), obs('o2', null), obs('o3', null));
+  for (let i = 0; i < 8; i++) { await edits.advance(5_000); await edits.send(obs(`e${i}`, 'Typed more of the delivery address.')); }
+  assert.ok(!said(edits.cues).includes(SHOW_LOOKS_DONE), 'the person keeps working');
+  const again = rig({});
+  await again.send(...SHOW(), obs('o1', null), obs('o2', null), obs('o3', null));
+  await again.send({ type: 'session', mode: 'learn', live: false, reason: 'ended' }, { type: 'session', mode: 'learn', live: true, reason: null });
+  await again.advance(RULES.showIdleMs * 2);
+  assert.ok(!said(again.cues).includes(SHOW_LOOKS_DONE), 'nothing shown in this Show yet');
+});
+
+test('answers are not commands: "that\'s it" after a question, stage phrases inside sentences, and moves backwards', async () => {
+  for (const t of ["Yes, that's it.", 'Exactly, that is it.', 'Right, done.', 'Да, это всё.', 'Ja, das ist alles.', "That's it?", 'Done?', 'Готово?']) assert.equal(doneSaid(t), false, t);
+  for (const t of ['Ich bin fertig.', "I'm finished", "We're done."]) assert.equal(doneSaid(t), true, t);
+  // An answer to Clipa's question that ends with the phrase does not end Show; the bare phrase does.
+  const r = rig({ generic_question: () => ok(QUESTION) });
+  await r.send(...SHOW(), obs('o1', null), obs('o2', 'The recipient changed.'));
+  await r.advance(RULES.pauseMs + 10);
+  const ask = of(r.cues, 'ask')[0]!;
+  await r.send({ type: 'cue_done', cueId: ask.cueId, outcome: 'spoken' });
+  await r.send(turn("The finance lead, that's it."));
+  assert.ok(!said(r.cues).includes(STAGE_START.review), 'an answer, not the end of Show');
+  await r.send(turn("That's it."));
+  assert.equal(said(r.cues).at(-1), STAGE_START.review);
+  // While a session runs, only a whole short command that moves forward starts a stage.
+  assert.equal(stageCommand('Let me show you: only customer_07 wants it as text.'), null);
+  assert.equal(stageCommand('Давай проверим адрес доставки.'), null);
+  assert.equal(stageCommand("Okay, let's review."), 'review');
+  const reflect = rig({ map_synthesis: () => ok({ ...MAP, gaps: [] }), map_edit: () => ok(NO_EDIT), reply_classification: () => ok({ verdict: 'unclear', correction: null }) });
+  await reflect.send(...SHOW(), obs('o1', 'Changed.'));
+  await reflect.send({ type: 'session', mode: 'learn', live: false, reason: 'ended' }, { type: 'session', mode: 'review', live: true, reason: null });
+  await reflect.send(turn('Let me show you: only customer_07 wants it as text.'), turn('Let me show you.'));
+  assert.ok(!said(reflect.cues).includes(STAGE_START.learn), 'no new Show from inside Reflect');
 });
 
 test('auto off: Clipa only proposes the next stage and starts it on a yes; a yes with nothing proposed does nothing', async () => {

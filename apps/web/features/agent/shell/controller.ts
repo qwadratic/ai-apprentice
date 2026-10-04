@@ -537,7 +537,8 @@ export class ShellController {
   private startStage(mode: Mode): void {
     const s = this.state;
     if (s.offRecord) return;
-    if (s.phase === 'live' && s.session?.mode === mode) { this.setMode(mode); return; }
+    // A late cue (replayed after a reconnect, or after the person pressed End) never starts a session by itself.
+    if (s.phase !== 'live' || s.session?.mode === mode) { this.setMode(mode); return; }
     void this.switchSession(mode);
   }
 

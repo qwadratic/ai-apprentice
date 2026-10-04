@@ -365,6 +365,18 @@ test('a stage cue with start starts that stage like Start: the running one ends 
   rig.controller.dispose();
 });
 
+test('a late stage cue with start (no session runs, e.g. after End) only opens the stage; nothing starts by itself', async () => {
+  const rig = await booted();
+  rig.conductor.streams[0]?.push(sseCue(cue(1, { type: 'stage', mode: 'teach', start: true }, { for: 'web' })));
+  await settle();
+  await settle();
+  const s = rig.controller.store.getState();
+  assert.equal(s.mode, 'teach', 'the tab opens');
+  assert.notEqual(s.phase, 'live', 'no session and no microphone');
+  assert.equal(s.session, null);
+  rig.controller.dispose();
+});
+
 test('an end cue ends the running session like End; off the record it is ignored', async () => {
   const rig = await booted();
   await rig.controller.start('learn');

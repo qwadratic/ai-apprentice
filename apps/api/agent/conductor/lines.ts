@@ -143,6 +143,8 @@ export const PROPOSE: Readonly<Record<'review' | 'teach', string>> = {
   review: 'Shall we reflect? Say yes, or press Reflect.',
   teach: 'Shall we pass it on? Say yes, or press Pass it on.',
 };
+/** macOS: the person said they are done with Show; the hand-over to Reflect in the browser follows when the Mac ends Show. */
+export const MAC_DONE_LINE = "Got it. End Show, and I'll open Reflect in the browser.";
 /** Said before Clipa ends the session because the person asked her to stop. */
 export const OFF_LINE = "Okay, I'm off. Press Start when you need me.";
 
@@ -157,12 +159,15 @@ function find(ws: readonly string[], phrase: readonly string[], from = 0): numbe
 }
 
 const DONE_PHRASES = phrases([
-  "that's it", 'that is it', "i'm done", 'i am done', 'done', 'all done', 'finished', "that's all",
+  "that's it", 'that is it', "i'm done", 'i am done', "we're done", 'we are done', 'done', 'all done', 'finished',
+  "i'm finished", 'i am finished', "that's all",
   'готово', 'это всё', 'вот и всё', 'ну всё', 'закончил', 'закончила', 'я закончил', 'я закончила',
-  'fertig', "das war's", 'das wars', 'das ist alles',
+  'fertig', 'ich bin fertig', "das war's", 'das wars', 'das ist alles',
 ]);
 /** Words that may come right before a done phrase ("okay so that's it", "I think I'm done"). */
-const DONE_LEAD = new Set(['ok', 'okay', 'so', 'and', 'well', 'alright', 'right', 'yes', 'yeah', 'think', 'guess', 'then', 'now', 'ну', 'так', 'ладно', 'и', 'вот', 'да', 'кажется', 'думаю', 'also', 'gut', 'ja', 'und', 'dann', 'glaube', 'denke']);
+const DONE_LEAD = new Set(['ok', 'okay', 'so', 'and', 'well', 'alright', 'think', 'guess', 'then', 'now', 'ну', 'так', 'ладно', 'и', 'вот', 'кажется', 'думаю', 'also', 'und', 'dann', 'glaube', 'denke']);
+/** A done phrase right after one of these is an answer ("Yes, that's it.", "Exactly, that's all."), not the end of a stage. */
+const AFFIRM = new Set(['yes', 'yeah', 'yep', 'right', 'exactly', 'correct', 'true', 'sure', 'да', 'точно', 'верно', 'именно', 'ja', 'genau', 'richtig', 'stimmt', 'gut']);
 /** Words that may follow a done phrase in a turn of at most five words ("that's it for now", "готово, спасибо"). */
 const DONE_TAIL = new Set(['now', 'then', 'here', 'for', 'today', 'thanks', 'thank', 'you', 'guys', 'ok', 'okay', 'сейчас', 'спасибо', 'на', 'сегодня', 'jetzt', 'danke', 'für', 'heute']);
 const DONE_SHORT_WORDS = 5;
@@ -176,13 +181,13 @@ const DONE_END_WORDS = 8;
  */
 export function doneSaid(text: string): boolean {
   const ws = words(text);
-  if (ws.length === 0 || ws.length > DONE_END_WORDS) return false;
+  if (ws.length === 0 || ws.length > DONE_END_WORDS || /\?\s*$/.test(text)) return false;
   const list = ws.map((x) => x.w);
   if (list.at(-1) === 'все' && list.length <= 4 && list.slice(0, -1).every((w) => w === 'вот' || w === 'ну' || w === 'и')) return true;
   const plain = plainText(text);
   for (const phrase of DONE_PHRASES) {
     for (let i = find(list, phrase); i >= 0; i = find(list, phrase, i + 1)) {
-      const before = i === 0 || /[,.!?;:—–-]/.test(plain.slice(ws[i - 1]!.end, ws[i]!.start)) || DONE_LEAD.has(list[i - 1]!);
+      const before = i === 0 || (!AFFIRM.has(list[i - 1]!) && (/[,.!?;:—–-]/.test(plain.slice(ws[i - 1]!.end, ws[i]!.start)) || DONE_LEAD.has(list[i - 1]!)));
       if (!before) continue;
       const rest = list.slice(i + phrase.length);
       if (rest.length === 0) return true;
@@ -190,6 +195,14 @@ export function doneSaid(text: string): boolean {
     }
   }
   return false;
+}
+
+/** The whole turn is a done phrase and nothing else ("That's it.", "Готово."): it counts even right after a question of Clipa's. */
+export function donePhraseOnly(text: string): boolean {
+  if (/\?\s*$/.test(text)) return false;
+  const list = words(text).map((x) => x.w);
+  if (list.length === 1 && list[0] === 'все') return true;
+  return DONE_PHRASES.some((p) => p.length === list.length && p.every((w, k) => list[k] === w));
 }
 
 /** Words that may stand beside a short command ("okay, stop please", "да, давай"). */
@@ -209,3 +222,25 @@ const YES_PHRASES = phrases(['yes', 'yeah', 'sure', 'ok', 'okay', "let's go", 'g
 export function offSaid(text: string): boolean { return command(text, OFF_PHRASES); }
 /** The person says yes to what Clipa proposed: a whole short turn ("yes", "let's go", "давай", "gerne"). */
 export function yesSaid(text: string): boolean { return command(text, YES_PHRASES); }
+
+/** Words that may stand around a stage phrase in a short command ("okay, let's review now", "ну, научи меня"). */
+const STAGE_NEUTRAL = new Set([...POLITE, 'so', 'then', 'well', 'alright', 'and', 'так', 'ладно', 'меня', 'also', 'dann', 'und']);
+const STAGE_COMMAND_WORDS = 6;
+const STAGE_WORDS: ReadonlyArray<readonly [Mode, string[][]]> = STAGE_PHRASES.map(([mode, list]) => [mode, phrases(list)]);
+/**
+ * The stage a whole short command turn asks for ("Let's review.", "Okay, teach me", "Давай проверим"), or null. While a
+ * session runs only such a turn starts a stage: a sentence that merely begins with the phrase ("Let me show you: only
+ * customer_07 wants it as text", "Давай проверим адрес доставки") is an ordinary turn.
+ */
+export function stageCommand(text: string): Mode | null {
+  if (/\?\s*$/.test(text)) return null;
+  const ws = words(text).map((x) => x.w);
+  if (ws.length === 0 || ws.length > STAGE_COMMAND_WORDS) return null;
+  for (const [mode, list] of STAGE_WORDS) {
+    for (const p of list) {
+      const i = find(ws, p);
+      if (i >= 0 && ws.every((w, k) => (k >= i && k < i + p.length) || STAGE_NEUTRAL.has(w))) return mode;
+    }
+  }
+  return null;
+}
