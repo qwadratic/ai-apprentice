@@ -151,6 +151,19 @@ test('waitForCheck waits while the check is pending and returns the status the p
   assert.deepEqual(await done, { status: 'warn', message: 'The expert would stop here.' });
 });
 
+test('waitForCheck also waits while the workspace is acquiring screen evidence, before the agent is asked', async () => {
+  const { clock, page, actions } = setup();
+  const statusKey = `${DEMO_SELECTORS.checkPanel}|data-status`;
+  page.attrs.set(statusKey, 'acquiring');
+  const done = clock.run(actions.waitForCheck(30_000));
+  await clock.advance(4000);
+  page.attrs.set(statusKey, 'pending');
+  await clock.advance(2000);
+  page.attrs.set(statusKey, 'unknown');
+  assert.equal((await done).status, 'unknown');
+  assert.ok(clock.now() >= 6000, 'it did not stop at acquiring or pending');
+});
+
 test('waitForCheck gives up at the timeout and reports the check as it is', async () => {
   const { clock, page, actions } = setup();
   page.attrs.set(`${DEMO_SELECTORS.checkPanel}|data-status`, 'pending');

@@ -2,8 +2,11 @@
 // knows nothing about the DOM; workspace-dom.ts implements it for stream A's demo workspace (apps/web/features/demo-workspace),
 // and a test double implements it for the unit tests. If A's mount changes, only the implementation changes.
 
-/** What the check panel shows. Mirrors the workspace's check states; 'sent' is not one of them (see isSent). */
-export type CheckStatus = 'idle' | 'pending' | 'clear' | 'warn' | 'unknown' | 'error';
+/**
+ * What the check panel shows. Mirrors the workspace's check states ('sent' is not one of them, see isSent): 'acquiring' is
+ * the wait for fresh screen evidence (vision), 'pending' the wait for the agent's reply; both mean "not answered yet".
+ */
+export type CheckStatus = 'idle' | 'acquiring' | 'pending' | 'clear' | 'warn' | 'unknown' | 'error';
 
 export interface CheckResult {
   status: CheckStatus;
@@ -39,7 +42,7 @@ export interface WorkspaceActions {
   preview(): Promise<void>;
   /** The check as it is now. */
   checkResult(): CheckResult;
-  /** Waits until the check is no longer pending (or the time is up) and returns it. */
+  /** Waits until the check is no longer acquiring or pending (or the time is up) and returns it. */
   waitForCheck(timeoutMs: number): Promise<CheckResult>;
   /** Ticks "I have reviewed the warning" (needed before Send after a warning or an unknown). */
   acknowledge(): Promise<void>;

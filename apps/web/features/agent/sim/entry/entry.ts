@@ -130,11 +130,10 @@ async function boot(persona: Persona): Promise<void> {
   // The stub reads the workspace through this view; the real agent will see pixels instead.
   let stub: ReturnType<typeof createStubAgent> | null = null;
   const checkpoint: CheckpointPort = {
-    async observeCurrentScreen(scope) {
+    async check(_scope, _signal, onDispatch) {
+      // Stand-in for "acquire fresh screen evidence, then ask the agent": the stub reads the workspace instead of pixels.
       await clock.sleep(400);
-      return { scope, orderId: 'stub-observation-order', emailId: 'stub-observation-email' };
-    },
-    async evaluate() {
+      onDispatch?.();
       await clock.sleep(1200);
       const verdict = stub?.evaluate() ?? { status: 'unknown' as const, message: 'STUB TUTOR (test double): not started.' };
       return { status: verdict.status, message: verdict.message, evidenceIds: [] };

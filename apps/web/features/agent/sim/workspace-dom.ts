@@ -49,7 +49,9 @@ export interface DomPort {
   setValue(selector: string, value: string, event: 'input' | 'change'): void;
 }
 
-const CHECK_STATUSES: readonly CheckStatus[] = ['idle', 'pending', 'clear', 'warn', 'unknown', 'error'];
+const CHECK_STATUSES: readonly CheckStatus[] = ['idle', 'acquiring', 'pending', 'clear', 'warn', 'unknown', 'error'];
+/** Not answered yet: the workspace is getting fresh screen evidence or waiting for the agent's reply. */
+const WAITING: readonly CheckStatus[] = ['acquiring', 'pending'];
 const POLL_MS = 200;
 
 export interface DemoWorkspaceActionsOptions {
@@ -128,10 +130,10 @@ export function createDemoWorkspaceActions(options: DemoWorkspaceActionsOptions)
     checkResult: check,
     async waitForCheck(timeoutMs) {
       const until = clock.now() + timeoutMs;
-      // The workspace turns "pending" on at once; a poll that still sees "idle" right after Preview waits one round.
+      // The workspace turns "acquiring" on at once; a poll that still sees "idle" right after Preview waits one round.
       await clock.sleep(POLL_MS);
       let result = check();
-      while (result.status === 'pending' && clock.now() < until) {
+      while (WAITING.includes(result.status) && clock.now() < until) {
         await clock.sleep(POLL_MS);
         result = check();
       }
