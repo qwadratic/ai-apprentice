@@ -24,8 +24,7 @@ import type { ControllerTimers, KeyValueStorage } from './controller.ts';
 import { SampleObservationSource } from './screen/sample-source.ts';
 import { createRuntimeWorkspace } from '../../demo-workspace/index.ts';
 import { LiveMount } from './screen/live-mount.ts';
-import { bindWorkspaceCheckpoint } from './screen/checkpoint-binding.ts';
-import type { BindableWorkspace } from './screen/checkpoint-binding.ts';
+import { liveWorkspaceBind } from './screen/live-bind.ts';
 import { SAMPLE_CUSTOMERS } from './screen/sample-scenarios.ts';
 import type { CreateRuntimeWorkspace } from './screen/runtime-workspace-source.ts';
 import { connectElevenLabs } from './voice/elevenlabs.ts';
@@ -218,8 +217,9 @@ export function createRuntime(): ShellRuntime {
   // A's createRuntimeWorkspace mounts the demo workspace itself (providesWorkspace).
   const live = new LiveMount({
     factory: liveFactory, controller, apiBase: API_BASE, providesWorkspace: true,
-    // Preview & check is answered by the tutor whenever Teach runs, whatever state A's capture status is in.
-    bind: (mount) => bindWorkspaceCheckpoint({ workspace: mount.workspace as BindableWorkspace, bridge: mount.bridge, host: controller, now }),
+    // Pass it on opens on the new order (ORD-2057, image only); Show keeps the practice order (ORD-2041). Preview & check is
+    // answered by the tutor whenever Teach runs, whatever state A's capture status is in.
+    bind: liveWorkspaceBind({ host: controller, now }),
   });
   // The real screen is the default. The sample (invented data, labelled synthetic) is an opt-in switch: it never runs unasked, so
   // a Work Map is not mixed from invented and real observations.

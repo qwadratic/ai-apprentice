@@ -7,7 +7,7 @@ import { isRecord } from '../config.ts';
 import type { GenericQuestionOutput, GuardrailCheckOutput, MapEditOutput, MapSynthesisOutput, ProcessMatchOutput, ReplyOutput } from '../llm-tasks.ts';
 import type { TaskResult } from '../llm.ts';
 import { demoMap } from './demo-map.ts';
-import { GUIDE, NUDGES, OPEN_WEB, STAGE_CONFIRM, detectLanguage, stageAsked } from './lines.ts';
+import { GUIDE, MAC_DONE_LINE, NUDGES, OFF_LINE, OPEN_WEB, PROPOSE, SHOW_LOOKS_DONE, STAGE_ABOUT, STAGE_CONFIRM, STAGE_NAMES, STAGE_START, detectLanguage, donePhraseOnly, doneSaid, offSaid, stageAsked, stageCommand, yesSaid } from './lines.ts';
 import { applyEdits } from './map-edits.ts';
 import type { ConductorMap, MapComment } from './map-edits.ts';
 import { mapTitle, storableMap } from './map-store.ts';
@@ -22,7 +22,7 @@ export const RULES = {
   /** Learn: at most this many questions per window, at least minGapMs apart. */
   learnMaxQuestions: 4,
   learnWindowMs: 10 * 60_000,
-  learnMinGapMs: 15_000,
+  learnMinGapMs: 20_000,
   /** How long an ask or a warning stays valid before the moment has passed. */
   askTtlMs: 12_000,
   warnTtlMs: 15_000,
@@ -52,12 +52,39 @@ export const RULES = {
   thoughtMaxChars: 60,
   /** Attention: Clipa flashes and goes where the person should look (an ask about a region, a warning, the next stage). */
   attention: true,
-  /** Show and Pass it on: a gentle line after nudgeAfterMs without the person talking or typing, at most nudgeMaxInRow in a row. */
+  /**
+   * Show and Pass it on: a gentle line after nudgeAfterMs without the person talking or typing, at most nudgeMaxInRow in a row.
+   * None in Reflect, none after the person said they are done, none while Clipa waits for a yes or is about to move on.
+   */
   nudges: true,
-  nudgeAfterMs: 10_000,
-  nudgeMaxInRow: 3,
-  /** An explicit phrase in the person's final turn ("let me show you", "let's review", "teach me") opens that stage. */
+  nudgeAfterMs: 20_000,
+  nudgeMaxInRow: 2,
+  /**
+   * An explicit phrase in the person's final turn ("let me show you", "let's review", "teach me") opens that stage; while a
+   * session runs on the web, Clipa starts it.
+   */
   voiceStages: true,
+  /** Short final turns on the web: "that's it" ends Show or Pass it on, "stop" ends the session, "yes" takes a proposal. */
+  voiceControl: true,
+  /**
+   * The flow between stages (the web's "Lead me through"): when a stage is complete Clipa moves on by herself (auto) or
+   * proposes it (manual). false: she never moves on or proposes by herself; voice control still works.
+   */
+  autoAdvance: true,
+  /** Show is complete after this long without typing, talking or a screen change, once there was real work to learn from. */
+  showIdleMs: 30_000,
+  showIdleMinObservations: 3,
+  /**
+   * After the map is confirmed: the handoff line, then this long, then the Pass it on tab opens (auto). It is not started:
+   * a new person takes over there, often in another browser, and presses Start.
+   */
+  afterHandoffMs: 5_000,
+  /** In Pass it on, "done" this soon after a warning means the fix ("Done." after fixing the terms), not the end of the stage. */
+  doneAfterWarnMs: 20_000,
+  /** A proposal ("Shall we reflect?") waits this long for a yes. */
+  proposalTtlMs: 30_000,
+  /** A line Clipa says before she switches: the switch waits until it is said, at most this long. */
+  lineBeforeSwitchMs: 10_000,
   keepCues: 300,
   keepObservations: 200,
   keepTurns: 200,
@@ -183,10 +210,19 @@ export interface ConductorDeps {
 }
 
 interface Turn { role: 'expert' | 'agent'; text: string; atMs: number }
+/** The order of the stages: while a session runs, a voice command only moves forward. */
+const STAGE_ORDER: Readonly<Record<Mode, number>> = { learn: 0, review: 1, teach: 2 };
 interface Source { client: ClientKind | null; lastSeq: number }
 type ReviewPhase = 'idle' | 'building' | 'gaps' | 'teachback' | 'confirmed';
-interface ActiveCue { cueId: string; type: Cue['type']; expiresAt: number | null; done: boolean }
+interface ActiveCue { cueId: string; type: Cue['type']; expiresAt: number | null; done: boolean; at: number }
 interface Prefetch { basis: string; status: 'running' | 'ready' | 'failed'; out: GenericQuestionOutput | null }
+/** What Clipa does next on her own: start a stage on the web, end the session, or propose a stage. */
+type Next = { kind: 'start'; mode: Mode } | { kind: 'open'; mode: Mode } | { kind: 'end'; reason: 'off' | 'done' } | { kind: 'propose'; mode: 'review' | 'teach' };
+/**
+ * `next` waits for the line `cueId` to be said (cue_done), then delayMs; at dueAt it goes ahead in any case (never while the
+ * person talks). `auto`: Clipa decided on it by herself, so the person going on (talking, typing, a screen change) drops it.
+ */
+interface After { next: Next; cueId: string | null; delayMs: number; dueAt: number; auto: boolean }
 
 export class Conductor {
   readonly sessionId: string;
@@ -265,6 +301,27 @@ export class Conductor {
   private stageStartedAt = -Infinity;
   private nudgesInRow = 0;
   private nudgeIndex = 0;
+  /** Auto mode (the web's "Lead me through", on unless the web says otherwise): Clipa moves on by herself. */
+  private auto = true;
+  /** A stage Clipa proposed (manual mode); a yes within proposalTtlMs starts it. */
+  private proposal: { mode: 'review' | 'teach'; at: number } | null = null;
+  /** The stage in which Clipa already proposed or moved on by herself (once per stage). */
+  private advancedIn: Mode | null = null;
+  private after: After | null = null;
+  /** The person said they are done with the running stage (or asked Clipa to stop). */
+  private stageDone = false;
+  /** The kind of face whose session is live: the web-only flow (stage starts, end, proposals) runs for a web session only. */
+  private liveClient: ClientKind | null = null;
+  /** Screen observations since the current stage started (Show is complete only after real work of its own). */
+  private stageObservations = 0;
+  /** The last screen change of any kind, an edit on the same surface included (the Show-idle clock). */
+  private lastActivityAt = 0;
+  /** When Clipa last warned (Pass it on). */
+  private lastWarnAt = -Infinity;
+  /** The person answered one of Clipa's questions in this session. */
+  private answered = false;
+  /** The end of the running stage was asked for by Clipa: the end says no "open the next stage" line of its own. */
+  private quietEnd = false;
   lastSeenAt: number;
 
   constructor(sessionId: string, deps: ConductorDeps) {
@@ -307,7 +364,7 @@ export class Conductor {
     };
     this.cues.push(env);
     if (this.cues.length > RULES.keepCues) this.cues.splice(0, this.cues.length - RULES.keepCues);
-    if (cue.type === 'ask' || cue.type === 'warn' || cue.type === 'teachback') this.active = { cueId: env.cueId, type: cue.type, expiresAt: ttl === null ? null : now + ttl, done: false };
+    if (cue.type === 'ask' || cue.type === 'warn' || cue.type === 'teachback') this.active = { cueId: env.cueId, type: cue.type, expiresAt: ttl === null ? null : now + ttl, done: false, at: now };
     if (cue.type === 'ask' || cue.type === 'warn' || cue.type === 'teachback' || cue.type === 'say') this.lastSpokeAt = now;
     for (const l of [...this.listeners]) l(env);
     return env;
@@ -351,15 +408,18 @@ export class Conductor {
   }
 
   /** Each face gets its own line for the step; a face with no line for it says nothing. */
-  private guide(step: string, only?: ClientKind): void {
+  private guide(step: string, only?: ClientKind): string | null {
     this.guided.add(step);
+    let webCue: string | null = null;
     for (const kind of only ? [only] : this.kinds()) {
       const line = GUIDE[kind][this.persona][step];
       if (!line) continue;
-      this.emit({ type: 'guide', step: line.step, phase: line.phase, text: line.text, target: line.target, speak: line.speak }, { for: kind });
+      const env = this.emit({ type: 'guide', step: line.step, phase: line.phase, text: line.text, target: line.target, speak: line.speak }, { for: kind });
+      if (kind === 'web') webCue = env.cueId;
       // The next stage of the journey: the person looks at its tab on the rail.
       if (kind === 'web' && line.target?.kind === 'ui' && line.target.name === 'mode_tab') this.attention(line.target);
     }
+    return webCue;
   }
   private guideOnce(step: string): void { if (!this.guided.has(step)) this.guide(step); }
 
@@ -418,11 +478,17 @@ export class Conductor {
         // A web app joining a session that already has a map shows it right away.
         if (e.client === 'web' && this.review.map) this.emit({ type: 'map', version: this.review.version, map: this.review.map, confirmed: this.review.phase === 'confirmed', origin: this.review.origin }, { for: 'web' });
         return;
+      case 'auto':
+        this.auto = e.on;
+        if (!e.on) this.cancelAutoAfter();
+        return;
       case 'off_record':
         if (e.on === this.offRecord) return;
         this.offRecord = e.on;
         this.resetLiveContext();
         this.pendingThought = null;
+        this.proposal = null;
+        this.after = null;
         if (e.on) {
           this.inflight?.abort();
           this.inflight = null;
@@ -435,6 +501,15 @@ export class Conductor {
         }
         return;
       case 'cue_done':
+        // The line before a switch is said: the switch follows after its delay.
+        if (this.after && this.after.cueId === e.cueId) {
+          // The person cut in, or the face skipped the line because they were busy: a switch of Clipa's own is dropped.
+          if (this.after.auto && (e.outcome === 'interrupted' || e.outcome === 'skipped')) this.cancelAutoAfter();
+          else {
+            this.after.cueId = null;
+            this.after.dueAt = Math.min(this.after.dueAt, now + this.after.delayMs);
+          }
+        }
         if (this.active && this.active.cueId === e.cueId) {
           this.active.done = true;
           if (this.active.type === 'ask' || this.active.type === 'warn') this.presence('dot');
@@ -464,7 +539,7 @@ export class Conductor {
         }
         return;
       case 'session':
-        this.onSession(e.mode, e.live, e.reason);
+        this.onSession(e.mode, e.live, e.reason, src.client);
         return;
       case 'activity':
         // Typing lasts until the next activity word: that moment is when the person last typed.
@@ -473,6 +548,7 @@ export class Conductor {
         if (e.state === 'typing') {
           this.lastBusyAt = now;
           this.lastPersonAt = now;
+          this.cancelAutoAfter();
           // The person went back to work: a question or warning that has not been said yet is out of date.
           if (this.active && !this.active.done && (this.active.type === 'ask' || this.active.type === 'warn')) { this.cancelActive(); this.presence('dot'); }
         }
@@ -488,6 +564,7 @@ export class Conductor {
           // The person talks: Clipa listens, and the nudges start counting again.
           this.lastPersonAt = now;
           this.nudgesInRow = 0;
+          if (e.active) this.cancelAutoAfter();
           if (e.active && !this.agentTalking) this.pose('listen');
         }
         return;
@@ -514,6 +591,7 @@ export class Conductor {
     this.observations.push(o);
     if (this.observations.length > RULES.keepObservations) this.observations.splice(0, this.observations.length - RULES.keepObservations);
     if (o.kind === 'input_activity') return;
+    this.stageObservations++;
     // A generic frame names its surface in free words that change between frames of one screen, and its app name can gain
     // or lose a prefix ("Google Chrome - Gmail"): for those only another app is a move. The workspace's surfaces are exact.
     const where = o.kind === 'screen_activity' ? appKey(o.app) : `${o.app ?? ''}|${o.surface}`;
@@ -544,6 +622,7 @@ export class Conductor {
     this.baselineProvenance.observations.splice(0, Math.max(0, this.baselineProvenance.observations.length - RULES.keepObservations));
     const changed = moved || baselineChanged || o.change !== null || last === undefined || last.summary !== o.summary || last.surface !== o.surface || last.app !== o.app;
     const newScreen = moved || baselineChanged || last === undefined || (o.kind === 'screen_activity' ? !sameScreen(last, o) : changed);
+    if (o.change !== null || newScreen) { this.lastActivityAt = now; this.cancelAutoAfter(); }
     if (changed || newScreen) {
       this.pendingChange = true;
       if (newScreen) {
@@ -614,7 +693,7 @@ export class Conductor {
     this.latestChangeId = null;
   }
 
-  private onSession(mode: Mode, live: boolean, reason: string | null): void {
+  private onSession(mode: Mode, live: boolean, reason: string | null, client: ClientKind | null = null): void {
     if (live || this.liveMode === mode) {
       if (!(live && mode === 'review' && this.mapPrefetch)) {
         this.inflight?.abort();
@@ -627,6 +706,16 @@ export class Conductor {
       this.selectedMode = mode;
       this.stageStartedAt = this.deps.now();
       this.nudgesInRow = 0;
+      this.stageDone = false;
+      this.quietEnd = false;
+      this.proposal = null;
+      this.advancedIn = null;
+      this.liveClient = client;
+      this.stageObservations = 0;
+      this.answered = false;
+      // A stage that starts (by Clipa's switch or the person's own Start) replaces whatever switch was still waiting.
+      this.after = null;
+      this.emit({ type: 'context', text: `[stage] Now in ${STAGE_NAMES[mode]}: ${STAGE_ABOUT[mode]}` });
       this.cancelActive();
       this.recognized = null;
       this.recognizedFor = null;
@@ -642,15 +731,24 @@ export class Conductor {
     }
     if (this.liveMode !== mode) return;
     this.liveMode = null;
+    this.liveClient = null;
+    // The person ended it (a switch Clipa asked for was already taken before her end): a switch still waiting is dropped, so
+    // no session and no microphone start by themselves after End.
+    this.after = null;
     this.pendingThought = null;
     this.inflight?.abort();
     this.inflight = null;
     this.prefetch = null;
     this.pendingSay = null;
+    this.proposal = null;
     this.cancelActive();
     if (reason === 'off_record') return;
-    if (mode === 'learn' && this.persona === 'expert') { this.handOver('review', 'review'); if (RULES.mapAfterShow) this.prefetchMap(); }
-    if (mode === 'teach') this.handOver('summary', 'summary');
+    this.emit({ type: 'context', text: `[stage] ${STAGE_NAMES[mode]} has ended.` });
+    // Clipa asked for this end herself (the next stage starts, or she switched off): no "open the next stage" line of its own.
+    const quiet = this.quietEnd;
+    this.quietEnd = false;
+    if (mode === 'learn' && this.persona === 'expert') { if (!quiet) this.handOver('review', 'review'); if (RULES.mapAfterShow) this.prefetchMap(); }
+    if (mode === 'teach' && !quiet) this.handOver('summary', 'summary');
     this.pose('idle');
   }
 
@@ -675,16 +773,25 @@ export class Conductor {
     this.lastBusyAt = this.deps.now();
     this.lastPersonAt = this.lastBusyAt;
     this.nudgesInRow = 0;
+    this.cancelAutoAfter();
+    // A question or warning of Clipa's is open (or was just said): this turn is most likely the answer to it.
+    const answering = this.active !== null && (this.active.type === 'ask' || this.active.type === 'warn') && this.lastBusyAt - this.active.at <= RULES.askTtlMs;
     // The person answered: whatever Clipa asked is done.
+    if (this.active?.type === 'ask') this.answered = true;
     if (this.active) this.active.done = true;
     if (!this.languageFixed) {
       const lang = detectLanguage(this.turns.filter((t) => t.role === 'expert').map((t) => t.text));
       if (lang !== null) this.language = lang;
       else if (/^[\x20-\x7e]+$/.test(text) && text.length > 20) this.language = null;
     }
-    // "Let's review", "teach me": the person picks a stage by voice. A turn that does that is not an answer or a map edit.
-    const asked = RULES.voiceStages ? stageAsked(text) : null;
-    if (asked !== null && asked !== this.liveMode && this.webFace()) { this.voiceStage(asked); return; }
+    // Short commands ("stop", "that's it", "yes") and "let's review", "teach me": a turn that does one of these is not an answer
+    // or a map edit.
+    if (this.voiceCommand(text)) return;
+    // With no session a stage phrase near the start opens that tab. While one runs only a whole short command that moves
+    // forward starts a stage: "Let me show you what I would do" in Pass it on, or a correction in Reflect, is an ordinary turn.
+    const asked = !RULES.voiceStages ? null : this.liveMode === null ? stageAsked(text) : stageCommand(text);
+    if (asked !== null && asked !== this.liveMode && this.webFace() && (this.liveMode === null || STAGE_ORDER[asked] > STAGE_ORDER[this.liveMode])) { this.voiceStage(asked); return; }
+    if (this.doneCommand(text, answering)) return;
     if (this.liveMode !== 'review' || !this.review.map) return;
     if (this.review.awaiting === 'teachback') { void this.classifyReply(text); return; }
     if (this.review.awaiting === 'gap') {
@@ -697,11 +804,140 @@ export class Conductor {
     void this.drainVoice();
   }
 
-  /** The web opens the stage the way a click on its tab does, and Clipa confirms it in a few words. */
+  /**
+   * While a session runs on the web, Clipa says a few words and then starts the stage the way Start does (the screen is asked
+   * for as after Start). Otherwise the web opens the stage the way a click on its tab does, and Clipa confirms it.
+   */
   private voiceStage(mode: Mode): void {
+    if (this.webLive()) { this.sayThen(STAGE_START[mode], { kind: 'start', mode }); return; }
     this.emit({ type: 'stage', mode }, { for: 'web' });
     this.attention({ kind: 'ui', name: 'mode_tab', mode });
     this.emit({ type: 'say', text: STAGE_CONFIRM[mode] }, { for: 'web' });
+  }
+
+  /** "Stop" ends the session; "yes" takes a pending proposal. True when the turn was one of these. */
+  private voiceCommand(text: string): boolean {
+    if (!RULES.voiceControl || !this.webLive()) return false;
+    if (offSaid(text)) {
+      // Already switching off ("Stop." then "Bye."): the line is not said twice.
+      if (this.after?.next.kind === 'end') return true;
+      this.stageDone = true;
+      this.quietEnd = true;
+      this.proposal = null;
+      this.cancelActive();
+      this.windDown();
+      this.sayThen(OFF_LINE, { kind: 'end', reason: 'off' });
+      return true;
+    }
+    const proposal = this.proposal;
+    if (proposal && this.deps.now() - proposal.at <= RULES.proposalTtlMs && yesSaid(text)) {
+      this.sayThen(STAGE_START[proposal.mode], { kind: 'start', mode: proposal.mode });
+      return true;
+    }
+    return false;
+  }
+
+  /** "That's it": Show hands over to Reflect, Pass it on ends with the summary. Reflect keeps its own confirm flow. */
+  private doneCommand(text: string, answering: boolean): boolean {
+    if (!RULES.voiceControl || this.stageDone || (this.liveMode !== 'learn' && this.liveMode !== 'teach') || !doneSaid(text)) return false;
+    // An answer to Clipa's own question ("The finance lead, that's it.") does not end the stage; the bare phrase still does.
+    if (answering && !donePhraseOnly(text)) return false;
+    if (this.liveMode === 'learn') {
+      if (this.persona !== 'expert') return false;
+      this.stageDone = true;
+      this.cancelActive();
+      this.windDown();
+      if (this.webLive()) this.sayThen(STAGE_START.review, { kind: 'start', mode: 'review' });
+      // The macOS face: its Show finishes on the hand-over only once it is ending, so the hand-over (and the map) stay at its
+      // End; Clipa says so and asks nothing more meanwhile.
+      else this.emit({ type: 'say', text: MAC_DONE_LINE }, { for: 'macos' });
+      return true;
+    }
+    if (!this.webLive()) return false;
+    // Right after a warning, "done" is the fix being made, not the end of Pass it on.
+    if (this.deps.now() - this.lastWarnAt <= RULES.doneAfterWarnMs) return false;
+    this.stageDone = true;
+    this.quietEnd = true;
+    this.cancelActive();
+    this.windDown();
+    // Pass it on is done: the summary is said, then the session ends (Clipa goes off).
+    this.afterLine(this.guide('summary', 'web'), { kind: 'end', reason: 'done' }, 0);
+    return true;
+  }
+
+  /** Clipa says `text` on the web, then does `next` once it is said. */
+  private sayThen(text: string, next: Next, delayMs = 0, auto = false): void {
+    this.afterLine(this.emit({ type: 'say', text }, { for: 'web' }).cueId, next, delayMs, auto);
+  }
+
+  /** `next` follows the line `cueId` (when it is said, or after lineBeforeSwitchMs at the latest) after delayMs. */
+  private afterLine(cueId: string | null, next: Next, delayMs: number, auto = false): void {
+    this.proposal = null;
+    this.after = { next, cueId, delayMs, dueAt: this.deps.now() + delayMs + (cueId === null ? 0 : RULES.lineBeforeSwitchMs), auto };
+  }
+
+  /** The person goes on (talks, types, the screen changes) or turns auto off: a switch Clipa decided on by herself is dropped. */
+  private cancelAutoAfter(): void {
+    if (!this.after?.auto) return;
+    this.after = null;
+    this.stageDone = false;
+    this.advancedIn = null;
+  }
+
+  /** The stage is winding down (done or stop): a question being prepared or waiting to be said is dropped. */
+  private windDown(): void {
+    this.prefetch = null;
+    this.pendingChange = false;
+    this.pendingSay = null;
+    if (this.liveMode === 'learn' || this.liveMode === 'teach') { this.inflight?.abort(); this.inflight = null; }
+  }
+
+  /** A web session is live: the web-only flow (stage starts, end, proposals) applies. */
+  private webLive(): boolean { return this.liveMode !== null && this.liveClient === 'web'; }
+
+  private goNext(next: Next): void {
+    if (next.kind === 'propose') { this.propose(next.mode); return; }
+    if (next.kind === 'open') {
+      this.emit({ type: 'stage', mode: next.mode }, { for: 'web' });
+      this.attention({ kind: 'ui', name: 'mode_tab', mode: next.mode });
+      return;
+    }
+    // The web ends the running stage for this: its end says no "open the next stage" line of its own.
+    this.quietEnd = true;
+    if (next.kind === 'end') { this.emit({ type: 'end', reason: next.reason }, { for: 'web' }); return; }
+    this.emit({ type: 'stage', mode: next.mode, start: true }, { for: 'web' });
+    this.attention({ kind: 'ui', name: 'mode_tab', mode: next.mode });
+  }
+
+  /** Manual mode: Clipa proposes the next stage in one line; a yes (or a click) starts it. */
+  private propose(mode: 'review' | 'teach'): void {
+    this.proposal = { mode, at: this.deps.now() };
+    this.emit({ type: 'say', text: PROPOSE[mode] }, { for: 'web' });
+    this.attention({ kind: 'ui', name: 'mode_tab', mode });
+  }
+
+  /** A stage is complete: auto mode moves on (after `line`, or a line of its own), manual mode proposes. Once per stage. */
+  private stageComplete(mode: 'review' | 'teach', line: string | null, lineCue: string | null = null, delayMs = 0): void {
+    if (!RULES.autoAdvance || !this.webLive() || this.advancedIn === this.liveMode) return;
+    this.advancedIn = this.liveMode;
+    if (this.auto) {
+      this.stageDone = true;
+      // Pass it on is a new person's (often in another browser): Clipa opens its tab and leaves Start to them.
+      const next: Next = mode === 'teach' ? { kind: 'open', mode } : { kind: 'start', mode };
+      if (line !== null) this.sayThen(line, next, delayMs, true);
+      else this.afterLine(lineCue, next, delayMs, true);
+    } else if (lineCue !== null) this.afterLine(lineCue, { kind: 'propose', mode }, 0);
+    else this.propose(mode);
+  }
+
+  /** Auto mode: Show is complete after a long quiet, once there was real work (screens or an answered question). */
+  private tickShowDone(now: number): void {
+    if (this.liveMode !== 'learn' || this.persona !== 'expert' || this.stageDone || this.after !== null || this.proposal !== null) return;
+    if (this.personTalking || this.agentTalking || this.activity === 'typing') return;
+    if ((this.active && !this.active.done) || this.pendingSay !== null || this.prefetch?.status === 'running') return;
+    if (this.stageObservations < RULES.showIdleMinObservations && !this.answered) return;
+    if (now - Math.max(this.lastBusyAt, this.lastPersonAt, this.lastChangeAt, this.lastActivityAt, this.stageStartedAt) < RULES.showIdleMs) return;
+    this.stageComplete('review', SHOW_LOOKS_DONE);
   }
 
   private onUi(action: 'confirm' | 'correct' | 'answer_gap' | 'ask_about' | 'finish', targetId: string | null, text: string | null): void {
@@ -740,15 +976,19 @@ export class Conductor {
     const now = this.deps.now();
     if (this.active && !this.active.done && this.active.expiresAt !== null && now > this.active.expiresAt) { this.cancelActive(); this.presence('dot'); }
     if (this.offRecord) return;
+    if (this.proposal && now - this.proposal.at > RULES.proposalTtlMs) this.proposal = null;
+    if (this.after && now >= this.after.dueAt && !this.personTalking) { const next = this.after.next; this.after = null; this.goNext(next); return; }
     this.flushThought();
-    if (this.pendingSay && this.paused(now) && (!this.active || this.active.done)) { this.emit({ type: 'say', text: this.pendingSay }); this.pendingSay = null; return; }
-    if ((this.liveMode === 'learn' || this.liveMode === 'teach') && this.inflight === null && this.shouldRecognize(now)) { void this.recognize(); return; }
-    if (this.liveMode === 'learn') this.tickLearn(now);
+    // Show or Pass it on is winding down (done, stop, a switch or a proposal waiting): Clipa asks and warns no more.
+    const winding = (this.liveMode === 'learn' || this.liveMode === 'teach') && (this.stageDone || this.after !== null || this.proposal !== null);
+    if (this.pendingSay && !winding && this.paused(now) && (!this.active || this.active.done)) { this.emit({ type: 'say', text: this.pendingSay }); this.pendingSay = null; return; }
+    if (!winding && (this.liveMode === 'learn' || this.liveMode === 'teach') && this.inflight === null && this.shouldRecognize(now)) { void this.recognize(); return; }
+    if (this.liveMode === 'learn' && !winding) this.tickLearn(now);
     if (this.inflight !== null) return;
     if (this.active && !this.active.done) return;
     if (this.liveMode === 'review') this.tickReview(now);
-    else if (this.liveMode === 'teach') this.tickTeach(now);
-    if (this.inflight === null) this.tickNudge(now);
+    else if (this.liveMode === 'teach' && !winding) this.tickTeach(now);
+    if (this.inflight === null) { this.tickShowDone(now); this.tickNudge(now); }
   }
 
   /**
@@ -758,6 +998,7 @@ export class Conductor {
   private tickNudge(now: number): void {
     if (!RULES.nudges || (this.liveMode !== 'learn' && this.liveMode !== 'teach')) return;
     if (this.nudgesInRow >= RULES.nudgeMaxInRow) return;
+    if (this.stageDone || this.proposal !== null || this.after !== null) return;
     if (this.personTalking || this.agentTalking || this.activity === 'typing' || this.activity === 'away') return;
     if ((this.active && !this.active.done) || this.pendingSay !== null || this.prefetch !== null) return;
     if (now - Math.max(this.lastPersonAt, this.lastSpokeAt, this.stageStartedAt) < RULES.nudgeAfterMs) return;
@@ -1170,7 +1411,9 @@ export class Conductor {
     this.deps.maps.confirm(this.sessionId, map, this.deps.now());
     this.emit({ type: 'map', version: this.review.version, map, confirmed: true, origin: this.review.origin });
     this.pose('celebrate');
-    this.guide('handoff', 'web');
+    const handoff = this.guide('handoff', 'web');
+    // Reflect is complete: after the handoff line, Pass it on starts (auto) or is proposed (manual).
+    if (this.liveMode === 'review') this.stageComplete('teach', null, handoff, RULES.afterHandoffMs);
   }
 
   private startTeach(): void {
@@ -1214,6 +1457,7 @@ export class Conductor {
     this.presence('full', regions[0] ? 'target' : 'corner');
     if (regions[0]) this.emit({ type: 'point', target: { kind: 'region', ...regions[0] } });
     this.attention(regions[0] ? { kind: 'region', ...regions[0] } : null);
+    this.lastWarnAt = this.deps.now();
     this.emit({ type: 'warn', guardrailId: out.guardrailId, text: out.message, regions, evidenceIds: rule?.evidenceIds ?? [] }, { ttlMs: RULES.warnTtlMs });
   }
 
@@ -1221,7 +1465,7 @@ export class Conductor {
   status(): Record<string, unknown> {
     return {
       persona: this.persona, clients: this.kinds(), language: this.language, selectedMode: this.selectedMode, liveMode: this.liveMode, offRecord: this.offRecord,
-      sharing: this.sharing, observations: this.observations.length, turns: this.turns.length, asked: this.askTimes.length, review: this.review.phase,
+      auto: this.auto, sharing: this.sharing, observations: this.observations.length, turns: this.turns.length, asked: this.askTimes.length, review: this.review.phase,
       mapVersion: this.review.version, cues: this.seq, busy: this.inflight !== null, baseline: this.baseline.current(),
     };
   }

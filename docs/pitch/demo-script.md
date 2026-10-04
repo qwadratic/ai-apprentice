@@ -36,16 +36,16 @@ One run through all three stages, **Show → Reflect → Pass it on**, in the de
 | 1 | Press **Start** in Show and share the screen when she asks (this Chrome tab is enough). Pick `Practice order · customer_07` (ORD-2041). | "Hi, I'm Clipa." Then quiet. |
 | 2 | In the email, press **Remove image**. In the message, type `Delivery address: 14 Sample Lane, 1010 Exampletown` and `Delivery window: 2026-10-12 14:00-16:00`. Then hands off the keyboard, silent. | One short why-question about the change, for example: "Why text instead of the image?" |
 | 3 | Answer: *"Their phone blocks images. I write the delivery details in the email."* | At most "Got it." Then quiet. |
-| 4 | Press **End** on the stage. | The map starts building in the background. |
+| 4 | Say *"That's it."* (do not press End). | "Okay, let's reflect." The map is built from Show and Reflect opens by itself (with **Lead me through** on, as by default). |
 
 ## Stage 2: Reflect (expert), about 1 minute raw
 
 | Step | You do or say | Clipa (expected) |
 | --- | --- | --- |
-| 5 | Press **Reflect**. | The map from Show: your words, the rule they give, and the screen moment. |
+| 5 | Nothing to press: Reflect opens. (With Lead me through off, say *"yes"* when she proposes it, or press Reflect.) | The rule card: your words, the rule they give, its exception, and the screen moment. |
 | 6 | She asks up to three short points, one at a time. Answer each in a sentence, for example: *"Only customer_07."* · *"An image is fine when the details are also in text."* · *"If you can't tell who the customer is, ask before you send."* | No reply of her own after an answer: the map updates, and she asks the next point. |
 | 7 | She reads the teach-back, at most 35 words: for whom, what to do, your reason, the exception. **Correct one detail**, for example: *"Both: the address and the delivery window."* | The map changes, and she reads the changed summary again. |
-| 8 | *"Yes, that's right."* | The rule is confirmed by the expert, and she points to Pass it on. |
+| 8 | *"Yes, that's right."* | "✓ Confirmed by the expert." After her handoff line the Pass it on tab opens; it does not start a session in the expert's browser. |
 
 ## Stage 3: Pass it on (new hire), about 1 minute raw
 
@@ -56,7 +56,7 @@ Switch to the new hire: the teammate, or the second Chrome profile. They open th
 | 9 | Pass it on opens on `New order · customer_07 · attachment` (ORD-2057, image only); if it opens on the practice order, pick that case in the menu. Type one line in the message, for example `Your order is on its way.`, keep the image, and stop with hands off the keyboard. | One short warning before Send, with Ivan's reason, for example: "Add the delivery details as text. For customer_07, an image alone won't do." |
 | 10 | Type the address and the delivery window from the order into the message. Stop. | "That fixes it. Ready for review." |
 | 11 | **The allow case.** Pick `Order · customer_03`, keep the image only, type one line, stop. | **Quiet.** The rule is only for customer_07. |
-| 12 | Press **End**. End the take here. | |
+| 12 | Say *"That's it."* (or press End). End the take here. | The summary, then the session ends. *"Stop"* turns Clipa off at any point. |
 
 Do not press **Preview & check** while the conductor leads Pass it on: that check runs in the browser without the confirmed map yet, so it answers "ask before you send". The take ends on "Ready for review".
 

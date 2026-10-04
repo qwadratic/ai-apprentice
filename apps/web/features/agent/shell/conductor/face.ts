@@ -6,7 +6,8 @@
 //   - Off the record nothing is rendered except `state hidden`.
 //   - Cues replayed from before this page joined a hand-over (`historyUntil`) only restore the map and the teach-back.
 //   - thought goes to the store (the thought bubble beside Clipa) and is never spoken; attention makes Clipa flash and go to
-//     its target; stage opens a stage the way a click on the rail does.
+//     its target; stage opens a stage the way a click on the rail does (with `start`, it starts it the way Start does);
+//     end ends the running session the way End does.
 import type { ClientTimers } from './client.ts';
 import type { ClientEvent, ClipaPose, ConductorMode, CueEnvelope, CueOutcome, Region, Target } from './protocol.ts';
 import { MAX_SAID } from './store.ts';
@@ -37,8 +38,10 @@ export interface FaceHost {
   timers: ClientTimers;
   /** Clipa flashes briefly (the person should look where she goes). */
   attention?(target: Target | null): void;
-  /** Opens a stage the way a click on its tab of the rail does. */
-  stage?(mode: ConductorMode): void;
+  /** Opens a stage the way a click on its tab of the rail does; with `start` also starts it the way Start does. */
+  stage?(mode: ConductorMode, start: boolean): void;
+  /** Ends the running session the way End does (`reason`: off, done). */
+  end?(reason: string): void;
 }
 
 /** A spoken cue whose speech never starts is given up after this long. */
@@ -209,7 +212,10 @@ export class ConductorFace {
         return;
       }
       case 'stage':
-        this.host.stage?.(cue.mode);
+        this.host.stage?.(cue.mode, cue.start === true);
+        return;
+      case 'end':
+        this.host.end?.(cue.reason);
         return;
       case 'attention': {
         // She flashes; a target she is not already at is pointed at the way a `point` cue does it.
