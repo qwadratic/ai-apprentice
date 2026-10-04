@@ -123,6 +123,16 @@ build_api() {
     log "npm ci"
     timeout $STEP_TIMEOUT npm ci --no-fund --no-audit || return 1
   fi
+  # apps/api type-checks against @apprentice/contracts, whose build output is the
+  # gitignored packages/contracts/dist that checkout's git clean removes.
+  if [ -f packages/contracts/package.json ] && jq -e '.scripts.build' packages/contracts/package.json >/dev/null; then
+    log "building @apprentice/contracts with $pm"
+    if [ $pm = pnpm ]; then
+      timeout $STEP_TIMEOUT pnpm --filter @apprentice/contracts run build || return 1
+    else
+      timeout $STEP_TIMEOUT npm run build --workspace @apprentice/contracts || return 1
+    fi
+  fi
   if [ -f apps/api/package.json ] && jq -e '.scripts.build' apps/api/package.json >/dev/null; then
     log "building apps/api with $pm"
     (cd apps/api && timeout $STEP_TIMEOUT "$pm" run build) || return 1

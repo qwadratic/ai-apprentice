@@ -212,6 +212,19 @@ jobs:
           cp -R apps/web/features/agent/launchpad/dist/. "$SITE_DIR/"
           cp -R apps/web/dist/. "$SITE_DIR/app/"
           find "$SITE_DIR" -type f | sort
+      # Anthropic keys, ElevenLabs keys (sk_ + hex) and any api-key/xi-api-key assignment of a long literal.
+      # A bare "api-key" grep would flag the app's own header-redaction code, so only assigned values count.
+      # grep exits 1 on no match; 0 (a match) and 2 (an error, e.g. a PCRE limit) both fail the job.
+      # The step runs under bash -e, so grep's status is caught with ||. -R follows symlinks (the Pages
+      # artifact dereferences them) and -a scans files with NUL bytes too.
+      - name: The published site carries no key-shaped values
+        run: |
+          set -uo pipefail
+          rc=0
+          grep -RalP 'sk-ant-[\w-]{20,}|sk_[a-fA-F0-9]{40,}|(?i:api[_-]?key|xi-api-key|elevenlabs_api_key)["\x27]?\s*[:=]\s*["\x27][\w-]{20,}' "$SITE_DIR" || rc=$?
+          if [ $rc -eq 1 ]; then echo "No key-shaped values in $SITE_DIR"; exit 0; fi
+          if [ $rc -eq 0 ]; then echo "::error::A key-shaped value is in the published site (files above)"; else echo "::error::The key scan failed (grep exit $rc)"; fi
+          exit 1
       - name: Write deploy.json at the site root
         env:
           SHA: ${{ needs.prepare.outputs.sha }}
