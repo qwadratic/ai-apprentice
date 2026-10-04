@@ -6,7 +6,12 @@ import type { AgentConfig } from './config.ts';
 import { isRecord } from './config.ts';
 
 export interface SessionRecord { sessionId: string; tokenHash: string; createdAt: number; expiresAt: number }
-export interface IssuedSession { sessionId: string; sessionEpochMs: number; token: string }
+/**
+ * issuedAtMs and serverNowMs are server clock readings. They are not the timeline epoch: the browser picks
+ * sessionEpochMs itself (Date.now() at the start click), so its own clock skew cannot make frame times negative.
+ * The pair lets the page estimate its clock offset if it needs one.
+ */
+export interface IssuedSession { sessionId: string; token: string; issuedAtMs: number; serverNowMs: number }
 export type AuthResult =
   | { ok: true; sessionId: string }
   | { ok: false; reason: 'missing' | 'invalid' | 'forbidden' };
@@ -76,7 +81,7 @@ export function createSessionStore(config: Pick<AgentConfig, 'sessionsDir' | 'se
       const record: SessionRecord = { sessionId: randomUUID(), tokenHash: hashToken(token).toString('hex'), createdAt: now, expiresAt: now + config.sessionTtlMs };
       sessions.set(record.sessionId, record);
       try { await persist(); } catch (error) { sessions.delete(record.sessionId); throw error; }
-      return { sessionId: record.sessionId, sessionEpochMs: now, token };
+      return { sessionId: record.sessionId, token, issuedAtMs: now, serverNowMs: config.now() };
     },
     check(authorization, sessionId) {
       const token = bearerToken(authorization);

@@ -55,10 +55,10 @@ export function createElevenLabsClient(config: AgentConfig, files: SessionFiles)
     },
     getConversation,
     async finishInBackground(id, conversationId, partial) {
-      const t0 = Date.now();
+      const t0 = config.now();
       let conversationStatus: unknown = null;
       try {
-        while (partial && Date.now() - t0 < config.timing.backgroundWaitMs) {
+        while (partial && config.now() - t0 < config.timing.backgroundWaitMs) {
           await sleep(config.timing.backgroundPollMs);
           const g = await getConversation(conversationId);
           if (g.conv) {
@@ -67,9 +67,9 @@ export function createElevenLabsClient(config: AgentConfig, files: SessionFiles)
           } else if (typeof g.status === 'number' && g.status < 500 && g.status !== 429) break;
         }
         const a = await storeAudio(id, conversationId);
-        config.log({ level: 'info', msg: 'finish background done', session: id, partial, conversation_status: conversationStatus, audio_status: a.status, audio_bytes: a.bytes ?? 0, ms: Date.now() - t0 });
+        config.log({ level: 'info', msg: 'finish background done', session: id, partial, conversation_status: conversationStatus, audio_status: a.status, audio_bytes: a.bytes ?? 0, ms: config.now() - t0 });
       } catch {
-        config.log({ level: 'error', msg: 'finish background failed', session: id, ms: Date.now() - t0 });
+        config.log({ level: 'error', msg: 'finish background failed', session: id, ms: config.now() - t0 });
       }
     },
   };

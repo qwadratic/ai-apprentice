@@ -27,6 +27,7 @@ export async function start(t: TestContext, options: AgentOptions = {}, dir?: st
     elevenLabsApiKey: EL_KEY, elevenLabsAgentIdInterviewer: EL_AGENT,
     ...options,
   });
+  t.after(() => agent.close());
   const app = await createApi({ allowedOrigins: [ORIGIN], modules: [agent.module] });
   const server = app.listen(0, '127.0.0.1');
   t.after(() => new Promise<void>((resolve) => { server.close(() => resolve()); server.closeAllConnections(); }));
@@ -36,7 +37,7 @@ export async function start(t: TestContext, options: AgentOptions = {}, dir?: st
   return { base: `http://127.0.0.1:${address.port}`, agent, dir: sessionsDir };
 }
 
-export interface Issued { sessionId: string; sessionEpochMs: number; token: string }
+export interface Issued { sessionId: string; token: string; issuedAtMs: number; serverNowMs: number }
 
 export async function issue(base: string): Promise<Issued> {
   const r = await fetch(`${base}/api/agent/sessions`, { method: 'POST', headers: { Origin: ORIGIN } });

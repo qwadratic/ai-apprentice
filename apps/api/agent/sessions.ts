@@ -19,6 +19,7 @@ export const AUDIO_EXT: Readonly<Record<string, string>> = {
   'audio/ogg': 'ogg', 'audio/webm': 'webm', 'audio/mp4': 'm4a', 'audio/aac': 'aac',
 };
 const AUDIO_EXTS = [...new Set(Object.values(AUDIO_EXT))];
+const SESSION_FILE = new RegExp(`^([A-Za-z0-9-]{8,64})\\.(jsonl|conv|elevenlabs\\.json|${AUDIO_EXTS.join('|')})$`);
 
 const errCode = (e: unknown): unknown => (isRecord(e) ? e.code : undefined);
 
@@ -40,9 +41,18 @@ export function parseEvents(body: unknown): ParsedEvents {
   return { ok: true, conversationId: conversationId as string | undefined, events };
 }
 
+export interface SessionInfo { id: string; size: number; mtime: number; hasEvents: boolean; hasTranscript: boolean; hasAudio: boolean }
+export interface SessionDump { conversationId: string | null; events: unknown[] | null; transcript: unknown; audio: { ext: string; bytes: number } | null }
+
 export interface SessionFiles {
-  /** Appends lines to {id}.jsonl; false when the session file would exceed its cap. */
-  appendEvents(id: string, lines: string, maxFileBytes: number): Promise<boolean>;
+  eventsSize(id: string): Promise<number>;
+  appendEvents(id: string, lines: string): Promise<void>;
+  /** Everything stored for one session, or null when nothing is. */
+  dump(id: string): Promise<SessionDump | null>;
+  /** Stored sessions, newest first, with the total bytes and the orphaned *.tmp file names. */
+  list(): Promise<{ sessions: SessionInfo[]; total: number; tmp: string[] }>;
+  remove(id: string): Promise<void>;
+  removeTmp(name: string, olderThanMs: number, now: number): Promise<boolean>;
   /** Binds the session to its first conversationId; false when it is bound to another one. */
   bindConversation(id: string, conversationId: string): Promise<boolean>;
   boundConversation(id: string): Promise<string | null>;
@@ -64,16 +74,60 @@ export function createSessionFiles(dir: string): SessionFiles {
     await fsp.writeFile(tmp, data, { mode: 0o640 });
     await fsp.rename(tmp, path);
   };
+  const boundConversation = async (id: string): Promise<string | null> => {
+    try { return (await fsp.readFile(file(id, 'conv'), 'utf8')).trim(); } catch { return null; }
+  };
   const hasAudio = async (id: string): Promise<boolean> => {
     for (const ext of AUDIO_EXTS) if (await size(file(id, ext))) return true;
     return false;
   };
   return {
-    async appendEvents(id, lines, maxFileBytes) {
+    eventsSize: (id) => size(file(id, 'jsonl')),
+    async appendEvents(id, lines) {
       await ensureDir();
-      const path = file(id, 'jsonl');
-      if ((await size(path)) + Buffer.byteLength(lines) > maxFileBytes) return false;
-      await fsp.appendFile(path, lines, { mode: 0o640 });
+      await fsp.appendFile(file(id, 'jsonl'), lines, { mode: 0o640 });
+    },
+    async dump(id) {
+      let events: unknown[] | null = null;
+      try { events = (await fsp.readFile(file(id, 'jsonl'), 'utf8')).split('\n').filter(Boolean).map((l) => JSON.parse(l) as unknown); } catch { /* none or unreadable */ }
+      const transcript = await readJson(file(id, 'elevenlabs.json'));
+      let audio: SessionDump['audio'] = null;
+      for (const ext of AUDIO_EXTS) { const bytes = await size(file(id, ext)); if (bytes) { audio = { ext, bytes }; break; } }
+      const conversationId = await boundConversation(id);
+      return events === null && transcript === null && !audio && !conversationId ? null : { conversationId, events, transcript, audio };
+    },
+    async list() {
+      const byId = new Map<string, SessionInfo>();
+      const tmp: string[] = [];
+      let total = 0;
+      let names: string[] = [];
+      try { names = await fsp.readdir(dir); } catch (e) { if (errCode(e) !== 'ENOENT') throw e; }
+      for (const name of names) {
+        if (name.endsWith('.tmp')) { tmp.push(name); continue; }
+        const m = SESSION_FILE.exec(name);
+        const id = m?.[1];
+        const kind = m?.[2];
+        if (!id || !kind) continue;
+        const st = await fsp.stat(join(dir, name));
+        total += st.size;
+        const info = byId.get(id) ?? { id, size: 0, mtime: 0, hasEvents: false, hasTranscript: false, hasAudio: false };
+        info.size += st.size;
+        info.mtime = Math.max(info.mtime, st.mtimeMs);
+        if (kind === 'jsonl') info.hasEvents = true;
+        if (kind === 'elevenlabs.json') info.hasTranscript = true;
+        if (AUDIO_EXTS.includes(kind)) info.hasAudio = true;
+        byId.set(id, info);
+      }
+      return { sessions: [...byId.values()].sort((a, b) => b.mtime - a.mtime), total, tmp };
+    },
+    async remove(id) {
+      for (const ext of ['jsonl', 'conv', 'elevenlabs.json', ...AUDIO_EXTS]) await fsp.rm(file(id, ext), { force: true });
+    },
+    async removeTmp(name, olderThanMs, now) {
+      const path = join(dir, name);
+      const st = await fsp.stat(path).catch(() => null);
+      if (!st || now - st.mtimeMs <= olderThanMs) return false;
+      await fsp.rm(path, { force: true });
       return true;
     },
     async bindConversation(id, conversationId) {
@@ -87,9 +141,7 @@ export function createSessionFiles(dir: string): SessionFiles {
         return (await fsp.readFile(path, 'utf8')).trim() === conversationId;
       }
     },
-    async boundConversation(id) {
-      try { return (await fsp.readFile(file(id, 'conv'), 'utf8')).trim(); } catch { return null; }
-    },
+    boundConversation,
     readTranscript: (id) => readJson(file(id, 'elevenlabs.json')),
     async storeTranscript(id, conv) {
       await ensureDir();
