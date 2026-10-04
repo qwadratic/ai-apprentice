@@ -19,6 +19,11 @@ export interface CaptureSnapshot {
   readonly masks: readonly PrivacyMask[];
   readonly reviewRequired: boolean;
 }
+export type CaptureSurface = 'order' | 'email' | 'ticket' | null;
+export interface CaptureProvenance {
+  readonly surface: CaptureSurface;
+  readonly sourceRevision: string | null;
+}
 export interface ProcessedFrame {
   readonly sessionId: string;
   readonly frameId: string;
@@ -26,6 +31,7 @@ export interface ProcessedFrame {
   readonly timestampMs: number;
   readonly generation: number;
   readonly geometry: Geometry;
+  readonly provenance: CaptureProvenance;
   readonly image: Blob;
 }
 export interface FrameLease {
@@ -55,8 +61,12 @@ export interface CaptureOptions {
   readonly runtime?: CaptureRuntime;
   readonly frameIntervalMs?: number;
   readonly renderIntervalMs?: number;
+  /** Read synchronously after processed pixels are painted and before PNG encoding starts. */
+  readonly snapshotProvenance?: () => CaptureProvenance;
   readonly onFrame?: (frame: ProcessedFrame, lease: FrameLease) => void | Promise<void>;
 }
+
+const EMPTY_PROVENANCE: CaptureProvenance = Object.freeze({ surface: null, sourceRevision: null });
 
 export function browserCaptureRuntime(): CaptureRuntime {
   return {
@@ -84,6 +94,7 @@ export class ScreenCapture {
   private readonly video: HTMLVideoElement;
   private readonly frameIntervalMs: number;
   private readonly renderIntervalMs: number;
+  private readonly snapshotProvenanceProvider?: CaptureOptions['snapshotProvenance'];
   private readonly onFrame?: CaptureOptions['onFrame'];
   private state: CaptureState = 'idle';
   private reason?: CaptureReason;
@@ -114,6 +125,7 @@ export class ScreenCapture {
     if (![this.frameIntervalMs, this.renderIntervalMs].every((n) => Number.isFinite(n) && n > 0)) {
       throw new RangeError('Capture intervals must be finite and positive.');
     }
+    this.snapshotProvenanceProvider = options.snapshotProvenance;
     this.onFrame = options.onFrame;
     this.canvas = this.runtime.createCanvas();
     const context = this.canvas.getContext('2d', { alpha: false });
@@ -372,6 +384,9 @@ export class ScreenCapture {
     const sessionId = this.session!.sessionId;
     const sequence = ++this.sequence;
     const timestampMs = this.timestamp();
+    // Keep capture context attached to the exact processed canvas snapshot. The
+    // provider object is never retained across the asynchronous encoder callback.
+    const provenance = this.snapshotProvenance();
     const token = {};
     this.pendingFrame = token;
     const isCurrent = () => !signal.aborted && this.state === 'capturing' &&
@@ -383,7 +398,7 @@ export class ScreenCapture {
       if (!isCurrent()) return;
       if (!image) { this.fail('frame-failed'); return; }
       const frame = Object.freeze({ sessionId, frameId: `${sessionId}:generation:${generation}:frame:${sequence}`,
-        sequence, timestampMs, generation, geometry, image });
+        sequence, timestampMs, generation, geometry, provenance, image });
       Promise.resolve().then(() => {
         if (isCurrent()) return this.onFrame?.(frame, Object.freeze({ signal, isCurrent }));
       }).catch(() => {
@@ -392,6 +407,19 @@ export class ScreenCapture {
         if (this.pendingFrame === token) this.pendingFrame = null;
       });
     }, 'image/png');
+  }
+
+  private snapshotProvenance(): CaptureProvenance {
+    const source = this.snapshotProvenanceProvider?.();
+    if (source === undefined) return EMPTY_PROVENANCE;
+    if (!source) throw new TypeError('Invalid capture provenance.');
+    const { surface, sourceRevision } = source;
+    if (!['order', 'email', 'ticket', null].includes(surface) ||
+        (sourceRevision !== null &&
+          (typeof sourceRevision !== 'string' || !sourceRevision || sourceRevision.length > 200))) {
+      throw new TypeError('Invalid capture provenance.');
+    }
+    return Object.freeze({ surface, sourceRevision });
   }
 
   private setOutputEnabled(enabled: boolean): void {

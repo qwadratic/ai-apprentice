@@ -106,13 +106,19 @@ test('doc-9 shape: `mount` is a named export next to agentModule', async () => {
   assert.equal(typeof index.authorize, 'function');
 });
 
-test('authorize() works as the screen module\'s dependency (null first, then the body\'s sessionId)', async (t) => {
-  const { registerWebRoute } = await import('../src/web-routes.ts');
-  const { mount: mountScreen } = await import('../screen/index.mjs');
+test('authorize() protects real screen start and frame routes with session-scoped semantics', async (t) => {
+  const { parseScreenObservation, parseScreenStatus } = await import('@apprentice/contracts');
+  const { createScreenModule } = await import('../src/screen-module.ts');
+  const { ScreenSessionHub, createMemoryEvidenceStore, createScreenService } = await import('../screen/index.ts');
   const { agent } = await start(t);
-  const offered: unknown[] = [];
-  const service = { offer: (input: unknown) => { offered.push(input); return 'accepted'; }, evidence: {} };
-  const app = await createApi({ allowedOrigins: [ORIGIN], modules: [{ name: 'screen', mount: (a) => { mountScreen(a, { register: registerWebRoute, service, authorize: agent.authorize }); } }] });
+  const runner = { async vision() { return { json: { outcome: 'incomplete', reason: 'unreadable' }, ms: 1 }; } };
+  const evidence = createMemoryEvidenceStore();
+  const hub = new ScreenSessionHub(({ publish, onEvent }) => createScreenService({
+    runner, evidence, publish, onEvent, parseObservation: parseScreenObservation,
+    queueOptions: { sampleIntervalMs: 0 },
+  }), parseScreenStatus);
+  const screen = createScreenModule({ allowedOrigins: [ORIGIN], hub, authorize: agent.authorize });
+  const app = await createApi({ allowedOrigins: [ORIGIN], modules: [screen] });
   const server = app.listen(0, '127.0.0.1');
   t.after(() => new Promise<void>((resolve) => { server.close(() => resolve()); server.closeAllConnections(); }));
   await new Promise<void>((resolve) => { if (server.listening) resolve(); else server.once('listening', () => resolve()); });
@@ -120,10 +126,21 @@ test('authorize() works as the screen module\'s dependency (null first, then the
   assert.ok(address && typeof address !== 'string');
   const a = await agent.store.issue();
   const b = await agent.store.issue();
-  const frame = (sessionId: string): string => JSON.stringify({ sessionId, frameId: 'f1', timestampMs: 1, processed: true, mediaType: 'image/png', data: 'AAAA' });
-  const post = (token: string | null, sessionId: string) => fetch(`http://127.0.0.1:${address.port}/screen/frames`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: frame(sessionId) });
-  assert.equal((await post(null, a.sessionId)).status, 401, 'no token: rejected before the body is read');
-  assert.equal((await post(a.token, b.sessionId)).status, 403, 'token of another session');
-  assert.equal((await post(a.token, a.sessionId)).status, 202, 'own session passes authorization and reaches the service');
-  assert.equal(offered.length, 1);
+  const base = `http://127.0.0.1:${address.port}/screen/sessions/${a.sessionId}`;
+  const headers = (token: string | null) => ({ Origin: ORIGIN, 'Content-Type': 'application/json',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}) });
+  const started = await fetch(`${base}/start`, { method: 'POST', headers: headers(a.token),
+    body: JSON.stringify({ sessionEpochMs: Date.now(), clientGeneration: 1 }) });
+  assert.equal(started.status, 201);
+  assert.equal('sessionToken' in (await started.json() as Record<string, unknown>), false);
+  const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0]).toString('base64');
+  const frame = JSON.stringify({ generation: 1, frameId: 'f1', timestampMs: 1, processed: true,
+    mediaType: 'image/png', data: png,
+    provenance: { surface: 'email', sourceRevision: 'email-r1', captureGeneration: 1 } });
+  const post = (token: string | null) => fetch(`${base}/frames`, {
+    method: 'POST', headers: headers(token), body: frame,
+  });
+  assert.equal((await post(null)).status, 401, 'no token');
+  assert.equal((await post(b.token)).status, 403, 'valid token of another session');
+  assert.equal((await post(a.token)).status, 202, 'own session reaches the real screen hub');
 });
