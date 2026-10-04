@@ -57,6 +57,8 @@ const REVIEW_NOTICES: Readonly<Record<string, string>> = {
   needs_words: 'Say or type what is different, and Clipa will update the map.',
 };
 export const PERSONA_STORAGE_KEY = 'apprentice.shell.persona';
+/** The viewer's "Lead me through" choice ('off' when turned off; anything else is on). */
+export const AUTO_LEAD_STORAGE_KEY = 'apprentice.shell.autoLead';
 const MAX_BUFFERED_CONTEXT = 20;
 /** No key press for this long after typing: the page reports `activity idle` to the conductor (its pause signal). */
 export const TYPING_IDLE_MS = 2500;
@@ -221,11 +223,14 @@ export class ShellController {
   private activityTimer: unknown = null;
   private personTalking = false;
   private agentTalking = false;
+  /** "Lead me through" (auto mode): on unless this viewer turned it off. */
+  private autoLead = true;
   private readonly conductorOff: () => void;
 
   constructor(deps: ControllerDeps) {
     this.deps = deps;
     this.store = deps.store ?? createStore(parsePersona(this.readStorage(PERSONA_STORAGE_KEY)));
+    this.autoLead = this.readStorage(AUTO_LEAD_STORAGE_KEY) !== 'off';
     this.brain = deps.createBrain((line) => this.log('sys', 'BRAIN', line));
     this.store.dispatch({ type: 'BRAIN_SET', name: this.brain.name, wired: this.brain.wired });
     this.limits = new SessionLimits({
@@ -417,6 +422,8 @@ export class ShellController {
     this.personaSent = persona;
     this.conductor.send({ type: 'hello', client: 'web', version: opts.version, persona, language: null, mapFrom: null });
     this.conductor.send({ type: 'mode', mode: this.state.mode });
+    // Auto mode is on unless the page says otherwise (also to a conductor that restarted).
+    if (!this.autoLead) this.conductor.send({ type: 'auto', on: false });
     if (!first) return;
     // What happened before the stream was live: the current session (not its history) and the latest of the other signals.
     const s = this.state;
@@ -438,7 +445,7 @@ export class ShellController {
   private conductorSend(event: ClientEvent): void {
     const client = this.conductor;
     if (client === null) return;
-    if (this.state.offRecord && event.type !== 'off_record' && event.type !== 'mode' && event.type !== 'session') return;
+    if (this.state.offRecord && event.type !== 'off_record' && event.type !== 'mode' && event.type !== 'session' && event.type !== 'auto') return;
     if (!this.helloSent) {
       this.earlyEvents.push(event);
       if (this.earlyEvents.length > MAX_EARLY_EVENTS) this.earlyEvents.shift();
@@ -519,9 +526,31 @@ export class ShellController {
       send: (event) => this.conductorSend(event),
       timers: this.deps.timers,
       attention: (target) => this.deps.conductor?.attention?.(target),
-      // The person asked for a stage by voice: exactly what a click on its tab of the journey rail does.
-      stage: (mode) => this.setMode(mode),
+      // A stage by voice: what a click on its tab of the journey rail does, or with `start` what Start does.
+      stage: (mode, start) => { if (start) this.startStage(mode); else this.setMode(mode); },
+      // The person said stop, or Pass it on is done: what End does.
+      end: (reason) => { void this.end(reason === 'off' ? 'Clipa switched off: the person asked her to stop.' : 'Session ended: the person said they were done.'); },
     };
+  }
+
+  /** The conductor starts a stage (by voice, or moving on by herself): as Start or "End ... and start ..." does. */
+  private startStage(mode: Mode): void {
+    const s = this.state;
+    if (s.offRecord) return;
+    // A late cue (replayed after a reconnect, or after the person pressed End) never starts a session by itself.
+    if (s.phase !== 'live' || s.session?.mode === mode) { this.setMode(mode); return; }
+    void this.switchSession(mode);
+  }
+
+  /** "Lead me through": on, Clipa moves on to the next stage by herself; off, she only proposes it. Remembered per viewer. */
+  isAutoLead(): boolean { return this.autoLead; }
+
+  setAutoLead(on: boolean): void {
+    if (this.autoLead === on) return;
+    this.autoLead = on;
+    this.writeStorage(AUTO_LEAD_STORAGE_KEY, on ? 'on' : 'off');
+    this.conductorSend({ type: 'auto', on });
+    this.sys(on ? 'Lead me through: on. Clipa moves on to the next stage by herself.' : 'Lead me through: off. Clipa only proposes the next stage.');
   }
 
   /** A conductor line said by the voice agent as `[ASK] text`; false when the voice is not connected. */

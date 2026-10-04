@@ -44,16 +44,16 @@ One run through all three stages, **Show → Reflect → Pass it on**, on real G
 | 3 | Answer: *"Lumen has a signed agreement for Net 30. Standard is Net 14, and Net 30 is only for Lumen. Anything longer needs the finance lead."* | One short acknowledgement, maybe one narrow follow-up, for example "Who approves longer terms?" |
 | 4 | **Language switch.** Go to the Sheet and type `3,000` into Q1 to Q4. Say in Russian: *"Теперь бюджет. Лицензию на год оплатили сразу, двенадцать тысяч, поэтому делю по кварталам."* Then stop. | She answers in Russian and asks why the spread, for example: "Почему вы разбили сумму по кварталам?" |
 | 5 | Answer in Russian: *"Она предоплачена на двенадцать месяцев. Если поставить всё в первый квартал, он выглядит как перерасход. Так только для предоплат больше тысячи евро."* | A short acknowledgement in Russian. |
-| 6 | Back to English: *"That's it."* Press **End** on the stage. | The map starts building in the background. |
+| 6 | Back to English: *"That's it."* Do not press End. | "Okay, let's reflect." Show ends and Reflect starts by itself; the map builds in the background. (With **Lead me through** off, or after pressing End yourself, press **Reflect** and **Start**.) |
 
 ## Stage 2: Reflect (expert), 1–2 minutes raw
 
 | Step | You do or say | Clipa (expected) |
 | --- | --- | --- |
-| 7 | Press **Reflect**. | The board opens with the map: two processes ("Invoice email: payment terms", "Prepaid cost: spread by quarter"), steps with screen moments, and rules in your words. |
+| 7 | Wait for the board (no click needed). | The board opens with the map: two processes ("Invoice email: payment terms", "Prepaid cost: spread by quarter"), steps with screen moments, and rules in your words. |
 | 8 | She raises at most two open points. Answer briefly, for example: *"Only Lumen. For anyone else, ask finance first."* | She updates the map and says what changed. |
 | 9 | She reads the teach-back, about 60 words. **Correct one detail:** *"Not over a thousand: over five hundred euros."* | She says what changed and reads the changed part again. |
-| 10 | *"Yes, that's right."* | The map is confirmed, and she points to Pass it on. |
+| 10 | *"Yes, that's right."* | The map is confirmed, and she opens the Pass it on tab. She does not start it: the new hire presses Start. |
 
 ## Stage 3: Pass it on (new hire), 1–2 minutes raw
 
