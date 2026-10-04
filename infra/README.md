@@ -145,6 +145,7 @@ Other sources, for manual use: `sudo systemctl start apprentice-deploy.service` 
 | `DEPLOY_REF` | deploy | default `main`; used with `DEPLOY_SOURCE=ref` |
 | `DEPLOY_JSON_URL` | deploy | default `https://qwadratic.github.io/clipa/deploy.json` |
 | `SESSIONS_DIR` | agent module | default `/var/lib/apprentice/sessions` (not in the env file; set in the unit if needed) |
+| `AGENT_MAPS_FILE` | agent module | Work Maps kept across restarts (the confirmed maps and the last built one, JSON, mode 0600, at most 4 MB), default `/var/lib/apprentice/maps.json`; empty keeps them in memory only, and so does a path that cannot be written (logged once) |
 | `SIGNED_URL_REQUIRE_SESSION`, `AGENT_*`, `SIGNED_URL_*`, `EVENTS_BYTES_PER_HOUR`, `SESSIONS_WARN_BYTES`, `SESSIONS_ROTATE_BYTES` | agent module | session-token requirement for the signed URL, rate limits and disk thresholds, all optional; see `apps/api/agent/config.ts` |
 | `DEBUG_ENDPOINTS` | placeholder only | `1` enables `GET /debug/sse`; ignored by apps/api |
 
@@ -156,7 +157,7 @@ Other sources, for manual use: `sudo systemctl start apprentice-deploy.service` 
 - read `DATABASE_PATH`, `MEDIA_DIR`, `RUNNER_URL` (`http://127.0.0.1:8787`), `RUNNER_TOKEN`, `ALLOWED_ORIGINS`, `ELEVENLABS_API_KEY` from the environment (systemd provides them; `GIT_SHA` is set too);
 - serve `GET /health` → 200 with `{"ok": true, ...}` (deploy rolls back otherwise) and keep the `ops` module registered: deploy's health check requires `/ops/deploy/status` through port 8000, so an API that loses it is rolled back;
 - handle its own CORS (`createApi`: exact match on `ALLOWED_ORIGINS`, 403 for other origins, answers `OPTIONS`);
-- write only under `/var/lib/apprentice/{db,media,sessions}`; log metadata, never prompts, images, transcripts or keys.
+- write only under `/var/lib/apprentice/{db,media,sessions}` and `/var/lib/apprentice/maps.json`; log metadata, never prompts, images, transcripts or keys.
 
 A module that needs the raw request bytes (a signature over the body, like the ops module) cannot rely on `express.json`, which `createApi` installs for every route: it only skips other content types.
 

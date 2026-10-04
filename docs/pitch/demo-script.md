@@ -21,7 +21,7 @@ One run through all three stages, **Show → Reflect → Pass it on**, on real G
 **The app**
 - Open https://qwadratic.github.io/clipa/ in Chrome, then do a hard reload (Cmd+Shift+R).
 - Health check: https://apprentice.exe.xyz/health should show ok.
-- **Clean server memory, so the run starts with no maps from rehearsals.** On the VM: `sudo systemctl restart apprentice-api` (about 15 s). Skip this if nobody confirmed a map since the last deploy.
+- **Clear the stored maps, so the run starts with no maps from rehearsals.** Maps now survive a restart (`/var/lib/apprentice/maps.json`), so on the VM: `sudo rm -f /var/lib/apprentice/maps.json && sudo systemctl restart apprentice-api` (about 15 s). Skip this if nobody built or confirmed a map since the last clean. With no map anywhere, Reflect shows the synthetic demo map, tagged "Demo session (synthetic)".
 
 **Recording**
 - Use Cmd+Shift+5, then "Record Entire Screen", then Options, then Microphone: the built-in microphone.

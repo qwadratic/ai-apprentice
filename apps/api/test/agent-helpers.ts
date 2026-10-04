@@ -25,6 +25,8 @@ export async function start(t: TestContext, options: AgentOptions = {}, dir?: st
   const agent = createAgent({
     allowedOrigins: [ORIGIN], sessionsDir, log: () => {},
     elevenLabsApiKey: EL_KEY, elevenLabsAgentIdInterviewer: EL_AGENT,
+    // Work Maps in memory only, unless a test names a file: never the server's own maps file.
+    mapsFile: '',
     ...options,
   });
   t.after(() => agent.close());

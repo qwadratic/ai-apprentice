@@ -13,6 +13,11 @@ export type Audience = 'all' | ClientKind;
 /** macOS: how much of Clipa is out of the corner. */
 export type Presence = 'dot' | 'peek' | 'full';
 export type UiTarget = 'share' | 'start' | 'mode_tab' | 'board_gap' | 'teachback' | 'summary';
+/**
+ * Where the map on the board comes from: this session, an earlier session (the newest map the server kept), or the synthetic
+ * demo map. Reflect falls back to the last two when the session has no map and no screen of its own.
+ */
+export type MapOrigin = 'session' | 'earlier' | 'demo';
 
 /** A labelled place on a frame; box is [x, y, w, h] normalised 0..1 to that frame. */
 export interface Region { regionId: string; label: string; box: [number, number, number, number] | null; evidenceId: string | null }
@@ -53,7 +58,8 @@ export type Cue =
   | { type: 'ask'; questionId: string; text: string; topic: string; regions: Region[]; evidenceIds: string[] }
   | { type: 'point'; target: Target }
   | { type: 'context'; text: string }
-  | { type: 'map'; version: number; map: unknown; confirmed: boolean }
+  // `origin` is additive (v1.3): a face that does not know it shows the map as before.
+  | { type: 'map'; version: number; map: unknown; confirmed: boolean; origin?: MapOrigin }
   | { type: 'teachback'; version: number; text: string }
   | { type: 'warn'; guardrailId: string; text: string; regions: Region[]; evidenceIds: string[] }
   | { type: 'say'; text: string }

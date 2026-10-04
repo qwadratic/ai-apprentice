@@ -48,6 +48,8 @@ export interface WorkMapBoardProps {
   onCardSelect?: (card: { kind: 'step' | 'guardrail' | 'gap'; id: string }) => void;
   /** Label the whole board as synthetic (sample or simulated session). */
   synthetic?: boolean;
+  /** Where the map comes from: an earlier session or the synthetic demo map get a small tag; this session's own map none. */
+  origin?: 'session' | 'earlier' | 'demo';
   title?: string;
   /** Show the selected moment's still frame on the board (the placeholder seek). Default true. */
   inlineMoment?: boolean;
@@ -478,6 +480,8 @@ export function WorkMapBoard(props: WorkMapBoardProps): ReactNode {
             </span>
           )}
           {props.synthetic && <span className="wm-tag wm-tag--synthetic">Synthetic session</span>}
+          {props.origin === 'earlier' && <span className="wm-tag wm-tag--earlier" data-origin="earlier">Earlier session</span>}
+          {props.origin === 'demo' && <span className="wm-tag wm-tag--synthetic wm-tag--demo" data-origin="demo">Demo session (synthetic)</span>}
         </div>
         <dl className="wm-counts">
           <div className="wm-count">

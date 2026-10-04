@@ -3,7 +3,7 @@
 // state stays the in-browser brain's, and this one is the conductor's. Nothing secret is kept here.
 import type { ScreenObservation } from '@apprentice/contracts';
 import type { ConductorStatus } from './client.ts';
-import type { ClipaPose, Region, Target } from './protocol.ts';
+import type { ClipaPose, MapOrigin, Region, Target } from './protocol.ts';
 
 export interface ConductorLine {
   cueId: string;
@@ -28,6 +28,8 @@ export interface ConductorMapSnapshot {
   /** The conductor's generic map (steps, guardrails, gaps, teachBack, comments) as sent; read it with fromGenericMap. */
   map: unknown;
   confirmed: boolean;
+  /** Where the map comes from: this session (default), an earlier session, or the synthetic demo map. */
+  origin?: MapOrigin;
 }
 
 export interface ConductorState {

@@ -89,6 +89,7 @@
   letter-spacing: 0.04em; text-transform: uppercase;
 }
 .wm-tag--synthetic { background: var(--wm-text); color: var(--wm-surface); opacity: 0.82; }
+.wm-tag--earlier { border: 1px solid currentColor; color: var(--wm-text); opacity: 0.82; }
 
 .wm-counts { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .wm-count {

@@ -3,12 +3,16 @@
 // that hands over to the web). Pure apart from the injected clock, LLM call, id source and web link, so tests drive it
 // with a fake clock and fake tasks.
 import { BaselineProfileSelector, baselinePromptContext } from '../../../../packages/screen/baseline/profiles.ts';
+import { isRecord } from '../config.ts';
 import type { GenericQuestionOutput, GuardrailCheckOutput, MapEditOutput, MapSynthesisOutput, ProcessMatchOutput, ReplyOutput } from '../llm-tasks.ts';
 import type { TaskResult } from '../llm.ts';
+import { demoMap } from './demo-map.ts';
 import { GUIDE, NUDGES, OPEN_WEB, STAGE_CONFIRM, detectLanguage, stageAsked } from './lines.ts';
 import { applyEdits } from './map-edits.ts';
-import type { ConductorMap } from './map-edits.ts';
-import type { Activity, Audience, ClientEnvelope, ClientEvent, ClientKind, Cue, CueEnvelope, Mode, Persona, Presence, Region, SeenObservation, Target } from './protocol.ts';
+import type { ConductorMap, MapComment } from './map-edits.ts';
+import { mapTitle, storableMap } from './map-store.ts';
+import type { MapStore, StoredMap } from './map-store.ts';
+import type { Activity, Audience, ClientEnvelope, ClientEvent, ClientKind, Cue, CueEnvelope, MapOrigin, Mode, Persona, Presence, Region, SeenObservation, Target } from './protocol.ts';
 
 export const RULES = {
   /** Quiet this long after the last typing, talking or screen change is a pause. */
@@ -70,14 +74,51 @@ function sameScreen(a: SeenObservation, b: SeenObservation): boolean {
 
 export interface ConfirmedMap { sessionId: string; map: MapSynthesisOutput; confirmedAt: number }
 
-/** Confirmed maps, shared by all sessions of this server: Teach reads the expert's map. One team, one demo server. */
+/** The comments a stored map carries (voice edits keep them on the map), or none. */
+function commentsOf(map: unknown): MapComment[] {
+  const raw = isRecord(map) ? map.comments : undefined;
+  return Array.isArray(raw)
+    ? raw.filter((c): c is MapComment => isRecord(c) && typeof c.targetId === 'string' && typeof c.text === 'string' && typeof c.atMs === 'number').slice(-50)
+    : [];
+}
+
+/**
+ * Confirmed maps, shared by all sessions of this server: Teach reads the expert's map. One team, one demo server. It also
+ * keeps the last map built in any session, which Reflect shows when a session has none of its own. With a store, all of it
+ * is written to disk on every change and read back at start, so a deploy or a restart keeps what Clipa learned.
+ */
 export class MapRegistry {
   private readonly bySession = new Map<string, ConfirmedMap>();
   private latest: ConfirmedMap | null = null;
-  confirm(sessionId: string, map: MapSynthesisOutput, at: number): void {
-    const entry = { sessionId, map, confirmedAt: at };
-    this.bySession.set(sessionId, entry);
+  private built: StoredMap | null = null;
+  private readonly store: MapStore | null;
+  constructor(store: MapStore | null = null) {
+    this.store = store;
+    if (store === null) return;
+    // Oldest first, so the newest confirmed map is the latest again.
+    for (const e of [...store.loaded.confirmed].sort((a, b) => a.atMs - b.atMs)) this.remember({ sessionId: e.sessionId, map: e.map, confirmedAt: e.atMs });
+    this.built = store.loaded.lastBuilt;
+  }
+  private remember(entry: ConfirmedMap): void {
+    this.bySession.set(entry.sessionId, entry);
     this.latest = entry;
+  }
+  confirm(sessionId: string, map: MapSynthesisOutput, at: number): void {
+    this.remember({ sessionId, map, confirmedAt: at });
+    this.persist();
+  }
+  /** A session built (or edited) its own map: it becomes the last built map, confirmed or not. */
+  recordBuilt(sessionId: string, map: MapSynthesisOutput, at: number): void {
+    this.built = { sessionId, atMs: at, title: mapTitle(map), map: storableMap(map) };
+    this.persist();
+  }
+  /** The newest map any session built from its own screen and words, or null. */
+  lastBuilt(): StoredMap | null { return this.built; }
+  private persist(): void {
+    this.store?.save({
+      confirmed: [...this.bySession.values()].map((e) => ({ sessionId: e.sessionId, atMs: e.confirmedAt, title: mapTitle(e.map), map: storableMap(e.map) })),
+      lastBuilt: this.built,
+    });
   }
   /** The map of `from` when named and confirmed, else the most recently confirmed one. */
   find(from: string | null): ConfirmedMap | null {
@@ -187,8 +228,9 @@ export class Conductor {
   private mapPrefetch: Promise<void> | null = null;
   private freshMap = false;
 
-  private review: { phase: ReviewPhase; map: ConductorMap | null; version: number; gapIndex: number; awaiting: 'gap' | 'teachback' | null; answeredAt: number; unclearAsked: boolean; editFailed: boolean } =
-    { phase: 'idle', map: null, version: 0, gapIndex: 0, awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false };
+  /** `origin`: the map is this session's own, a copy of an earlier session's, or the demo map (Reflect's fallbacks). */
+  private review: { phase: ReviewPhase; map: ConductorMap | null; version: number; gapIndex: number; awaiting: 'gap' | 'teachback' | null; answeredAt: number; unclearAsked: boolean; editFailed: boolean; origin: MapOrigin } =
+    { phase: 'idle', map: null, version: 0, gapIndex: 0, awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false, origin: 'session' };
   private readonly voiceQueue: string[] = [];
 
   private readonly cues: CueEnvelope[] = [];
@@ -358,7 +400,7 @@ export class Conductor {
         if (e.client === 'macos') this.presence('peek');
         this.guide(this.review.map && e.client === 'web' ? 'talk_to_edit' : 'welcome', e.client);
         // A web app joining a session that already has a map shows it right away.
-        if (e.client === 'web' && this.review.map) this.emit({ type: 'map', version: this.review.version, map: this.review.map, confirmed: this.review.phase === 'confirmed' }, { for: 'web' });
+        if (e.client === 'web' && this.review.map) this.emit({ type: 'map', version: this.review.version, map: this.review.map, confirmed: this.review.phase === 'confirmed', origin: this.review.origin }, { for: 'web' });
         return;
       case 'off_record':
         if (e.on === this.offRecord) return;
@@ -643,7 +685,9 @@ export class Conductor {
 
   private onUi(action: 'confirm' | 'correct' | 'answer_gap' | 'ask_about' | 'finish', targetId: string | null, text: string | null): void {
     const map = this.review.map;
-    if (action === 'confirm' && map && this.review.phase === 'teachback') { this.confirmMap(); return; }
+    // A map from an earlier session or the demo map may be confirmed at once, before its open points: it is not news.
+    const confirmable = this.review.phase === 'teachback' || (this.review.phase === 'gaps' && this.review.origin !== 'session');
+    if (action === 'confirm' && map && confirmable) { this.confirmMap(); return; }
     if (action === 'correct' && map && text) { this.voiceQueue.push(text); void this.drainVoice(); return; }
     if (action === 'finish' && this.liveMode === 'review' && this.review.phase === 'gaps') { this.review.gapIndex = map?.gaps.length ?? 0; this.finishGaps(); return; }
     if (action === 'answer_gap' && map) {
@@ -912,14 +956,16 @@ export class Conductor {
   // queue behind it). A confirmed map stays as it is, as before.
   private prefetchMap(): void {
     const observations = this.genericObservations(40);
-    if (observations.length === 0 || this.mapPrefetch || this.review.phase === 'confirmed') return;
+    if (observations.length === 0 || this.mapPrefetch || this.ownConfirmed()) return;
     const provenance = this.provenanceSnapshot();
     this.thought('Putting your map together…');
     this.mapPrefetch = (async () => {
       const map = await this.run<MapSynthesisOutput>('map_synthesis', { observations, transcript: this.transcript(60, 600), correction: null, previousTeachBack: null });
-      if (map && !this.offRecord && this.review.phase !== 'confirmed') {
-        this.review = { phase: 'idle', map: { ...map, baselineProvenance: provenance, comments: [] }, version: this.review.version, gapIndex: 0, awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false };
+      if (map && !this.offRecord && !this.ownConfirmed()) {
+        const built: ConductorMap = { ...map, baselineProvenance: provenance, comments: [] };
+        this.review = { phase: 'idle', map: built, version: this.review.version, gapIndex: 0, awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false, origin: 'session' };
         this.freshMap = true;
+        this.deps.maps.recordBuilt(this.sessionId, built, this.deps.now());
       }
     })().catch(() => undefined).finally(() => { this.mapPrefetch = null; });
   }
@@ -945,20 +991,47 @@ export class Conductor {
       else this.readTeachBack();
       return;
     }
-    if (this.review.map) { this.publishMap(this.review.map, this.review.phase === 'confirmed', false); this.guide('talk_to_edit', 'web'); return; }
-    if (observations.length === 0) { this.guide('no_session_yet', 'web'); return; }
-    this.review = { phase: 'building', map: null, version: this.review.version, gapIndex: 0, awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false };
+    // A fallback copy gives way as soon as the session has a screen of its own: its own map is built instead.
+    const fallback = this.review.map !== null && this.review.origin !== 'session';
+    if (this.review.map && !(fallback && observations.length > 0)) { this.publishMap(this.review.map, this.review.phase === 'confirmed', false); this.guide('talk_to_edit', 'web'); return; }
+    if (observations.length === 0) { this.openFallbackMap(); return; }
+    this.review = { phase: 'building', map: null, version: this.review.version, gapIndex: 0, awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false, origin: 'session' };
     this.pose('think');
     this.guide('building', 'web');
     this.thought('Putting your map together…');
     const map = await this.run<MapSynthesisOutput>('map_synthesis', { observations, transcript: turns, correction: null, previousTeachBack: null });
     if (this.offRecord || this.liveMode !== 'review') return;
-    if (!map) { this.review.phase = 'idle'; this.quiet('could not build the map; try Review again'); this.pose('idle'); return; }
+    // The model could not build this session's map: Reflect still opens with one (the last built map or the demo map),
+    // labelled, and the next Review tries this session's own map again.
+    if (!map) { this.quiet('could not build this session\'s map; showing an earlier one'); this.openFallbackMap(); return; }
     this.publishMap({ ...map, baselineProvenance: provenance, comments: [] }, false);
     this.pose('listen');
     if (map.gaps.length > 0) { this.review.phase = 'gaps'; this.guide('gaps', 'web'); }
     else this.readTeachBack();
   }
+
+  /**
+   * Reflect always has a session to explore. Without a map of its own (no screen yet, or the model could not build one),
+   * the session gets a copy of the last map
+   * built in an earlier session (kept across restarts), else the synthetic demo map; the board labels where it comes from.
+   * Edits change this session's copy only, and a confirmation registers it like any confirmed map, so Pass it on works.
+   */
+  private openFallbackMap(): void {
+    const stored = this.deps.maps.lastBuilt();
+    // The same session id: this session's own map, back after a restart.
+    const origin: MapOrigin = stored === null ? 'demo' : stored.sessionId === this.sessionId ? 'session' : 'earlier';
+    const source = stored === null ? demoMap() : structuredClone(stored.map);
+    this.freshMap = false;
+    this.review = { phase: 'gaps', map: null, version: this.review.version, gapIndex: 0, awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false, origin };
+    this.publishMap({ ...source, processes: source.processes ?? [], comments: commentsOf(source), baselineProvenance: this.provenanceSnapshot() }, false);
+    this.pose('listen');
+    if (origin === 'demo') this.emit({ type: 'context', text: '[map] The map on the board is a synthetic demo map, not from this session: payment terms on an invoice email and a prepaid cost spread by quarter. Say so if asked; any change the person asks for is applied by the app.' });
+    if (origin === 'earlier') this.emit({ type: 'context', text: '[map] The map on the board comes from an earlier session, not from this one. Any change the person asks for is applied by the app to this session\'s copy.' });
+    this.guide(origin === 'demo' ? 'demo_map' : origin === 'earlier' ? 'earlier_map' : 'talk_to_edit', 'web');
+  }
+
+  /** This session confirmed a map of its own (a confirmed fallback copy does not stop its own map from being built). */
+  private ownConfirmed(): boolean { return this.review.phase === 'confirmed' && this.review.origin === 'session'; }
 
   private provenanceSnapshot(): NonNullable<MapSynthesisOutput['baselineProvenance']> {
     return structuredClone(this.baselineProvenance);
@@ -968,7 +1041,9 @@ export class Conductor {
     map = { ...map, baselineProvenance: map.baselineProvenance ?? this.provenanceSnapshot() };
     this.review.map = map;
     if (bump) this.review.version++;
-    this.emit({ type: 'map', version: this.review.version, map, confirmed });
+    // A new or edited map of the session's own is the last built one; an earlier or demo copy is never stored as built.
+    if (bump && this.review.origin === 'session') this.deps.maps.recordBuilt(this.sessionId, map, this.deps.now());
+    this.emit({ type: 'map', version: this.review.version, map, confirmed, origin: this.review.origin });
   }
 
   private askGap(): void {
@@ -986,7 +1061,8 @@ export class Conductor {
 
   /** After the gaps: rebuild the map when an answer could not be applied by voice, then read the teach-back. */
   private finishGaps(): void {
-    if (this.review.editFailed) { void this.resynthesize(null); return; }
+    // Rebuilding needs the session's own screen: a map without it (an earlier or demo copy) is read back as it is.
+    if (this.review.editFailed && this.genericObservations(1).length > 0) { void this.resynthesize(null); return; }
     this.readTeachBack();
   }
 
@@ -1071,7 +1147,7 @@ export class Conductor {
     this.review.phase = 'confirmed';
     this.review.awaiting = null;
     this.deps.maps.confirm(this.sessionId, map, this.deps.now());
-    this.emit({ type: 'map', version: this.review.version, map, confirmed: true });
+    this.emit({ type: 'map', version: this.review.version, map, confirmed: true, origin: this.review.origin });
     this.pose('celebrate');
     this.guide('handoff', 'web');
   }
