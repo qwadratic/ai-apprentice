@@ -1,2 +1,9 @@
 .DS_Store
 .claude/worktrees/
+
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+*.tsbuildinfo

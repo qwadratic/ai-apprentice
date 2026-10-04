@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@kigulx'
 created_date: '2026-10-03 21:15'
-updated_date: '2026-10-03 22:29'
+updated_date: '2026-10-03 23:54'
 labels:
   - stream-a
   - infra
@@ -40,5 +40,11 @@ Owner: Stream A orchestrator. The three worker chats cannot implement compatible
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-Inspect current A/B requirements and the TASK-3.1 contract proposal. Agree root setup and app/API entry points with B. Prepare the smallest web skeleton and shared contract on task-2.1-web-foundation, verify package checks, then publish an exact foundation commit for dependent branches. Main receives Backlog only.
+Publish the accepted doc-7 contracts and compatible web/API scaffold as a small PR on current main. Reconcile existing B workspaces without changing their sources. Follow with the agreed TS7 root configuration, real screen/agent route composition and shell integration; publish exact SHAs for dependent workers.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Publication branch codex/task-2.1-foundation-pr is based on main f315f54 and carries source code commits 35b5528 + fda1da99b83eb96851930c1aa7121192210379cd. Coordinator fixed the current-main lockfile, separated independently checked B lab compiler context, and used direct Node22 TypeScript runtime for API to avoid source overwrite on emission. Reproduced Node22.22 typechecks, 78 tests (55 B, 20 contracts, 3 API), and web/API/contracts build. Root TS7 consolidation and real integration remain In Progress; public lab is not replaced.
+<!-- SECTION:NOTES:END -->

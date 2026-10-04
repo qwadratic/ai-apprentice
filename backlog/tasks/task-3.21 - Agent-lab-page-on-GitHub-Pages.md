@@ -1,11 +1,11 @@
 ---
 id: TASK-3.21
 title: Agent lab page on GitHub Pages
-status: In Progress
+status: Done
 assignee:
   - '@qwadratic'
 created_date: '2026-10-03 22:04'
-updated_date: '2026-10-03 23:10'
+updated_date: '2026-10-04 00:51'
 labels:
   - stream-b
   - ux
@@ -26,10 +26,10 @@ Fast clickable preview of stream B before A's skeleton exists: a static page wit
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 https://qwadratic.github.io/ai-apprentice/ serves the lab page after a push to main (needs Pages source = GitHub Actions)
-- [ ] #2 No key or token is in the page or the repo; the page gets a signed URL from the VM API, or takes ?agent=<public agent id> for testing
-- [ ] #3 Clipa reflects the session state: idle, listening, speaking, thinking, off
-- [ ] #4 Mock playback sends contextual updates and the log shows every event sent and received
+- [x] #1 https://qwadratic.github.io/ai-apprentice/ serves the lab page after a push to main (needs Pages source = GitHub Actions)
+- [x] #2 No key or token is in the page or the repo; the page gets a signed URL from the VM API, or takes ?agent=<public agent id> for testing
+- [x] #3 Clipa reflects the session state: idle, listening, speaking, thinking, off
+- [x] #4 Mock playback sends contextual updates and the log shows every event sent and received
 <!-- AC:END -->
 
 ## Definition of Done
@@ -44,3 +44,9 @@ Fast clickable preview of stream B before A's skeleton exists: a static page wit
 <!-- SECTION:NOTES:BEGIN -->
 PR #6 merged (auto-end 10 min, hidden-tab end, audio disclosure, harness label, ?api allowlist, ?agent removed). Live agent patched by the coordinator with Ivan's approval at ~01:35: prompt, first_message, language and voice overrides false, text_only true, max_duration_seconds 600, auth enabled; signed-url still 200 from the Pages origin.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Lab live on Pages (now at /lab/ behind the launch page), signed URL from the VM, Clipa states, mock playback with contextual updates and a full event log.
+<!-- SECTION:FINAL_SUMMARY:END -->

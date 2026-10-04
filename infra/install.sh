@@ -4,8 +4,9 @@
 # (/opt/apprentice/bin/apprentice-deploy). The services themselves run from the
 # deployed checkout /opt/apprentice/repo, which deploy.sh moves; on the first
 # install that checkout is set to the commit this installer comes from.
-# Then it builds the checkout and (re)starts runner and API. The deploy timer
-# is installed but its enabled/disabled state is left as it is.
+# Then it builds the checkout and (re)starts runner, API and the deploy webhook
+# (ops) and arms the path unit that turns webhook requests into deploys. The
+# deploy timer is installed but its enabled/disabled state is left as it is.
 set -euo pipefail
 [ "$(id -u)" = 0 ] || { echo "run with sudo" >&2; exit 1; }
 
@@ -13,7 +14,7 @@ SRC="$(cd "$(dirname "$0")" && pwd)"
 CLONE_SHA="$(git -C "$SRC" rev-parse HEAD)"
 REPO=/opt/apprentice/repo
 as_app() { sudo -u apprentice -H "$@"; }
-UNITS=(apprentice-runner.service apprentice-api.service apprentice-deploy.service apprentice-deploy.timer)
+UNITS=(apprentice-runner.service apprentice-api.service apprentice-ops.service apprentice-deploy.service apprentice-deploy.timer apprentice-deploy-request.service apprentice-deploy-request.path)
 
 id apprentice >/dev/null 2>&1 || useradd --system --create-home --home-dir /home/apprentice --shell /bin/bash apprentice
 install -d -o root -g root -m 755 /opt/apprentice
@@ -36,6 +37,7 @@ CLAUDE_CODE_OAUTH_TOKEN=
 ANTHROPIC_API_KEY=
 RUNNER_TOKEN=$(openssl rand -hex 32)
 API_TOKEN=$(openssl rand -hex 32)
+DEPLOY_WEBHOOK_SECRET=$(openssl rand -hex 32)
 ALLOWED_ORIGINS=
 DATABASE_PATH=/var/lib/apprentice/db/apprentice.sqlite
 MEDIA_DIR=/var/lib/apprentice/media
@@ -47,7 +49,7 @@ DEBUG_ENDPOINTS=
 EOF
   )
 fi
-for v in ELEVENLABS_AGENT_ID_INTERVIEWER ELEVENLABS_AGENT_ID_TUTOR; do
+for v in ELEVENLABS_AGENT_ID_INTERVIEWER ELEVENLABS_AGENT_ID_TUTOR DEPLOY_WEBHOOK_SECRET; do
   grep -q "^$v=" /etc/apprentice/env || echo "$v=" >> /etc/apprentice/env
 done
 chown root:root /etc/apprentice/env
@@ -77,8 +79,9 @@ fi
 as_app /opt/apprentice/bin/apprentice-deploy --build-only
 
 systemctl daemon-reload
-systemctl enable --quiet apprentice-runner.service apprentice-api.service
-systemctl restart apprentice-runner.service apprentice-api.service
+systemctl enable --quiet apprentice-runner.service apprentice-api.service apprentice-ops.service apprentice-deploy-request.path
+systemctl restart apprentice-runner.service apprentice-api.service apprentice-ops.service
+systemctl start apprentice-deploy-request.path
 # Before this layout, infra/ was copied to /opt/apprentice/infra.
 rm -rf /opt/apprentice/infra
 echo "installed from ${CLONE_SHA:0:12}; serving $(as_app git -C "$REPO" rev-parse --short=12 HEAD); deploy timer: $(systemctl is-enabled apprentice-deploy.timer 2>/dev/null || true)"

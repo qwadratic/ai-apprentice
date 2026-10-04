@@ -26,6 +26,9 @@ const HOST = process.env.HOST || '0.0.0.0';
 const PORT = Number(process.env.PORT || 8000);
 const RUNNER_URL = new URL(process.env.RUNNER_URL || 'http://127.0.0.1:8787');
 const RUNNER_TOKEN = process.env.RUNNER_TOKEN || '';
+// The deploy webhook service; /ops/* is forwarded there unchanged.
+const OPS_URL = new URL(process.env.OPS_URL || 'http://127.0.0.1:8788');
+const OPS_MAX_BODY = 4096;
 const API_TOKEN = process.env.API_TOKEN || '';
 const GIT_SHA = process.env.GIT_SHA || 'unknown'; // the code this process runs
 const DEPLOYED_SHA_FILE = process.env.DEPLOYED_SHA_FILE || '/var/lib/apprentice/deployed-sha'; // written by deploy.sh
@@ -442,6 +445,32 @@ async function deployedSha(): Promise<string | null> {
   }
 }
 
+// Forwards one /ops/* request to the ops service with its raw body and the
+// signature header, adding the client IP for its rate limit.
+function opsRequest(req: IncomingMessage, body: Buffer | null): Promise<{ status: number; body: Buffer }> {
+  return new Promise((resolve, reject) => {
+    const headers: OutgoingHttpHeaders = { 'x-forwarded-for': clientIp(req) };
+    const sig = req.headers['x-deploy-signature'];
+    if (typeof sig === 'string') headers['x-deploy-signature'] = sig;
+    if (body) {
+      headers['content-type'] = req.headers['content-type'] || 'application/json';
+      headers['content-length'] = body.length;
+    }
+    const r = http.request(
+      { host: OPS_URL.hostname, port: OPS_URL.port, method: req.method, path: req.url, headers, timeout: 60_000 },
+      (rr) => {
+        const chunks: Buffer[] = [];
+        rr.on('data', (c: Buffer) => chunks.push(c));
+        rr.on('end', () => resolve({ status: rr.statusCode || 502, body: Buffer.concat(chunks) }));
+        rr.on('error', reject);
+      },
+    );
+    r.on('timeout', () => r.destroy(new Error('timeout')));
+    r.on('error', reject);
+    r.end(body ?? undefined);
+  });
+}
+
 async function runnerUp(rid: string): Promise<'up' | 'down'> {
   try {
     const r = await runnerRequest('GET', '/health', null, rid);
@@ -741,6 +770,37 @@ const server = http.createServer(async (req, res) => {
         if (i < 5) await new Promise((r) => setTimeout(r, 1000));
       }
       res.end();
+      return;
+    }
+    if (route.startsWith('/ops/')) {
+      // Deploy webhook and its status: authenticated by the ops service (HMAC).
+      let body: Buffer | null = null;
+      if (req.method === 'POST') {
+        try {
+          body = await readBody(req, OPS_MAX_BODY);
+        } catch (e) {
+          if (e instanceof TooLarge) {
+            status = 413;
+            resBytes = send(res, 413, { ok: false, error: 'body_too_large', max_bytes: OPS_MAX_BODY });
+            res.on('finish', () => req.destroy());
+            return;
+          }
+          throw e;
+        }
+        meta.req_bytes = body.length;
+      } else {
+        req.resume();
+      }
+      try {
+        const r = await opsRequest(req, body);
+        status = r.status;
+        res.writeHead(r.status, { 'Content-Type': 'application/json', 'Content-Length': r.body.length, 'Cache-Control': 'no-store' });
+        res.end(r.body);
+        resBytes = r.body.length;
+      } catch {
+        status = 502;
+        resBytes = send(res, 502, { ok: false, error: 'ops_unreachable' });
+      }
       return;
     }
     if (route.startsWith('/runner/')) {

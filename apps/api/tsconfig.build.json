@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "dist",
+    "allowJs": true,
+    "checkJs": false
+  },
+  "include": [
+    "server.ts",
+    "src/**/*.ts",
+    "screen/**/*.ts",
+    "agent/**/*.ts",
+    "screen/**/*.mjs",
+    "agent/**/*.mjs"
+  ]
+}
