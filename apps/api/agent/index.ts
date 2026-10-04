@@ -6,6 +6,7 @@ import { resolveConfig } from './config.ts';
 import type { AgentOptions } from './config.ts';
 import { registerAdminRoutes } from './admin.ts';
 import { createElevenLabsClient } from './elevenlabs.ts';
+import { registerLlmRoutes } from './llm.ts';
 import { registerAgentRoutes } from './routes.ts';
 import type { AgentRuntime } from './routes.ts';
 import { createMaintenance } from './rotation.ts';
@@ -34,7 +35,7 @@ export function createAgent(options: AgentOptions = {}): Agent {
   const maintenance = createMaintenance(config, files);
   const runtime: AgentRuntime = { config, store, files, eleven: createElevenLabsClient(config, files), maintenance, background: new Set() };
   return {
-    module: { name: 'agent', mount: (app) => { registerAgentRoutes(app, runtime); registerAdminRoutes(app, runtime); maintenance.start(); } },
+    module: { name: 'agent', mount: (app) => { registerAgentRoutes(app, runtime); registerLlmRoutes(app, runtime); registerAdminRoutes(app, runtime); maintenance.start(); } },
     maintain: () => maintenance.run(),
     close: () => { maintenance.stop(); },
     authorize: async (request, sessionId) => store.check(request.headers.get('authorization'), sessionId).ok,

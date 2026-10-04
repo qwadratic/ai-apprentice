@@ -188,6 +188,48 @@ test('bounded updates report cursor expiry instead of silently skipping observat
   assert.throws(() => hub.updates(session, 1, 0), {code: 'cursor_expired'});
 });
 
+test('idle started and paused sessions release capacity while recently active sessions survive', () => {
+  let now = 0;
+  const stopped: string[] = [];
+  const evidence = createMemoryEvidenceStore();
+  const hub = new ScreenSessionHub(context => ({
+    start() {}, pause() {}, resume() {}, stop() { stopped.push(context.sessionId); },
+    snapshot: () => ({state: 'capturing', sessionId: context.sessionId, generation: 1, active: 0, queued: 0, sequence: 0}),
+    offer: () => 'accepted', evidence,
+  }), parseStatus, () => now, 2, 2, 100);
+  const started = hub.start('started', 0, 1);
+  const paused = hub.start('paused', 0, 1);
+  const pausedRecord = hub.authenticate('paused', paused.sessionToken);
+  hub.lifecycle(pausedRecord, 1, 'pause');
+
+  now = 60;
+  hub.authenticate('started', started.sessionToken);
+  now = 100;
+  const replacement = hub.start('replacement', 100, 1);
+
+  assert.deepEqual(stopped, ['paused']);
+  assert.equal(hub.authenticate('started', started.sessionToken).sessionId, 'started');
+  assert.equal(hub.authenticate('replacement', replacement.sessionToken).sessionId, 'replacement');
+  assert.throws(() => hub.authenticate('paused', paused.sessionToken), {code: 'session_not_found'});
+});
+
+test('an abandoned capturing session expires on access and can be replaced at capacity', () => {
+  let now = 0;
+  let stops = 0;
+  const evidence = createMemoryEvidenceStore();
+  const hub = new ScreenSessionHub(context => ({
+    start() {}, pause() {}, resume() {}, stop() { stops++; },
+    snapshot: () => ({state: 'capturing', sessionId: context.sessionId, generation: 1, active: 0, queued: 0, sequence: 0}),
+    offer: () => 'accepted', evidence,
+  }), parseStatus, () => now, 1, 2, 50);
+  const abandoned = hub.start('abandoned', 0, 1);
+
+  now = 50;
+  assert.throws(() => hub.authenticate('abandoned', abandoned.sessionToken), {code: 'session_not_found'});
+  assert.equal(stops, 1);
+  assert.equal(hub.start('replacement', 50, 1).sessionId, 'replacement');
+});
+
 test('mount exposes start, frame, poll, lifecycle and scoped Evidence routes', () => {
   const routes: string[] = []; const runner: VisionRunner = {async vision() { throw new Error('unused'); }};
   mount({}, {register: (_app, route) => routes.push(`${route.method} ${route.path}`), hub: makeHub(runner), allowOrigin: () => true});

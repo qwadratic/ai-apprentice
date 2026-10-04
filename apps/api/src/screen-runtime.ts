@@ -2,7 +2,7 @@ import path from 'node:path';
 import {DatabaseSync} from 'node:sqlite';
 import {parseScreenObservation, parseScreenStatus} from '@apprentice/contracts';
 import {ScreenSessionHub, createFileEvidenceStore, createRunnerClient, createScreenService} from '../screen/index.ts';
-import type {EvidenceMetadataRepository, ScreenEvidenceRecord, VisionRunner} from '../screen/index.ts';
+import type {EvidenceMetadataRepository, ScreenEvidenceRecord, ScreenEvidenceStore, VisionRunner} from '../screen/index.ts';
 
 export interface ScreenRuntimeOptions {
   readonly databasePath: string;
@@ -10,7 +10,7 @@ export interface ScreenRuntimeOptions {
   readonly runner?: VisionRunner;
   readonly env?: Readonly<Record<string, string | undefined>>;
 }
-export interface ScreenRuntime { readonly hub: ScreenSessionHub; close(): void }
+export interface ScreenRuntime { readonly hub: ScreenSessionHub; readonly evidence: ScreenEvidenceStore; close(): void }
 
 export function createScreenRuntime(options: ScreenRuntimeOptions): ScreenRuntime {
   assertAbsolutePath('DATABASE_PATH', options.databasePath);
@@ -22,7 +22,7 @@ export function createScreenRuntime(options: ScreenRuntimeOptions): ScreenRuntim
   const hub = new ScreenSessionHub(({publish, onEvent}) => createScreenService({
     runner, evidence, publish, onEvent, parseObservation: parseScreenObservation,
   }), parseScreenStatus);
-  return {hub, close: () => database.close()};
+  return {hub, evidence, close: () => database.close()};
 }
 
 export function createSqliteEvidenceMetadata(database: DatabaseSync): EvidenceMetadataRepository {

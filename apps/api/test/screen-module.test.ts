@@ -81,6 +81,34 @@ test('screen module binds agent auth, hides hub credentials and persists Evidenc
   assert.deepEqual(Buffer.from(await asset.arrayBuffer()), png);
 });
 
+
+test('persisted Evidence remains authorized after runtime restart without a capture session', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'screen-restart-'));
+  const options = {databasePath: path.join(root, 'screen.sqlite'), mediaDir: path.join(root, 'media')};
+  const first = createScreenRuntime(options);
+  const saved = await first.evidence.save({sessionId: 'saved-session', frameId: 'saved-frame',
+    timestampMs: 1, processed: true, mediaType: 'image/png', bytes: png}, {signal: new AbortController().signal});
+  first.close();
+  const restarted = createScreenRuntime(options);
+  t.after(async () => { restarted.close(); await rm(root, {recursive: true, force: true}); });
+  const app = await createApi({allowedOrigins: [origin], modules: [createScreenModule({
+    allowedOrigins: [origin], hub: restarted.hub, evidence: restarted.evidence,
+    authorize: (request, session) => request.headers.get('authorization') === `Bearer ${bearer}` &&
+      (session === null || session === 'saved-session' || session === 'other-session'),
+  })]});
+  const server = app.listen(0, '127.0.0.1'); t.after(() => close(server));
+  const base = await serverUrl(server);
+  const headers = {authorization: `Bearer ${bearer}`};
+  const url = `${base}/screen/sessions/saved-session/evidence/${saved.id}`;
+  assert.equal((await fetch(url)).status, 401);
+  assert.equal((await fetch(url, {headers: {...headers, origin: 'https://foreign.test'}})).status, 403);
+  const metadata = await fetch(url, {headers}); assert.equal(metadata.status, 200);
+  const asset = await fetch(`${url}/asset`, {headers}); assert.equal(asset.status, 200);
+  assert.deepEqual(Buffer.from(await asset.arrayBuffer()), png);
+  assert.equal((await fetch(url.replace('/saved-session/', '/other-session/'), {headers})).status, 403);
+  assert.equal((await fetch(`${url.replace('/saved-session/', '/other-session/')}/asset`, {headers})).status, 403);
+});
+
 test('environment-backed screen module fails closed without storage configuration', async () => {
   const module = createScreenModule({allowedOrigins: [origin], authorize: async () => true, env: {}});
   await assert.rejects(createApi({modules: [module]}), /DATABASE_PATH is required/);
