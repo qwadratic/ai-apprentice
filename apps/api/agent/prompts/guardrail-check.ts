@@ -18,7 +18,8 @@ export const system = [
   'Output fields:',
   '- status: warn, clear or unknown.',
   '- guardrailId: the id of the rule that decided it, taken only from the input; null for clear when no rule applies.',
-  '- message: for warn, what the tutor says, at most 30 words: say that the expert would stop here and ask the new hire why they think so, without giving the answer.',
+  '- message: for warn, what the tutor says: one line of at most 20 words. First the rule\'s required action as a plain instruction, then its scope',
+  '  or the expert\'s reason as a short clause (the shape: "Add X. For Y, Z won\'t do."). No question, no long quote.',
   '  For unknown, one short sentence about what is not visible. Null for clear. Write it in the given language; English when language is null.',
   '- regionIds: up to 4 ids of the regions on the latest observation that the message points at, taken only from the input; empty if none fit.',
 ].join('\n');
