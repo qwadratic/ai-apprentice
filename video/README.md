@@ -110,6 +110,18 @@ npm run render -- Sample --script scripts/tech.json --out out/clipa-tech.mp4
 bash capture/finalize.sh out/clipa-demo.mp4 ../apps/web/public/videos/clipa-demo.mp4
 ```
 
+### Voice-over
+
+`capture/voiceover.mjs` puts a voice-over on a finished video. `scripts/demo-voiceover.json` lists the lines (`id`, `voice`: `narrator`, `clipa`, `expert` or `newhire`, `text`, `atSec` on the video, `maxSec` until the next line). The audio comes from the Clipa API, which runs ElevenLabs TTS on the server for whitelisted lines only (`GET /api/agent/voiceover/<id>`), because the key stays there. Run it from the repo root:
+
+```sh
+node video/capture/voiceover.mjs --base https://apprentice.exe.xyz        # overwrites the script's "video"
+node video/capture/voiceover.mjs --base https://apprentice.exe.xyz --out /tmp/demo-vo.mp4
+node video/capture/voiceover.mjs --fake --script my-test.json --out /tmp/t.mp4   # offline: tones instead of speech
+```
+
+Each line is downloaded once with curl (it follows `HTTPS_PROXY`) to `assets/voiceover/<id>.mp3` (git-ignored); a changed text or `--refresh` fetches it again. A line starts at `atSec`, or 0.15 s after the previous line if that one is still playing; the script prints a timing table and warns when a line starts more than 1.5 s late, is longer than its `maxSec`, or runs past the end of the video. The clips are mixed into one track, normalised to about -16 LUFS and padded with silence to the video length; the picture is copied as is and the audio is AAC 160k with faststart. Needs ffmpeg and ffprobe 4.4 or newer on PATH (unlike the renders, which use Remotion's bundled ffmpeg).
+
 `recorder/journey.ts` simulates only what headless Chrome cannot do: it posts the screen observations the vision step would produce and the spoken answers as transcript text, and it blocks the voice signed-URL request so no voice conversation opens. Everything Clipa says comes from the live API; the take writes it to `assets/recordings/journey.cues.json`. The take opens real sessions and, at the end of Reflect, confirms a synthetic map in the API's memory. `NODE_USE_ENV_PROXY=1` makes Node's fetch use `HTTPS_PROXY`; it is only needed behind a proxy.
 
 ## Browser and downloads
