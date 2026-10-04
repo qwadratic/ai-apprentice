@@ -53,6 +53,7 @@ final class ClipaController {
     var captureGeneration = 0
     var screenState = "off"
     var voiceRetries = 0
+    var voiceProblemShown = false
     var endTimeout: Task<Void, Never>?
     var screenChain: Task<Void, Never>?
     /// Incremented on every start and end, so a slow start of an earlier stage cannot take over a later one.
@@ -164,6 +165,7 @@ final class ClipaController {
         stage = .starting(persona)
         offTheRecord = false
         voiceRetries = 0
+        voiceProblemShown = false
         resetFace()
         overlay.setDimmed(false)
         overlay.setPresence(.peek)
@@ -403,8 +405,9 @@ final class ClipaController {
         do {
             let url = try await api.signedVoiceURL(role: persona.voiceRole, token: session.token)
             guard isLive, !offTheRecord else { return }
+            voice.allowEchoCancellation = config.echoCancellation
             voice.connect(url: url, role: persona.voiceRole, microphone: microphone)
-            log.write("voice_connect", ["role": persona.voiceRole, "microphone": microphone])
+            log.write("voice_connect", ["role": persona.voiceRole, "microphone": microphone, "echo_cancellation_allowed": config.echoCancellation])
         } catch {
             log.write("voice_error", ["error": String(describing: error)])
             overlay.say("Voice is unavailable (\(error)); I'll show my lines here.", warning: true)
@@ -417,6 +420,12 @@ final class ClipaController {
         menuBar?.refresh()
         if state == .live {
             voiceRetries = 0
+            // Live but silent: say so once, so nobody waits for a voice that cannot play.
+            if !voice.audioProblem.isEmpty, !voiceProblemShown {
+                voiceProblemShown = true
+                overlay.say("I can't play sound on this Mac (\(voice.audioProblem)). My lines stay in this bubble.", warning: true)
+                overlay.clearLine(after: 10)
+            }
             // Screen context that arrived before the conversation was up.
             for text in pendingContext { voice.sendContext(text) }
             pendingContext.removeAll()

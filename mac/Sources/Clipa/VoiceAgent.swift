@@ -8,7 +8,7 @@ import Foundation
 /// - Clipa's lines go in as `user_message` "[ASK] text" (the agents say what follows [ASK] verbatim), screen context as
 ///   `contextual_update`.
 /// The signed URL is a secret: it is never logged, and connection errors are reported by code only.
-/// With voice processing (echo cancellation) on, the microphone stays open while Clipa speaks; without it, the
+/// With voice processing (echo cancellation, opt-in) on, the microphone stays open while Clipa speaks; without it, the
 /// microphone sends silence while she speaks, so she never hears herself.
 @MainActor
 final class VoiceAgent {
@@ -24,6 +24,12 @@ final class VoiceAgent {
     private(set) var personTalking = false
     /// Agent audio events received in this conversation.
     private(set) var audioChunks = 0
+    /// On: try macOS voice processing first. Off: the plain engine; the microphone is muted while Clipa speaks.
+    var allowEchoCancellation = false
+    /// Why Clipa cannot be heard on this Mac (empty when playback works). Shown in the menu and once in the bubble.
+    private(set) var audioProblem = ""
+    /// Playback works, but without echo cancellation, and why.
+    private(set) var audioNote = ""
 
     var onAgentSpeaking: ((Bool) -> Void)?
     var onPersonTalking: ((Bool) -> Void)?
@@ -46,6 +52,11 @@ final class VoiceAgent {
     private var scheduled = 0
     private var ignoreAudioUpTo = -1
     private var speakingOff: Task<Void, Never>?
+    private var outputRate: Double = 16000
+    private var inputRate: Double = 16000
+    private var outputCheck = 0
+    private var outputCheckPlayed = false
+    private var formatProblem = ""
 
     private var vadHighAt: TimeInterval = 0
     private var vadStartedAt: TimeInterval = 0
@@ -190,8 +201,9 @@ final class VoiceAgent {
             let meta = json["conversation_initiation_metadata_event"] as? [String: Any]
             let output = Self.sampleRate(meta?["agent_output_audio_format"] as? String)
             let input = Self.sampleRate(meta?["user_input_audio_format"] as? String)
+            formatProblem = output == nil ? "unsupported agent audio format" : ""
             if audioOutput { startAudio(outputRate: output ?? 16000, inputRate: input ?? 16000) }
-            setState(.live, output == nil ? "unsupported agent audio format" : "")
+            setState(.live, audioDetail)
         case "audio":
             guard let event = json["audio_event"] as? [String: Any],
                   let encoded = event["audio_base_64"] as? String,
@@ -226,6 +238,10 @@ final class VoiceAgent {
         }
     }
 
+    static func joined(_ parts: String...) -> String {
+        parts.filter { !$0.isEmpty }.joined(separator: "; ")
+    }
+
     /// "pcm_16000" -> 16000; nil for formats this client does not play (ulaw_8000).
     static func sampleRate(_ format: String?) -> Double? {
         guard let format, format.hasPrefix("pcm_"), let rate = Double(format.dropFirst(4)), rate > 0 else { return nil }
@@ -234,22 +250,46 @@ final class VoiceAgent {
 
     // MARK: - Audio
 
+    /// Voice processing (echo cancellation) first. Where it cannot start, or starts but plays nothing (checked with a
+    /// short silent buffer), the plain engine takes over and the microphone is muted while Clipa speaks.
     private func startAudio(outputRate: Double, inputRate: Double) {
+        self.outputRate = outputRate
+        self.inputRate = inputRate
+        audioProblem = ""
+        audioNote = ""
+        if microphone && allowEchoCancellation, startEngine(voiceProcessing: true) {
+            checkOutput()
+            return
+        }
+        let failedWithVoiceProcessing = audioProblem
+        if startEngine(voiceProcessing: false) {
+            audioProblem = ""
+            if !failedWithVoiceProcessing.isEmpty { audioNote = "echo cancellation off: \(failedWithVoiceProcessing)" }
+        }
+    }
+
+    private var audioDetail: String { Self.joined(formatProblem, audioProblem, audioNote) }
+
+    /// Builds and starts one engine. False (with `audioProblem` set) when it cannot start.
+    private func startEngine(voiceProcessing: Bool) -> Bool {
         stopAudio()
         let engine = AVAudioEngine()
-        var aec = false
-        if microphone {
+        if voiceProcessing {
             do {
                 try engine.inputNode.setVoiceProcessingEnabled(true)
-                aec = true
             } catch {
-                aec = false
+                audioProblem = "voice processing unavailable (code \((error as NSError).code))"
+                return false
             }
         }
-        echoCancellation = aec
+        echoCancellation = voiceProcessing
         let player = AVAudioPlayerNode()
         engine.attach(player)
-        guard let playFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: outputRate, channels: 1, interleaved: false) else { return }
+        guard let playFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: outputRate, channels: 1, interleaved: false) else {
+            audioProblem = "no playback format"
+            echoCancellation = false
+            return false
+        }
         engine.connect(player, to: engine.mainMixerNode, format: playFormat)
 
         if microphone, let target = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: inputRate, channels: 1, interleaved: true) {
@@ -267,20 +307,49 @@ final class VoiceAgent {
         do {
             try engine.start()
         } catch {
-            detail = "audio engine failed (code \((error as NSError).code))"
+            audioProblem = "audio engine failed (code \((error as NSError).code))"
             if tapInstalled { engine.inputNode.removeTap(onBus: 0) }
             tapInstalled = false
             pipe.clear()
-            return
+            echoCancellation = false
+            return false
         }
         player.play()
         self.engine = engine
         self.player = player
         self.playFormat = playFormat
+        return true
+    }
+
+    /// Plays 0.2 s of silence through the voice-processing engine. If the output never reports it played, that engine
+    /// is silent on this Mac: the plain engine replaces it.
+    private func checkOutput() {
+        guard let player, let playFormat,
+              let silence = AVAudioPCMBuffer(pcmFormat: playFormat, frameCapacity: AVAudioFrameCount(playFormat.sampleRate * 0.2)),
+              let channel = silence.floatChannelData?[0] else { return }
+        silence.frameLength = silence.frameCapacity
+        channel.update(repeating: 0, count: Int(silence.frameLength))
+        outputCheck += 1
+        let check = outputCheck
+        outputCheckPlayed = false
+        player.scheduleBuffer(silence, completionCallbackType: .dataPlayedBack, completionHandler: Self.playedBlock { [weak self] in
+            guard let self, self.outputCheck == check else { return }
+            self.outputCheckPlayed = true
+        })
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            guard let self, self.outputCheck == check, self.echoCancellation, !self.outputCheckPlayed, self.socket != nil else { return }
+            if self.startEngine(voiceProcessing: false) {
+                self.audioProblem = ""
+                self.audioNote = "echo cancellation off: it played nothing"
+            }
+            self.setState(self.state, self.audioDetail)
+        }
     }
 
     private func stopAudio() {
         playGeneration += 1
+        outputCheck += 1
         scheduled = 0
         speakingOff?.cancel()
         speakingOff = nil
