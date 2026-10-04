@@ -98,9 +98,13 @@ const main = async (): Promise<void> => {
   const composition = await selectComposition({ serveUrl, id, inputProps, ...browserOptions });
   const missing = missingAssets(composition.props);
   if (missing.length > 0) {
-    console.error(
-      `Missing file(s) under assets/: ${missing.join(', ')}\nRecord them first, e.g. "npm run record:sample", or fix the script.`,
-    );
+    const hints = missing.map((file) => {
+      const walkthrough = /^recordings\/(.+)\.mp4$/.exec(file)?.[1];
+      return walkthrough && existsSync(path.join(root, 'recorder', 'walkthroughs', `${walkthrough}.json`))
+        ? `  ${file}: record it with "npm run record -- ${walkthrough}"`
+        : `  ${file}: not found, fix the script or add the file`;
+    });
+    console.error(`Missing file(s) under assets/ (the recordings are not in git):\n${hints.join('\n')}`);
     process.exit(1);
   }
 
