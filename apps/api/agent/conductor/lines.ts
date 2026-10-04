@@ -12,23 +12,25 @@ const ui = (name: 'share' | 'start' | 'mode_tab' | 'board_gap' | 'teachback' | '
 type Lines = Readonly<Record<string, GuideLine>>;
 
 const WEB_EXPERT: Lines = {
-  welcome: { step: 'welcome', phase: 'share', text: 'Share your whole screen, then start Learn and work as usual.', target: ui('share'), speak: false },
+  welcome: { step: 'welcome', phase: 'learn', text: 'Press Start in Show, then share your whole screen and work as usual.', target: ui('start', 'learn'), speak: false },
+  share_now: { step: 'share_now', phase: 'share', text: 'Now share your whole screen so I can see your work.', target: ui('share'), speak: false },
   share_failed: { step: 'share_failed', phase: 'share', text: 'Sharing did not start. Try again and pick the entire screen.', target: ui('share'), speak: false },
-  start_learn: { step: 'start_learn', phase: 'learn', text: 'I can see your screen. Press Start in Learn and just work.', target: ui('start', 'learn'), speak: false },
+  start_learn: { step: 'start_learn', phase: 'learn', text: 'I can see your screen. Press Start in Show and just work.', target: ui('start', 'learn'), speak: false },
   work: { step: 'work', phase: 'learn', text: 'I am watching quietly and will only ask at natural pauses.', target: null, speak: false },
-  review: { step: 'review', phase: 'review', text: 'Thanks. Let us look at what I learned: open Review.', target: ui('mode_tab', 'review'), speak: true },
+  review: { step: 'review', phase: 'review', text: 'Thanks. Let us look at what I learned: open Reflect.', target: ui('mode_tab', 'review'), speak: true },
   building: { step: 'building', phase: 'review', text: 'I am putting your steps and rules on the map.', target: null, speak: false },
-  no_session_yet: { step: 'no_session_yet', phase: 'review', text: 'There is nothing on the map yet. Run Learn first.', target: ui('mode_tab', 'learn'), speak: true },
+  no_session_yet: { step: 'no_session_yet', phase: 'review', text: 'There is nothing on the map yet. Run Show first.', target: ui('mode_tab', 'learn'), speak: true },
   gaps: { step: 'gaps', phase: 'review', text: 'A few points are still open. I will ask about them one at a time.', target: ui('board_gap'), speak: false },
   teachback: { step: 'teachback', phase: 'review', text: 'Here is what I understood. Tell me if it is right or what to change.', target: ui('teachback'), speak: false },
   talk_to_edit: { step: 'talk_to_edit', phase: 'review', text: 'Just tell me what to change, add or remove; I will edit the map.', target: null, speak: false },
-  handoff: { step: 'handoff', phase: 'teach', text: 'The map is confirmed. A new hire can start Teach now.', target: ui('mode_tab', 'teach'), speak: true },
+  handoff: { step: 'handoff', phase: 'teach', text: 'The map is confirmed. A new hire can start Pass it on now.', target: ui('mode_tab', 'teach'), speak: true },
 };
 const WEB_NEW_HIRE: Lines = {
-  welcome: { step: 'welcome', phase: 'share', text: 'Share your screen and start Teach. I will help you decide like the expert.', target: ui('share'), speak: false },
+  welcome: { step: 'welcome', phase: 'teach', text: 'Press Start in Pass it on, then share your screen. I will help you decide like the expert.', target: ui('start', 'teach'), speak: false },
+  share_now: { step: 'share_now', phase: 'share', text: 'Now share your screen so I can follow your case.', target: ui('share'), speak: false },
   share_failed: { step: 'share_failed', phase: 'share', text: 'Sharing did not start. Try again and pick the entire screen.', target: ui('share'), speak: false },
-  start_teach: { step: 'start_teach', phase: 'teach', text: 'I can see your screen. Press Start in Teach and work on your case.', target: ui('start', 'teach'), speak: false },
-  no_map: { step: 'no_map', phase: 'teach', text: 'There is no confirmed map yet: the expert confirms one in Review first.', target: null, speak: true },
+  start_teach: { step: 'start_teach', phase: 'teach', text: 'I can see your screen. Press Start in Pass it on and work on your case.', target: ui('start', 'teach'), speak: false },
+  no_map: { step: 'no_map', phase: 'teach', text: 'There is no confirmed map yet: the expert confirms one in Reflect first.', target: null, speak: true },
   work: { step: 'work', phase: 'teach', text: 'Go ahead. Tell me what you would do next and why.', target: null, speak: false },
   summary: { step: 'summary', phase: 'summary', text: 'Well done. Here is what you handled and what to practise.', target: ui('summary'), speak: true },
 };
@@ -38,7 +40,7 @@ const MAC_EXPERT: Lines = {
 };
 const MAC_NEW_HIRE: Lines = {
   welcome: { step: 'welcome', phase: 'teach', text: 'I am here in the corner. Start your case; I will speak up before a risky step.', target: null, speak: false },
-  no_map: { step: 'no_map', phase: 'teach', text: 'There is no confirmed map yet: the expert confirms one in Review first.', target: null, speak: true },
+  no_map: { step: 'no_map', phase: 'teach', text: 'There is no confirmed map yet: the expert confirms one in Reflect first.', target: null, speak: true },
   work: { step: 'work', phase: 'teach', text: 'Go ahead. Tell me what you would do next and why.', target: null, speak: false },
 };
 

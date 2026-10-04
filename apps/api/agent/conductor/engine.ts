@@ -269,6 +269,7 @@ export class Conductor {
         if (e.state === 'capturing' || e.state === 'camera') {
           this.sharing = true;
           if (this.liveMode === null) this.guide(this.persona === 'new_hire' ? 'start_teach' : 'start_learn', 'web');
+          else this.guideOnce('work');
         } else if (e.state === 'unavailable') {
           this.sharing = false;
           this.guide('share_failed', 'web');
@@ -330,7 +331,9 @@ export class Conductor {
       this.liveMode = mode;
       this.selectedMode = mode;
       this.cancelActive();
-      if (mode === 'learn') { this.pose('listen'); this.presence('dot'); this.guideOnce('work'); }
+      // On the web the screen is shared after Start: until it is, the next step is to share it.
+      if ((mode === 'learn' || mode === 'teach') && !this.sharing && this.has('web')) this.guide('share_now', 'web');
+      if (mode === 'learn') { this.pose('listen'); this.presence('dot'); if (this.sharing || !this.has('web')) this.guideOnce('work'); }
       if (mode === 'review') void this.startReview();
       if (mode === 'teach') this.startTeach();
       return;
