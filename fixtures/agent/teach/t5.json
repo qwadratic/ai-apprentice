@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "t5",
+  "title": "Rule corrected in Review: the latest confirmed version applies",
+  "orderId": "ORD-2071",
+  "draft": {
+    "bodyText": "Hello, here are your delivery details.\nAddress: 3 Fixture Street, 1010 Exampletown\nDelivery window: 2026-10-16 10:00-12:00",
+    "attachTemplateImage": true
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "actor": "expert (scripted)",
+  "note": "Scripted expert for simulated sessions and tests: the answers are what a person would say, keyed by question topic. Agent code in packages/agent/src never reads this file (a test checks that no expert wording appears in the sources). All data is synthetic.",
+  "answers": {
+    "reason": { "thinkMs": 900, "text": "Customer_07 asked me for it in writing, because his phone blocks pictures in our emails. So I spell the details out myself." },
+    "essentials": { "thinkMs": 700, "text": "The address and the delivery window." },
+    "guardrail": { "thinkMs": 1000, "text": "If I can't tell which customer an order belongs to, I stop and ask the account manager first." },
+    "scope": { "thinkMs": 800, "text": "Only for him. Customer_09 asks for something similar, but I never found out why, so I just go along with it." },
+    "exception": { "thinkMs": 800, "text": "Yes, an extra picture is fine as long as the details are written out." },
+    "why_stop": { "thinkMs": 800, "text": "Because a wrong match sends someone else's delivery details to the wrong person." },
+    "duration": { "thinkMs": 700, "text": "Until he says otherwise. The account manager hears about changes first." }
+  },
+  "teachback": {
+    "correction": { "thinkMs": 1200, "text": "One correction: the order number goes in as well as the address and the delivery window." },
+    "confirm": { "thinkMs": 800, "text": "Yes, that's right." }
+  },
+  "actions": [
+    { "waitMs": 600, "do": "select_order", "orderId": "ORD-2041" },
+    { "waitMs": 2200, "do": "attach_template" },
+    { "waitMs": 1800, "do": "remove_attachment" },
+    { "waitMs": 3400, "do": "pause", "expectQuestion": true },
+    { "waitMs": 500, "do": "type", "target": "body", "text": "Hello, here are your delivery details.\nAddress: 14 Sample Lane, 1010 Exampletown\nDelivery window: 2026-10-12 14:00-16:00", "cps": 22 },
+    { "waitMs": 3400, "do": "pause", "expectQuestion": true },
+    { "waitMs": 600, "do": "preview" },
+    { "waitMs": 3400, "do": "pause", "expectQuestion": true },
+    { "waitMs": 600, "do": "send" },
+    { "waitMs": 700, "do": "open_ticket" },
+    { "waitMs": 500, "do": "type", "target": "ticket-note", "text": "ORD-2041: delivery details sent.", "cps": 22 },
+    { "waitMs": 800, "do": "mark_done" },
+    { "waitMs": 3000, "do": "finish_learn" }
+  ]
+}

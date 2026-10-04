@@ -175,6 +175,8 @@ A module that needs the raw request bytes (a signature over the body, like the o
 
 Success: `200 {ok: true, json, ms}` when `schema` was given (the SDK's `structured_output`), else `200 {ok: true, text, ms}`.
 
+Structured output takes one object schema at the root: a schema whose root is a union (`oneOf`, `anyOf` or `allOf`, as A's vision schema is) comes back from the SDK as `502 sdk_error / is_error` within about 1.5 s, while the same union nested under an object property works (measured on the VM, 4 Oct). The runner therefore sends such a schema as `{type: "object", required: ["result"], additionalProperties: false, properties: {result: <schema>}}` and returns the unwrapped `result`, so `json` always has the shape of the client's own schema (`src/schema.ts`, TASK-4.7). Other schemas pass through unchanged.
+
 | Status | Body | Meaning |
 |---|---|---|
 | 400 | `{ok:false, error:"invalid_json"\|"invalid_body", fields?}` | bad request (field paths only) |
@@ -219,7 +221,7 @@ Measured 3 Oct 2026 (oauth mode, `claude-sonnet-5-5`, concurrency 2, 2 vCPU / 7 
 
 ```bash
 npm ci && npm run check                                        # repo root: apps/api (incl. the ops module tests), web, packages
-(cd infra/claude-runner && npm ci --include=optional && npm run typecheck)
+(cd infra/claude-runner && npm ci --include=optional && npm run typecheck && npm test)
 (cd infra/placeholder-api && npm ci && npm run typecheck)      # tsc --noEmit
 (cd infra/ops && npm ci && npm run typecheck)                  # tsc --noEmit
 bash -n infra/*.sh infra/deploy/deploy.sh

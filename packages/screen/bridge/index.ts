@@ -1,2 +1,5 @@
 export {createScreenBridgeRuntime} from './ScreenBridgeRuntime.js';
-export type {ScreenBridgeRuntime, ScreenBridgeRuntimeOptions} from './ScreenBridgeRuntime.js';
+export type {
+  CurrentObservationRequest, ScreenBridgeRuntime, ScreenBridgeRuntimeOptions, ScreenWorkspaceRuntime,
+  WorkspaceActivity, WorkspaceRevisions, WorkspaceScope,
+} from './ScreenBridgeRuntime.js';
