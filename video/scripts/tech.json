@@ -296,7 +296,7 @@
         }
       ],
       "code": {
-        "title": "screen_activity · as the conductor saw it in our run (synthetic)",
+        "title": "screen_activity · its shape (synthetic example)",
         "atSec": 1.5,
         "text": "{\n  \"kind\": \"screen_activity\",\n  \"facts\": {\n    \"app\": \"Demo workspace\",\n    \"surface\": \"Order → email → ticket\",\n    \"summary\": \"The draft to customer_07 has the\n      delivery address and time in the text\n      and the delivery image attached.\",\n    \"change\": \"Address and time copied from\n      the order into the email text.\",\n    \"pendingAction\": \"Send demo email\",\n    \"regions\": [{ \"label\": \"Message\",\n                  \"box\": [0.31, 0.52, 0.42, 0.18] }]\n  }\n}"
       },
@@ -380,7 +380,7 @@
         {
           "fromSec": 7,
           "toSec": 13.8,
-          "text": "Steps tied to screen moments, rules in the expert's words."
+          "text": "Steps, judgment calls and guardrails, each rule in the expert’s words."
         }
       ]
     },

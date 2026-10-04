@@ -92,13 +92,13 @@ scenes.push({
 
 // 1 · Show
 scenes.push(clip(m.show - 0.3, m['show-change'] + 0.5, 11, '1 · Show', spread([
-  '1 · Show: the expert does a real task and talks as she works.',
-  'Clipa stays quiet while she types.',
+  '1 · Show: the expert works through the task in the demo workspace.',
+  'Clipa stays quiet while the expert types.',
 ])));
 if (ask1) {
   const from = m['show-change'] - 0.5;
   scenes.push(timedClip(from, m['show-answer'] + 8, 15, '1 · Show', [
-    [from, 'She stops typing. Clipa waits for the pause.'],
+    [from, 'The typing stops. Clipa waits for a natural pause.'],
     [m['show-ask'], `Clipa, at the pause: “${clean(ask1.text, 180)}”`],
     [m['show-answer'], `Expert: “${quoteAnswer(ask1.text)}”`],
   ]));
@@ -113,7 +113,7 @@ if (ask2) {
 const mapAt = m['reflect-map'] ?? m.reflect + 20;
 scenes.push(clip(m.reflect - 0.3, mapAt + 7, 12, '2 · Reflect', spread([
   '2 · Reflect: Clipa turns the session into a Work Map.',
-  'Steps with their screen moments; rules in the expert’s own words.',
+  'Steps, judgment calls and guardrails, with each rule in the expert’s words.',
 ])));
 if (has('reflect-ask-0')) {
   scenes.push(clip(m['reflect-ask-0'] - 0.5, m['reflect-answer-0'] + 8, 11, '2 · Reflect', (d) => [
@@ -159,7 +159,7 @@ if (has('teach-fixed')) {
 if (has('teach-allow')) {
   scenes.push(clip(m['teach-allow'] - 3, (m['teach-allow-end'] ?? m['teach-allow'] + 20), 9, '3 · Pass it on', spread([
     'customer_03, the same image-only email: the expert’s rule is only for customer_07.',
-    'No warning: Clipa stays quiet.',
+    'No warning: the rule does not apply here.',
   ])));
 }
 if (has('off')) {
@@ -172,7 +172,7 @@ scenes.push({
   type: 'clipa-outro', durationSec: 7, headline: "Clipa. The expert's judgment, passed on.",
   lines: ['Clipa learns how your best people decide, teaches it to the next person,', 'and turns it into agents that ask before they break your rules.'],
   links: [{ label: 'Demo', url: 'qwadratic.github.io/clipa' }, { label: 'Code', url: 'github.com/qwadratic/clipa' }],
-  note: 'Synthetic data; a teammate wrote the expert’s answers. Masks protect the screen, not speech.',
+  note: 'Synthetic data. The expert’s and the new hire’s answers were scripted for this recording. Masks protect the screen, not speech.',
 });
 
 const demo = { transitionSec: 0.5, scenes };

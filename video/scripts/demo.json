@@ -63,12 +63,12 @@
         {
           "fromSec": 0.25,
           "toSec": 5.36,
-          "text": "1 · Show: the expert does a real task and talks as she works."
+          "text": "1 · Show: the expert works through the task in the demo workspace."
         },
         {
           "fromSec": 5.76,
           "toSec": 10.88,
-          "text": "Clipa stays quiet while she types."
+          "text": "Clipa stays quiet while the expert types."
         }
       ]
     },
@@ -85,7 +85,7 @@
         {
           "fromSec": 0.3,
           "toSec": 5.37,
-          "text": "She stops typing. Clipa waits for the pause."
+          "text": "The typing stops. Clipa waits for a natural pause."
         },
         {
           "fromSec": 5.52,
@@ -117,7 +117,7 @@
         {
           "fromSec": 6.25,
           "toSec": 11.85,
-          "text": "Steps with their screen moments; rules in the expert’s own words."
+          "text": "Steps, judgment calls and guardrails, with each rule in the expert’s words."
         }
       ]
     },
@@ -271,7 +271,7 @@
         {
           "fromSec": 4.75,
           "toSec": 8.85,
-          "text": "No warning: Clipa stays quiet."
+          "text": "No warning: the rule does not apply here."
         }
       ]
     },
@@ -315,7 +315,7 @@
           "url": "github.com/qwadratic/clipa"
         }
       ],
-      "note": "Synthetic data; a teammate wrote the expert’s answers. Masks protect the screen, not speech."
+      "note": "Synthetic data. The expert’s and the new hire’s answers were scripted for this recording. Masks protect the screen, not speech."
     }
   ]
 }
