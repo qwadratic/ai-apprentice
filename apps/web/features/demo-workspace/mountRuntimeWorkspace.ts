@@ -145,8 +145,8 @@ export function createRuntimeWorkspace(options: RuntimeWorkspaceOptions): Runtim
       }
       await runtime.bridge.resume();
       capturing = runtime.capture.getSnapshot().state === 'capturing';
-      if (!capturing) return;
       workspace.setOffRecord(false);
+      if (!capturing) return;
       adapter.syncScope(workspace.getState().scope);
       setCheckpointConnected(true);
     },
