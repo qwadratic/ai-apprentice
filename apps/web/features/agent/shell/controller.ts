@@ -31,7 +31,8 @@ import { VoiceSession } from './voice/voice-session.ts';
 
 export const BRAIN_TICK_MS = 500;
 /** The workspace waits for the checkpoint reply for 4 s (doc-7); after that the shell answers `unknown` itself. */
-export const CHECKPOINT_TIMEOUT_MS = 4000;
+/** Below the workspace's own 4 s reply deadline, so that even `unknown` reaches it in time. */
+export const CHECKPOINT_TIMEOUT_MS = 3500;
 /** A WARN that has to wait for the agent to finish speaking is dropped after this long. */
 export const WARN_HOLD_MS = 15000;
 /** A spoken question that produces no agent audio within this time stops looking "thinking". */
@@ -252,14 +253,31 @@ export class ShellController {
   registerCapture(capture: CaptureLike): () => void {
     this.captureOff?.();
     this.capture = capture;
+    let last: string | null = null;
     const off = capture.subscribe((snapshot) => {
+      const was = last;
+      last = snapshot.state;
       this.store.dispatch({ type: 'CAPTURE_SNAPSHOT', capture: { state: snapshot.state, reason: snapshot.reason ?? null } });
+      if (was !== snapshot.state && (snapshot.state === 'stopped' || snapshot.state === 'error')) this.onCaptureEnded(snapshot.reason ?? null);
     });
     this.captureOff = off;
     return () => {
       off();
       if (this.capture === capture) { this.capture = null; this.captureOff = null; }
     };
+  }
+
+  /**
+   * A cancelled picker or a Stop ends the capture for good: the screen runtime does not share again inside the same session id. The
+   * person is told plainly what to do; nothing restarts on its own (a new Learn session would start a new Work Map).
+   */
+  private onCaptureEnded(reason: string | null): void {
+    const s = this.state;
+    if (s.phase !== 'live' || s.offRecord || s.session === null || s.session.mode === 'review') return;
+    const mode = s.session.mode === 'learn' ? 'Learn' : 'Teach';
+    const text = `Screen sharing ended${reason ? ` (${reason})` : ''}. This session cannot share a screen again: press End, then start ${mode} again for a new session and share the window.`;
+    this.sys(text);
+    this.store.dispatch({ type: 'BANNER_SET', banner: { kind: 'warn', text } });
   }
 
   /** What ScreenPanel needs at its start click: the live session and its one epoch. */

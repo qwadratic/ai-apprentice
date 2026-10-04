@@ -11,7 +11,7 @@ import type { DirectorLike } from '../clipa/director-presenter.ts';
 import { HEARTBEAT_TTL_MS, INPUT_QUIET_MS, InputGuard, watchPageInput } from '../clipa/input-guard.ts';
 import { createClipaStore } from '../clipa/presenter.ts';
 import { HINT_ATTR, SURFACE_ATTR, resolveClipaTarget, selectorsFor } from '../clipa/targets.ts';
-import { CLIPA_MARKS, markClipaTargets } from '../slots/demo-workspace-adapter.ts';
+import { CLIPA_MARKS, markClipaTargets } from '../clipa/workspace-marks.ts';
 import { SpeechGate } from '../voice/speech-gate.ts';
 import { must } from './helpers.ts';
 

@@ -4,6 +4,7 @@
 // needs them to exist. Review has no screen, so it gets no mount, and off the record never creates one (the controller already
 // ended the session; the next session mounts again).
 import type { ShellController } from '../controller.ts';
+import { markClipaTargets } from '../clipa/workspace-marks.ts';
 import { RuntimeWorkspaceSource } from './runtime-workspace-source.ts';
 import type { CreateRuntimeWorkspace, RuntimeWorkspaceMount } from './runtime-workspace-source.ts';
 
@@ -74,6 +75,9 @@ export class LiveMount {
     }
     // The controller follows the capture's state (the status chip) and stops it when the session ends.
     this.failedFor = null;
+    // A's workspace renders its markup once per mount: the Clipa marks (attributes only) let her fly to the body, Preview and Send.
+    const root = this.workspaceRoot;
+    if (this.providesWorkspace && root !== null && typeof root.querySelector === 'function') markClipaTargets(root);
     // `mounted` is set first: registering the capture changes the store, which calls sync again.
     const current = { sessionId: wanted, mount, unregisterCapture: (): void => {} };
     this.mounted = current;

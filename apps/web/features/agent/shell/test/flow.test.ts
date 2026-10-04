@@ -162,7 +162,7 @@ test('the checkpoint reply arrives within 4 s: a brain that does not answer gets
   assert.equal(card.status, 'unknown');
   assert.match(card.message, /did not answer in time/);
   assert.equal(card.deliveryError, null, 'the unknown reply reached the workspace');
-  assert.ok(rig.controller.store.getState().events.some((e) => e.dir === 'err' && /did not answer the checkpoint within 4 s/.test(e.text)));
+  assert.ok(rig.controller.store.getState().events.some((e) => e.dir === 'err' && /did not answer the checkpoint within 3.5 s/.test(e.text)));
 });
 
 test('a brain that answers late does not overwrite the unknown reply', async () => {

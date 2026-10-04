@@ -15,7 +15,7 @@ import { API_BASE } from './config.ts';
 import { ShellController } from './controller.ts';
 import type { ControllerTimers, KeyValueStorage } from './controller.ts';
 import { SampleObservationSource } from './screen/sample-source.ts';
-import { createBridgeMount } from './screen/bridge-mount.ts';
+import { createRuntimeWorkspace } from '../../demo-workspace/index.ts';
 import { LiveMount } from './screen/live-mount.ts';
 import { SAMPLE_CUSTOMERS } from './screen/sample-scenarios.ts';
 import type { CreateRuntimeWorkspace } from './screen/runtime-workspace-source.ts';
@@ -52,11 +52,10 @@ function newId(): string {
 }
 
 /**
- * The real screen, mounted per session: stream A's capture, ScreenBridge and screen panel (PR #21), composed in bridge-mount.ts.
- * Stream A's `createRuntimeWorkspace` (the same plus the demo workspace and its checkpoint adapter; not on main yet) replaces this
- * one line when it lands: import it and assign it here, nothing else in the shell changes.
+ * The real screen and the demo workspace, mounted per session: stream A's `createRuntimeWorkspace` (PR #33: capture, ScreenBridge,
+ * screen panel, demo workspace and its checkpoint adapter as one lifecycle). Teach checkpoints come from its Preview -> Send.
  */
-const liveFactory: CreateRuntimeWorkspace = createBridgeMount;
+const liveFactory: CreateRuntimeWorkspace = createRuntimeWorkspace;
 
 export function createRuntime(): ShellRuntime {
   const store = createClipaStore();
@@ -92,8 +91,8 @@ export function createRuntime(): ShellRuntime {
     storage: browserStorage,
   });
   note = (type, text) => controller.note(type, text);
-  // providesWorkspace: false while the factory is the screen-only bridge mount; true with A's createRuntimeWorkspace.
-  const live = new LiveMount({ factory: liveFactory, controller, apiBase: API_BASE, providesWorkspace: false });
+  // A's createRuntimeWorkspace mounts the demo workspace itself (providesWorkspace).
+  const live = new LiveMount({ factory: liveFactory, controller, apiBase: API_BASE, providesWorkspace: true });
   // The real screen is the default. The sample (invented data, labelled synthetic) is an opt-in switch: it never runs unasked, so
   // a Work Map is not mixed from invented and real observations.
   return {
