@@ -108,10 +108,32 @@ test('Learn: a newer screen makes a prepared question out of date', async () => 
   const r = rig({ generic_question: (body) => ok({ ...QUESTION, question: `About ${String((body.observations as Array<{ id: string }>).at(-1)?.id)}` }) });
   await r.send({ type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', 'First change.'), { type: 'activity', state: 'typing' });
   await r.advance(RULES.settleMs + 10);
-  await r.send(obs('o2', 'Second change.'));
+  await r.send(obs('o2', 'Second change.', { surface: 'inbox' }));
   await r.send({ type: 'activity', state: 'pause' });
   await r.advance(RULES.pauseMs + 10);
   assert.equal(cueOf(r.cues, 'ask').at(-1)?.text, 'About o2');
+});
+
+test('Learn: a reworded frame of the same generic screen neither restarts the pause nor drops the prepared question', async () => {
+  const r = rig({ generic_question: () => ok(QUESTION) });
+  await r.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', null), obs('o2', 'The recipient changed.'));
+  await r.advance(RULES.settleMs + 10);
+  assert.equal(r.calls.length, 1, 'prepared as soon as the screen settled');
+  // The vision model rewords the same compose window on every frame, and the frames come faster than the pause.
+  for (let i = 3; i < 8; i++) {
+    await r.send(obs(`o${i}`, `Reworded ${i}.`));
+    await r.advance(1200);
+  }
+  assert.equal(cueOf(r.cues, 'ask')[0]?.text, QUESTION.question, 'asked although reworded frames kept coming');
+  // Another app is a new screen: it restarts the pause.
+  await r.advance(RULES.learnMinGapMs); // the reworded frames after the first question bring a second one
+  await r.advance(RULES.learnMinGapMs + RULES.askTtlMs); // its moment passes, and so does the gap
+  const asked = of(r.cues, 'ask').length;
+  await r.send(obs('o9', 'A sheet opened.', { app: 'Sheets', surface: 'budget sheet' }));
+  await r.advance(RULES.pauseMs - 300);
+  assert.equal(of(r.cues, 'ask').length, asked, 'not before the pause after a real screen change');
+  await r.advance(400);
+  assert.equal(of(r.cues, 'ask').length, asked + 1, 'asked once the pause after the new screen began');
 });
 
 test('typing cancels a question that has not been said yet; off the record hides Clipa and drops input', async () => {

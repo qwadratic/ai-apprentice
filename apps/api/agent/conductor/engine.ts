@@ -45,6 +45,11 @@ export const RULES = {
 export interface ConfirmedMap { sessionId: string; map: MapSynthesisOutput; confirmedAt: number }
 
 /** Confirmed maps, shared by all sessions of this server: Teach reads the expert's map. One team, one demo server. */
+/** Two generic observations of one screen: the same app, surface and control about to be used. */
+function sameScreen(a: SeenObservation, b: SeenObservation): boolean {
+  return a.kind === 'screen_activity' && b.kind === 'screen_activity' && a.app === b.app && a.surface === b.surface && a.pendingAction === b.pendingAction;
+}
+
 export class MapRegistry {
   private readonly bySession = new Map<string, ConfirmedMap>();
   private latest: ConfirmedMap | null = null;
@@ -359,16 +364,24 @@ export class Conductor {
     // The same observation can arrive twice (from the screen module and from a client that forwards it): keep the first.
     if (this.observations.some((x) => x.id === o.id)) return;
     const last = this.observations[this.observations.length - 1];
+    const lastScreen = [...this.observations].reverse().find((x) => x.kind !== 'input_activity');
     this.observations.push(o);
     if (this.observations.length > RULES.keepObservations) this.observations.splice(0, this.observations.length - RULES.keepObservations);
     if (o.kind === 'input_activity') return;
     const changed = o.change !== null || last === undefined || last.summary !== o.summary || last.surface !== o.surface;
+    // A generic screen's summary and change are the vision model's free text, reworded on every frame of the same screen
+    // (a blinking caret is enough for a new frame every 1.5 s). Only another app, surface or pending control is a new
+    // screen: it restarts the pause and drops the question being prepared. A reworded frame does neither, or the pause
+    // would never come and every prepared question would be dropped.
+    const moved = o.kind !== 'screen_activity' ? changed : lastScreen === undefined || !sameScreen(lastScreen, o);
     if (changed) {
       this.pendingChange = true;
-      this.lastChangeAt = now;
       this.latestChangeId = o.id;
-      // A question being prepared for an older screen is out of date.
-      if (this.prefetch?.status === 'running' && this.prefetch.basis !== o.id && this.liveMode === 'learn') this.inflight?.abort();
+      if (moved) {
+        this.lastChangeAt = now;
+        // A question being prepared for an older screen is out of date.
+        if (this.prefetch?.status === 'running' && this.prefetch.basis !== o.id && this.liveMode === 'learn') this.inflight?.abort();
+      }
     }
     if (changed || o.pendingAction !== null) this.pendingTeachCheck = true;
     if (o.pendingAction !== null) this.urgentTeachCheck = true;
@@ -488,12 +501,19 @@ export class Conductor {
     const budget = this.learnBudget(now);
     if (budget === 'used') { this.quiet('question budget used up for now'); return; }
     const basis = this.latestChangeId;
-    const ready = this.prefetch && this.prefetch.basis === basis && this.prefetch.status !== 'running' ? this.prefetch : null;
+    // A question prepared for an earlier frame of the same generic screen still fits it.
+    const ready = this.prefetch && this.prefetch.status !== 'running' && (this.prefetch.basis === basis || this.sameScreenIds(this.prefetch.basis, basis)) ? this.prefetch : null;
     if (ready && budget === 'ok' && this.paused(now)) { this.sayQuestion(ready); return; }
     const settled = now - this.lastChangeAt >= RULES.settleMs;
     const nearlyAllowed = now - this.lastAskAt >= RULES.learnMinGapMs - 10_000;
     if (settled && nearlyAllowed && this.inflight === null && (!this.prefetch || this.prefetch.basis !== basis)) void this.prepareQuestion(basis);
     else if (budget === 'soon' && this.paused(now)) this.quiet('asked recently');
+  }
+
+  private sameScreenIds(a: string, b: string): boolean {
+    const x = this.observations.find((o) => o.id === a);
+    const y = this.observations.find((o) => o.id === b);
+    return x !== undefined && y !== undefined && sameScreen(x, y);
   }
 
   private tickReview(now: number): void {
