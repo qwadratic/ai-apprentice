@@ -58,7 +58,7 @@ test('pending rejects double Preview and double Send without losing the original
   const first = model.preview(); await tick(); await model.preview();
   assert.equal(fixture.replies.length, 1); assert.equal(model.getState().check.status, 'pending');
   assert.equal(model.send(), false); assert.equal(model.send(), false);
-  fixture.replies[0].resolve(clear); await first;
+  fixture.replies[0]!.resolve(clear); await first;
   assert.deepEqual(fixture.references[0], ['observed-order', 'observed-email']);
   assert.equal(model.canSend(), true); model.dispose();
 });
@@ -79,8 +79,8 @@ for (const [name, change] of [
   test(`${name} invalidates a pending result, even if the adapter ignores abort`, async () => {
     const fixture = controlled(); const model = make(fixture.port);
     const old = model.preview(); await tick(); change(model); await old;
-    assert.equal(fixture.signals[0].aborted, true);
-    fixture.replies[0].resolve(clear); await tick();
+    assert.equal(fixture.signals[0]!.aborted, true);
+    fixture.replies[0]!.resolve(clear); await tick();
     assert.equal(model.getState().check.status, 'idle'); assert.equal(model.canSend(), false); model.dispose();
   });
 }
@@ -89,8 +89,8 @@ test('an old response cannot replace a newer warning', async () => {
   const fixture = controlled(); const model = make(fixture.port);
   const old = model.preview(); await tick(); model.editDraft({ body: 'New draft' }); await old;
   const current = model.preview(); await tick();
-  fixture.replies[1].resolve({ status: 'warn', message: 'Current warning', evidenceIds: [] }); await current;
-  fixture.replies[0].resolve(clear); await tick();
+  fixture.replies[1]!.resolve({ status: 'warn', message: 'Current warning', evidenceIds: [] }); await current;
+  fixture.replies[0]!.resolve(clear); await tick();
   assert.equal(model.getState().check.status, 'warn'); assert.equal(model.canSend(), false); model.dispose();
 });
 
@@ -104,8 +104,8 @@ test('edits invalidate a completed clear result and its acknowledgement', async 
 
 test('timeout aborts stalled work; its late response cannot authorize sending', async () => {
   const fixture = controlled(); const model = make(fixture.port, 15);
-  await model.preview(); assert.equal(model.getState().check.status, 'error'); assert.equal(fixture.signals[0].aborted, true);
-  fixture.replies[0].resolve(clear); await tick(); assert.equal(model.canSend(), false); model.dispose();
+  await model.preview(); assert.equal(model.getState().check.status, 'error'); assert.equal(fixture.signals[0]!.aborted, true);
+  fixture.replies[0]!.resolve(clear); await tick(); assert.equal(model.canSend(), false); model.dispose();
 });
 
 test('no agent, rejected response and malformed response are technical errors', async () => {
@@ -163,7 +163,11 @@ test('synthetic cases vary visible data without a hidden rule or oracle', () => 
   assert.notEqual(spare.order.deliveryWindow, spareNew.order.deliveryWindow);
   for (const item of demoCases) {
     assert.deepEqual(Object.keys(item).sort(), ['draft', 'id', 'label', 'order']);
-    const artwork = decodeURIComponent(item.draft.attachments[0].imageUrl.split(',')[1]);
+    const attachment = item.draft.attachments[0];
+    assert.ok(attachment);
+    const encodedArtwork = attachment.imageUrl.split(',')[1];
+    assert.ok(encodedArtwork);
+    const artwork = decodeURIComponent(encodedArtwork);
     assert.ok(artwork.includes(item.order.deliveryAddress)); assert.ok(artwork.includes(item.order.deliveryWindow));
   }
 });
@@ -180,6 +184,6 @@ test('Learn source details match the B fixture revision 30865d6', () => {
 test('disposal aborts the pending check and prevents late subscriptions or sends', async () => {
   const fixture = controlled(); const model = make(fixture.port);
   const pending = model.preview(); await tick(); model.dispose(); await pending;
-  fixture.replies[0].resolve(clear); await tick(); assert.equal(model.canSend(), false);
+  fixture.replies[0]!.resolve(clear); await tick(); assert.equal(model.canSend(), false);
   assert.throws(() => model.send(), /disposed/); assert.throws(() => model.subscribe(() => {}), /disposed/);
 });

@@ -44,7 +44,7 @@ export function createWorkspace(options: Options) {
   let requestSequence = 0;
   let active: { id: number; scope: VersionScope; abort: AbortController; timer: ReturnType<typeof setTimeout>; done: () => void } | undefined;
   const listeners = new Set<(state: WorkspaceState) => void>();
-  const first = cases[0];
+  const first = cases[0]!;
   let state: WorkspaceState = {
     scope: { sessionId: options.sessionId, taskGeneration: 0, draftRevision: 0 }, caseId: first.id,
     order: structuredClone(first.order), draft: structuredClone(first.draft), offRecord: false, check: { status: 'idle' }, acknowledged: false,
