@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import type { FrameLease, ProcessedFrame } from '../ScreenCapture.ts';
 import { loadModules, harness, deferred, flush } from './helpers.ts';
 
-const { ScreenCapture, validateMasks, maskPixels, cleanup } = await loadModules();
+const { ScreenCapture, DEFAULT_FRAME_ENCODING, validateMasks, maskPixels, cleanup } = await loadModules();
 after(cleanup);
 const mask = { id: 'synthetic-email', x: 0.1, y: 0.2, width: 0.4, height: 0.2 };
 
@@ -254,4 +254,55 @@ test('frame identity does not repeat when the same session restarts', async () =
   const h = harness(ScreenCapture); await h.start(); h.share(); await h.step(); const id = h.frames[0]!.frameId;
   h.capture.stop(); h.sourceTrack.readyState = 'live'; await h.start(); h.share(); await h.step();
   assert.notEqual(h.frames[1]!.frameId, id); h.capture.dispose();
+});
+
+// Frame encoding for vision (smaller frames for the Codex runner): a shared screen of any app goes at most 960 px wide
+// as JPEG 0.5; the demo workspace surfaces stay native-size PNG unless applyTo is 'all'. All pixels are synthetic.
+test('a shared screen goes 960 px wide as JPEG 0.5, scaled from the masked processed canvas', async () => {
+  assert.deepEqual({ ...DEFAULT_FRAME_ENCODING }, { maxWidth: 960, jpegQuality: 0.5, applyTo: 'generic' });
+  assert.ok(Object.isFrozen(DEFAULT_FRAME_ENCODING));
+  const h = harness(ScreenCapture, { videoWidth: 1920, videoHeight: 1080 });
+  await h.start(); h.capture.setMasks([mask]); assert.equal(h.share(), true); await h.step();
+  assert.equal(h.frames.length, 1);
+  assert.deepEqual(h.blobRequests.at(-1), { canvas: 'scaled', width: 960, height: 540, type: 'image/jpeg', quality: 0.5 });
+  assert.equal(h.frames[0]!.image.type, 'image/jpeg');
+  assert.equal(h.frames[0]!.geometry.width, 1920, 'geometry stays the source geometry');
+  assert.deepEqual(h.scaled[0]!.draws, [[0, 0, 960, 540]]);
+  const pixels = new Uint8ClampedArray(await h.frames[0]!.image.arrayBuffer());
+  const at = (x: number, y: number): number[] => [...pixels.slice((y * 960 + x) * 4, (y * 960 + x) * 4 + 4)];
+  // The mask covers x 0.1..0.5, y 0.2..0.4 of the source: black in the encoded frame at the same relative place.
+  for (const [x, y] of [[96, 108], [300, 160], [479, 215]] as const) assert.deepEqual(at(x, y), [0, 0, 0, 255], `${x},${y}`);
+  for (const [x, y] of [[10, 10], [600, 160], [300, 300]] as const) assert.deepEqual(at(x, y), [255, 255, 255, 255], `${x},${y}`);
+  h.capture.stop();
+  assert.deepEqual([h.scaled[0]!.width, h.scaled[0]!.height], [1, 1], 'stop clears the scaled copy');
+  h.capture.dispose();
+});
+
+test('workspace surface frames stay native-size PNG by default; applyTo all compacts them too', async () => {
+  const email = () => ({ surface: 'email' as const, sourceRevision: 'email-r1' });
+  const workspace = harness(ScreenCapture, { snapshotProvenance: email, frameEncoding: { maxWidth: 50 } });
+  await workspace.start(); workspace.share(); await workspace.step();
+  assert.deepEqual(workspace.blobRequests.at(-1), { canvas: 'processed', width: 100, height: 60, type: 'image/png', quality: undefined });
+  assert.equal(workspace.frames[0]!.image.type, 'image/png'); assert.equal(workspace.scaled.length, 0);
+  workspace.capture.dispose();
+  const all = harness(ScreenCapture, { snapshotProvenance: email, frameEncoding: { maxWidth: 50, applyTo: 'all' } });
+  await all.start(); all.share(); await all.step();
+  assert.deepEqual(all.blobRequests.at(-1), { canvas: 'scaled', width: 50, height: 30, type: 'image/jpeg', quality: 0.5 });
+  all.capture.dispose();
+});
+
+test('a narrow share keeps its size; jpegQuality null encodes PNG; invalid encoding knobs throw', async () => {
+  const narrow = harness(ScreenCapture);
+  await narrow.start(); narrow.share(); await narrow.step();
+  assert.deepEqual(narrow.blobRequests.at(-1), { canvas: 'processed', width: 100, height: 60, type: 'image/jpeg', quality: 0.5 });
+  assert.equal(narrow.scaled.length, 0);
+  narrow.capture.dispose();
+  const png = harness(ScreenCapture, { frameEncoding: { maxWidth: 40, jpegQuality: null } });
+  await png.start(); png.share(); await png.step();
+  assert.deepEqual(png.blobRequests.at(-1), { canvas: 'scaled', width: 40, height: 24, type: 'image/png', quality: undefined });
+  png.capture.dispose();
+  for (const frameEncoding of [{ maxWidth: 0 }, { maxWidth: Number.NaN }, { jpegQuality: 0 }, { jpegQuality: 1.5 },
+    { applyTo: 'workspace' as 'all' }]) {
+    assert.throws(() => harness(ScreenCapture, { frameEncoding }), RangeError, JSON.stringify(frameEncoding));
+  }
 });
