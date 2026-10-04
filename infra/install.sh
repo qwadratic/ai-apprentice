@@ -21,7 +21,7 @@ install -d -o root -g root -m 755 /opt/apprentice
 install -d -o apprentice -g apprentice -m 750 /var/lib/apprentice /var/lib/apprentice/db /var/lib/apprentice/media /var/lib/apprentice/runner-cwd /var/lib/apprentice/sessions
 if [ ! -d /opt/apprentice/repo/.git ]; then
   install -d -o apprentice -g apprentice -m 755 /opt/apprentice/repo
-  sudo -u apprentice git clone -q https://github.com/qwadratic/ai-apprentice.git /opt/apprentice/repo
+  sudo -u apprentice git clone -q https://github.com/qwadratic/clipa.git /opt/apprentice/repo
 fi
 install -d -o root -g root -m 700 /etc/apprentice
 if [ ! -f /etc/apprentice/env ]; then

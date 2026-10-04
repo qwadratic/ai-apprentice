@@ -6,6 +6,7 @@ import { Header } from './components/Header.tsx';
 import { SessionControls } from './components/SessionControls.tsx';
 import { StatusBar } from './components/StatusBar.tsx';
 import { ClipaAgent } from './clipa/ClipaAgent.tsx';
+import { setClipaFavicon } from './components/ClipaLogo.tsx';
 import { ShellContext, useShellState } from './hooks.ts';
 import { createRuntime } from './runtime.ts';
 import { ReplaySlot } from './slots/ReplaySlot.tsx';
@@ -49,7 +50,8 @@ export function AppShell() {
 
   useEffect(() => {
     const { controller } = runtime;
-    document.title = 'AI Apprentice';
+    document.title = 'Clipa';
+    setClipaFavicon();
     const onVisibility = (): void => controller.onVisibilityChange(document.hidden);
     const onPageHide = (): void => controller.onPageHide();
     document.addEventListener('visibilitychange', onVisibility);

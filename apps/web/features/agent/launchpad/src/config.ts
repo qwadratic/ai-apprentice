@@ -1,6 +1,6 @@
 // Everything environment-specific lives here. The footer links in static/index.html repeat three of these URLs.
 
-export const REPO = 'qwadratic/ai-apprentice';
+export const REPO = 'qwadratic/clipa';
 export const REPO_URL = `https://github.com/${REPO}`;
 export const PULLS_URL = `${REPO_URL}/pulls`;
 export const MERGE_QUEUE_URL = `${PULLS_URL}?q=is%3Apr+is%3Aopen+label%3Aready-to-merge`;
