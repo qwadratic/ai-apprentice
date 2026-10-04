@@ -114,6 +114,8 @@ export interface MapGuardrailData {
   condition: string;
   requiredAction: string;
   requiredFacts: FactKey[];
+  /** The part of requiredFacts nobody told the map: it is assumed from what the screen showed. The teach-back says so. */
+  assumedFacts: FactKey[];
   scope: MapScopeData;
   exceptions: MapExceptionData[];
   /** Open points kept as unknown instead of being guessed. */

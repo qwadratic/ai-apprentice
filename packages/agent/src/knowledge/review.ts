@@ -110,7 +110,9 @@ export function buildTeachBack(map: WorkMap): TeachBack {
         g.scope.kind === "all"
           ? "for every customer"
           : `only for ${listOf(g.scope.customers) || "this customer"}${g.scope.explicit ? "" : " (you did not say; I assume it from the screen)"}`;
-      const what = g.requiredFacts.length > 0 ? `the email must include the ${labelFacts(g.requiredFacts)}` : "I do not know yet what the email must include";
+      const assumed =
+        g.assumedFacts.length === 0 ? "" : g.assumedFacts.length === g.requiredFacts.length ? " (I assume it from the screen)" : ` (I assume the ${labelFacts(g.assumedFacts)} from the screen)`;
+      const what = g.requiredFacts.length > 0 ? `the email must include the ${labelFacts(g.requiredFacts)}${assumed}` : "I do not know yet what the email must include";
       const exc = g.exceptions.length > 0 ? `Exception: ${g.exceptions.map((e) => e.text).join(" ")}` : "No exception stated.";
       parts.push(`Scope: ${scope}. ${what[0]?.toUpperCase() ?? ""}${what.slice(1)}. ${exc} ${reason}`);
     } else if (g.trigger === "unknown_entity") {
@@ -121,6 +123,16 @@ export function buildTeachBack(map: WorkMap): TeachBack {
   }
   parts.push("Did I get that right?");
   return { text: parts.join(" "), evidenceIds, version: map.version, digest: teachBackDigest(map) };
+}
+
+/**
+ * Speak a teach-back: returns the teach-back of the working map and a state that records it as the one the expert was last told.
+ * A confirmation (reply or button) is matched against that record and nothing else. Call it again for every new teach-back
+ * (after a correction, a late answer, or a stale reply); the state forgets the record whenever the map changes.
+ */
+export function stateTeachBack(state: MapState): { state: MapState; teachBack: TeachBack } {
+  const teachBack = buildTeachBack(workingMap(state));
+  return { state: reduceMap(state, { type: "teachback_stated", digest: teachBack.digest }), teachBack };
 }
 
 export type TeachBackReply = "confirm" | "correct" | "unclear";
@@ -253,12 +265,15 @@ export async function applyTeachBackReply(
   reply: { text: string; atMs: number; evidenceIds?: string[] },
   extractor: AnswerExtractor,
   classifier: ReplyClassifier = new HeuristicReplyClassifier(),
-  /** The teach-back the expert heard, when it is not the current one. */
+  /** Redundant: the state records the teach-back last stated (stateTeachBack). If given and different, the reply is stale. */
   heard?: TeachBack,
 ): Promise<TeachBackOutcome> {
   const current = buildTeachBack(workingMap(state));
-  // The gate: a reply answers the teach-back it followed. If the map moved on since, nothing is confirmed.
-  if (heard !== undefined && heard.digest !== current.digest) return { outcome: "stale", state, teachBack: current, issues: [] };
+  // The gate: a reply answers the teach-back the expert was last told. If none was stated, or the map moved on since, nothing is
+  // confirmed and the host states the current version again (stateTeachBack).
+  if (state.lastStatedDigest !== current.digest || (heard !== undefined && heard.digest !== state.lastStatedDigest)) {
+    return { outcome: "stale", state, teachBack: current, issues: [] };
+  }
   let read = await classifier.classify(current.text, reply.text);
   // A confirmation is a reply that is only confirmation tokens, whoever classified it: a model cannot confirm what the words do not.
   if (read.verdict === "confirm" && readReply(reply.text).verdict !== "confirm") read = { verdict: "unclear", correction: null };
@@ -369,7 +384,7 @@ export function pressReviewButton(
   itemId: string,
   button: ReviewButton,
   atMs: number,
-  /** The teach-back the expert heard, when the buttons belong to one. */
+  /** Redundant: the state records the teach-back last stated (stateTeachBack). If given and different, the press is stale. */
   heard?: TeachBack,
 ): ButtonOutcome {
   if (button === "skip") {
@@ -382,7 +397,9 @@ export function pressReviewButton(
     return { outcome: "confirmed", state };
   }
   const current = buildTeachBack(workingMap(state));
-  if (heard !== undefined && heard.digest !== current.digest) return { outcome: "stale", state, teachBack: current };
+  if (state.lastStatedDigest !== current.digest || (heard !== undefined && heard.digest !== state.lastStatedDigest)) {
+    return { outcome: "stale", state, teachBack: current };
+  }
   try {
     const next = reduceMap(state, confirmationOf(state, atMs, "(confirmed with the button)"));
     clarifier.understood(itemId);
