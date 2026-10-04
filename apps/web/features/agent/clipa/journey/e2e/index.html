@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Journey e2e</title>
+    <style>
+      :root { color-scheme: light dark; --bg: #f3f6f5; --fg: #14211f; --card: #fff; --line: #cbd7d4; }
+      @media (prefers-color-scheme: dark) { :root { --bg: #0d1413; --fg: #e5eeec; --card: #162120; --line: #2f4240; } }
+      body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.4 system-ui, sans-serif; }
+      header { display: flex; gap: 8px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+      main { display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; padding: 16px; }
+      section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+      button { font: inherit; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--fg); }
+      .preview { height: 120px; display: grid; place-items: center; border: 1px dashed var(--line); margin-top: 8px; }
+      input { font: inherit; padding: 6px 8px; width: 60%; }
+      .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <strong>Journey e2e</strong>
+      <button type="button" data-clipa-target="mode-learn">Learn</button>
+      <button type="button" data-clipa-target="mode-review">Review</button>
+      <button type="button" data-clipa-target="mode-teach">Teach</button>
+    </header>
+    <main>
+      <div>
+        <section>
+          <h3>Screen</h3>
+          <button type="button" data-clipa-target="share-screen">Choose screen or window</button>
+          <div class="preview" data-clipa-target="screen-preview">preview</div>
+        </section>
+        <section data-clipa-target="workspace">
+          <h3>Workspace</h3>
+          <div class="row">
+            <input id="note" placeholder="type here" autocomplete="off" />
+            <button type="button" data-clipa-target="send">Send</button>
+          </div>
+        </section>
+      </div>
+      <div>
+        <section>
+          <h3>Session</h3>
+          <div class="row">
+            <button type="button" data-clipa-target="session-start">Start</button>
+            <button type="button" data-clipa-target="session-end">End session</button>
+          </div>
+        </section>
+        <section data-clipa-target="review-board">
+          <h3>Review</h3>
+          <p data-clipa-target="board-gap">An open gap</p>
+          <blockquote data-clipa-target="teachback">The teach-back</blockquote>
+        </section>
+        <section data-clipa-target="mastery-summary">
+          <h3>Mastery</h3>
+          <p>Mastered and to practise</p>
+        </section>
+      </div>
+    </main>
+    <script type="module" src="./page.js"></script>
+  </body>
+</html>
