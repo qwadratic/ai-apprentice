@@ -26,6 +26,8 @@ export interface VoiceHandle {
   sendContextualUpdate(text: string): void;
   /** A user-side message. The live agent answers `[ASK] <text>` by saying <text> verbatim and otherwise stays silent. */
   sendUserMessage(text: string): void;
+  /** Mutes or unmutes the microphone; the conversation stays open. */
+  setMicMuted?(muted: boolean): void;
   end(): Promise<void>;
 }
 

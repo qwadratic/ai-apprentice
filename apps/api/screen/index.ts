@@ -4,6 +4,8 @@ export {createFileEvidenceStore, createMemoryEvidenceStore, normalizeFrame, Evid
 export type {EvidenceMetadataRepository, ProcessedFrame, ScreenEvidenceRecord, ScreenEvidenceStore} from './evidence-store.ts';
 export {createScreenService, defaultVisionPrompt, visibleOnlySystem} from './service.ts';
 export type {ScreenService, ScreenServiceOptions} from './service.ts';
+export {FrameStoryboard, MAX_STORYBOARD_FRAMES, parseVisionFrames, STORYBOARD_DEFAULTS} from './storyboard.ts';
+export type {StoryboardFrame, StoryboardOptions} from './storyboard.ts';
 export {createObservationFactory, parseVisionResult, VISION_RESULT_SCHEMA, VisionContractError} from './vision-contract.ts';
 export type {VisionResult} from './vision-contract.ts';
 export {ObservationProvenanceRegistry, ProvenanceError} from './provenance.ts';

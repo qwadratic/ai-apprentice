@@ -53,6 +53,38 @@ test('start opens the picker synchronously and uploads only the processed PNG wi
   instance.dispose();
 });
 
+test('a shared screen with no workspace surface uploads the encoder output as JPEG', async () => {
+  const harness = createHarness();
+  const jpeg = Uint8Array.from([0xff, 0xd8, 0xff, 0xdb, 0x00, 0x43]);
+  const encoded: Array<[string | undefined, number | undefined]> = [];
+  const canvas = harness.runtime.createCanvas() as unknown as {toBlob: (callback: BlobCallback, type?: string, quality?: number) => void};
+  canvas.toBlob = (callback, type, quality) => { encoded.push([type, quality]); callback(new Blob([jpeg], {type: type ?? 'image/png'})); };
+  const frames: Array<Record<string, unknown>> = [];
+  const instance = createScreenBridgeRuntime({apiBase: 'https://screen.test', authHeader: () => 'Bearer browser-session-token-12345',
+    sourceRevision: () => null, captureRuntime: harness.runtime, frameIntervalMs: 1,
+    fetch: async (input, init) => {
+      const url = String(input); const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {};
+      if (url.endsWith('/start')) {
+        return Response.json({sessionId: 's', generation: 1, nextCursor: 0, sessionToken: 'screen-session-token-abcdefghijkl',
+          status: {schemaVersion: 1, sessionId: 's', state: 'capturing'}}, {status: 201});
+      }
+      if (url.endsWith('/frames')) { frames.push(body); return Response.json({ok: true, outcome: 'accepted', sessionId: 's', generation: 1, frameId: body.frameId}, {status: 202}); }
+      if (url.includes('/updates')) return Response.json({sessionId: 's', generation: 1, observations: [], statuses: [], nextCursor: 0});
+      const command = body.command as 'pause' | 'resume' | 'stop';
+      const state = command === 'pause' ? 'paused' : command === 'resume' ? 'capturing' : 'stopped';
+      return Response.json({sessionId: 's', generation: (body.generation as number) + 1, nextCursor: 1, status: {schemaVersion: 1, sessionId: 's', state}});
+    }});
+  await instance.bridge.start({sessionId: 's', sessionEpochMs: 0});
+  harness.video.videoWidth = 2; harness.video.videoHeight = 2; harness.video.readyState = 4;
+  harness.step();
+  assert.equal(instance.capture.confirmMasks(instance.capture.getSnapshot().geometry!.revision), true);
+  await instance.bridge.resume(); harness.step(); await tick(); await tick();
+  assert.deepEqual(encoded[0], ['image/jpeg', 0.5]);
+  assert.equal(frames[0]?.mediaType, 'image/jpeg'); assert.equal(frames[0]?.data, Buffer.from(jpeg).toString('base64'));
+  assert.deepEqual(frames[0]?.provenance, {surface: null, sourceRevision: null, captureGeneration: (frames[0]?.provenance as {captureGeneration: number}).captureGeneration});
+  instance.dispose();
+});
+
 test('off-record closes delivery before awaiting HTTP and panel resume cannot reopen it', async () => {
   const harness = createHarness(); let releasePause!: () => void;
   const pauseResponse = new Promise<Response>(resolve => { releasePause = () => resolve(Response.json({sessionId: 's', generation: 4, nextCursor: 1, status: {schemaVersion: 1, sessionId: 's', state: 'paused'}})); });

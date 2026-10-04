@@ -45,6 +45,37 @@ export interface CaptureInvalidation {
   readonly timestampMs: number;
 }
 export interface DisplayCaptureOptions { readonly video: true; readonly audio: false; }
+/** How a frame for vision is encoded. Masks are already painted on the processed canvas before any scaling or encoding. */
+export interface FrameEncoding {
+  /** A wider frame is scaled down to this width, keeping its aspect ratio; a narrower one keeps its size. Infinity: never scale. */
+  readonly maxWidth: number;
+  /** JPEG quality in (0, 1]; null encodes lossless PNG. */
+  readonly jpegQuality: number | null;
+  /** 'generic': frames with no workspace surface (a shared screen of any app); 'all': also order, email and ticket frames. */
+  readonly applyTo: 'generic' | 'all';
+}
+/**
+ * Retina detail is not needed for vision, and image size drives model latency: a shared screen goes at most 960 px wide
+ * as JPEG 0.5. Frames outside `applyTo` (by default the demo workspace surfaces) stay native-size PNG, as before.
+ */
+export const DEFAULT_FRAME_ENCODING: FrameEncoding = Object.freeze({ maxWidth: 960, jpegQuality: 0.5, applyTo: 'generic' });
+
+/**
+ * A generic frame goes to vision only when the screen visibly changed, judged deterministically on a small grayscale
+ * thumbnail (as the macOS app does): at least minCells thumbnail pixels moved by more than minDelta gray levels. A
+ * blinking caret or a ticking clock is not a change, so it never costs a vision call.
+ */
+export const CHANGE_THUMBNAIL = Object.freeze({ width: 128, height: 80, minCells: 2, minDelta: 10 });
+
+/** True when the screen visibly changed between two grayscale thumbnails (always true without a previous one). */
+export function visiblyChanged(previous: Uint8Array | null, next: Uint8Array): boolean {
+  if (!previous || previous.length !== next.length) return true;
+  let cells = 0;
+  for (let i = 0; i < next.length; i++) {
+    if (Math.abs((previous[i] ?? 0) - (next[i] ?? 0)) > CHANGE_THUMBNAIL.minDelta && ++cells >= CHANGE_THUMBNAIL.minCells) return true;
+  }
+  return false;
+}
 
 type ManualCanvasTrack = MediaStreamTrack & { requestFrame(): void };
 type CaptureCanvas = HTMLCanvasElement & { captureStream?: (frameRate?: number) => MediaStream };
@@ -61,8 +92,10 @@ export interface CaptureOptions {
   readonly runtime?: CaptureRuntime;
   readonly frameIntervalMs?: number;
   readonly renderIntervalMs?: number;
-  /** Read synchronously after processed pixels are painted and before PNG encoding starts. */
+  /** Read synchronously after processed pixels are painted and before encoding starts. */
   readonly snapshotProvenance?: () => CaptureProvenance;
+  /** Overrides of DEFAULT_FRAME_ENCODING for frames sent to vision. */
+  readonly frameEncoding?: Partial<FrameEncoding>;
   readonly onFrame?: (frame: ProcessedFrame, lease: FrameLease) => void | Promise<void>;
 }
 
@@ -94,6 +127,7 @@ export class ScreenCapture {
   private readonly video: HTMLVideoElement;
   private readonly frameIntervalMs: number;
   private readonly renderIntervalMs: number;
+  private readonly frameEncoding: FrameEncoding;
   private readonly snapshotProvenanceProvider?: CaptureOptions['snapshotProvenance'];
   private readonly onFrame?: CaptureOptions['onFrame'];
   private state: CaptureState = 'idle';
@@ -112,6 +146,12 @@ export class ScreenCapture {
   private lastRenderMs = -Infinity;
   private lastFrameMs = -Infinity;
   private pendingFrame: object | null = null;
+  /** Holds a scaled copy of the processed canvas only while a frame is encoded; cleared with the processed canvas. */
+  private encoder: { readonly canvas: HTMLCanvasElement; readonly context: CanvasRenderingContext2D } | null = null;
+  /** The change thumbnail's canvas, and the thumbnail of the last generic frame sent (with its geometry revision). */
+  private thumb: { readonly canvas: HTMLCanvasElement; readonly context: CanvasRenderingContext2D } | null = null;
+  private lastThumb: Uint8Array | null = null;
+  private lastThumbRevision: number | null = null;
   private abort = new AbortController();
   private processedStreams = new Set<MediaStream>();
   private listeners = new Set<(snapshot: CaptureSnapshot) => void>();
@@ -124,6 +164,18 @@ export class ScreenCapture {
     this.renderIntervalMs = options.renderIntervalMs ?? 1000 / 15;
     if (![this.frameIntervalMs, this.renderIntervalMs].every((n) => Number.isFinite(n) && n > 0)) {
       throw new RangeError('Capture intervals must be finite and positive.');
+    }
+    const encoding = options.frameEncoding ?? {};
+    this.frameEncoding = Object.freeze({
+      maxWidth: encoding.maxWidth ?? DEFAULT_FRAME_ENCODING.maxWidth,
+      jpegQuality: encoding.jpegQuality === undefined ? DEFAULT_FRAME_ENCODING.jpegQuality : encoding.jpegQuality,
+      applyTo: encoding.applyTo ?? DEFAULT_FRAME_ENCODING.applyTo,
+    });
+    const { maxWidth, jpegQuality, applyTo } = this.frameEncoding;
+    if (typeof maxWidth !== 'number' || !(maxWidth >= 1) ||
+        (jpegQuality !== null && (typeof jpegQuality !== 'number' || !(jpegQuality > 0 && jpegQuality <= 1))) ||
+        (applyTo !== 'generic' && applyTo !== 'all')) {
+      throw new RangeError('Frame encoding needs maxWidth >= 1, JPEG quality in (0, 1] or null, and applyTo generic or all.');
     }
     this.snapshotProvenanceProvider = options.snapshotProvenance;
     this.onFrame = options.onFrame;
@@ -349,6 +401,56 @@ export class ScreenCapture {
   private blank(): void {
     this.context.fillStyle = '#000000';
     this.context.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    // Resizing clears the scaled copy, so no processed pixels outlive a stop there either.
+    if (this.encoder) { this.encoder.canvas.width = 1; this.encoder.canvas.height = 1; }
+    if (this.thumb) { this.thumb.canvas.width = 1; this.thumb.canvas.height = 1; this.thumb = null; }
+    this.lastThumb = null;
+    this.lastThumbRevision = null;
+  }
+
+  /** Grayscale thumbnail of the processed canvas (masks included), or null where pixels cannot be read back. */
+  private thumbnail(): Uint8Array | null {
+    if (typeof this.context.getImageData !== 'function') return null;
+    const { width, height } = CHANGE_THUMBNAIL;
+    if (!this.thumb) {
+      const canvas = this.runtime.createCanvas();
+      const context = canvas.getContext('2d', { alpha: false, willReadFrequently: true }) as CanvasRenderingContext2D | null;
+      if (!context || typeof context.getImageData !== 'function') return null;
+      canvas.width = width;
+      canvas.height = height;
+      this.thumb = { canvas, context };
+    }
+    const { context } = this.thumb;
+    context.drawImage(this.canvas, 0, 0, width, height);
+    const { data } = context.getImageData(0, 0, width, height);
+    const gray = new Uint8Array(width * height);
+    for (let i = 0; i < gray.length; i++) {
+      gray[i] = ((data[i * 4] ?? 0) * 77 + (data[i * 4 + 1] ?? 0) * 150 + (data[i * 4 + 2] ?? 0) * 29) >> 8;
+    }
+    return gray;
+  }
+
+  /** The processed canvas, or a copy scaled down to maxWidth. Only processed pixels, masks included, are ever scaled. */
+  private encodingCanvas(geometry: Geometry, maxWidth: number): HTMLCanvasElement {
+    if (geometry.width <= maxWidth) return this.canvas;
+    const width = Math.max(1, Math.floor(maxWidth));
+    const height = Math.max(1, Math.round((geometry.height * width) / geometry.width));
+    if (!this.encoder) {
+      const canvas = this.runtime.createCanvas();
+      const context = canvas.getContext('2d', { alpha: false });
+      if (!context) throw new Error('A 2D canvas is required.');
+      this.encoder = { canvas, context };
+    }
+    const { canvas, context } = this.encoder;
+    if (canvas.width !== width) canvas.width = width;
+    if (canvas.height !== height) canvas.height = height;
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.globalAlpha = 1;
+    context.globalCompositeOperation = 'source-over';
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = 'high';
+    context.drawImage(this.canvas, 0, 0, width, height);
+    return canvas;
   }
 
   private tick = (): void => {
@@ -382,19 +484,32 @@ export class ScreenCapture {
     const signal = this.abort.signal;
     const geometry = this.geometry!;
     const sessionId = this.session!.sessionId;
-    const sequence = ++this.sequence;
-    const timestampMs = this.timestamp();
     // Keep capture context attached to the exact processed canvas snapshot. The
     // provider object is never retained across the asynchronous encoder callback.
     const provenance = this.snapshotProvenance();
+    const encoding = this.frameEncoding.applyTo === 'all' || provenance.surface === null ? this.frameEncoding : null;
+    if (provenance.surface === null) {
+      // A generic screen that did not visibly change is not sent: no vision call, no reworded observation.
+      const thumb = this.thumbnail();
+      if (thumb) {
+        if (this.lastThumbRevision === geometry.revision && !visiblyChanged(this.lastThumb, thumb)) return;
+        this.lastThumb = thumb;
+        this.lastThumbRevision = geometry.revision;
+      }
+    }
+    const sequence = ++this.sequence;
+    const timestampMs = this.timestamp();
+    // Scaling copies the processed canvas painted just above, so masks are applied before scaling and encoding.
+    const target = encoding ? this.encodingCanvas(geometry, encoding.maxWidth) : this.canvas;
+    const quality = encoding?.jpegQuality ?? null;
     const token = {};
     this.pendingFrame = token;
     const isCurrent = () => !signal.aborted && this.state === 'capturing' &&
       this.generation === generation && this.geometry?.revision === geometry.revision &&
       this.video.videoWidth === geometry.width && this.video.videoHeight === geometry.height &&
       this.video.readyState >= 2 && !this.sourceTrack?.muted;
-    // toBlob snapshots the processed canvas; consumers never retain a live raw source.
-    this.canvas.toBlob((image) => {
+    // toBlob snapshots the processed (or scaled processed) canvas; consumers never retain a live raw source.
+    const encoded = (image: Blob | null): void => {
       if (!isCurrent()) return;
       if (!image) { this.fail('frame-failed'); return; }
       const frame = Object.freeze({ sessionId, frameId: `${sessionId}:generation:${generation}:frame:${sequence}`,
@@ -406,7 +521,9 @@ export class ScreenCapture {
       }).finally(() => {
         if (this.pendingFrame === token) this.pendingFrame = null;
       });
-    }, 'image/png');
+    };
+    if (quality === null) target.toBlob(encoded, 'image/png');
+    else target.toBlob(encoded, 'image/jpeg', quality);
   }
 
   private snapshotProvenance(): CaptureProvenance {

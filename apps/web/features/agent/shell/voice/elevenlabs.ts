@@ -39,6 +39,7 @@ export const connectElevenLabs: VoiceConnector = async (signedUrl, events, signa
     },
     sendContextualUpdate: (text) => { conversation.sendContextualUpdate(text); },
     sendUserMessage: (text) => { conversation.sendUserMessage(text); },
+    setMicMuted: (muted) => { conversation.setMicMuted(muted); },
     end: async () => { await conversation.endSession(); },
   };
 };

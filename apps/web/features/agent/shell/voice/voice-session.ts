@@ -19,6 +19,7 @@ export class VoiceSession {
   private connected = false;
   private ended = false;
   private started = false;
+  private micMuted = false;
 
   constructor(connector: VoiceConnector) {
     this.connector = connector;
@@ -55,6 +56,17 @@ export class VoiceSession {
       return;
     }
     this.handle = handle;
+    if (this.micMuted) this.applyMute();
+  }
+
+  /** Mutes the microphone now and for the rest of this session (applied as soon as the conversation opens). */
+  setMicMuted(muted: boolean): void {
+    this.micMuted = muted;
+    this.applyMute();
+  }
+
+  private applyMute(): void {
+    try { this.handle?.setMicMuted?.(this.micMuted); } catch { /* a closed conversation has no microphone to mute */ }
   }
 
   conversationId(): string {
