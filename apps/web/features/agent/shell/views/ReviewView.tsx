@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { EvidenceLinks, NotWired, StepCards } from '../components/Parts.tsx';
 import { ConductorReview } from '../conductor/ConductorReview.tsx';
 import { useConductorLeads } from '../conductor/hooks.ts';
+import { ClipaNow } from '../feed/ClipaNow.tsx';
+import { LiveFeed } from '../feed/LiveFeed.tsx';
 import { useShell, useShellState } from '../hooks.ts';
 
 /** Review (Reflect): the conductor's board while the conductor leads, else the in-browser brain's debrief (the fallback). */
@@ -20,6 +22,7 @@ function BrainReview() {
   const buttons = useShellState((s) => s.review.buttons);
   const notice = useShellState((s) => s.review.notice);
   const map = useShellState((s) => s.draftMap);
+  const running = useShellState((s) => s.phase === 'live' && s.session?.mode === 'review');
   const [correcting, setCorrecting] = useState(false);
   const [draft, setDraft] = useState('');
 
@@ -36,30 +39,19 @@ function BrainReview() {
 
   return (
     <div className="as-view" data-testid="view-review">
+      <ClipaNow
+        idle={brain.wired && teachBack.text === null && gaps.length === 0 && (map.guardrails ?? []).length === 0
+          ? 'No rule in the map yet: run Show first, then come back here.'
+          : running ? 'Answer what is open, then confirm or correct what I read back.' : 'Press Start Reflect for a spoken debrief.'}
+      />
       {!brain.wired && (
-        <NotWired>
-          the debrief and the teach-back ({brain.name}): the brain writes the gap questions and the teach-back text, and decides when
-          the debrief is done. Questions deferred in Learn do show up below.
-        </NotWired>
-      )}
-      {brain.wired && (
-        <p className="as-note" data-testid="review-hint">
-          Start Review for a spoken debrief: Clipa asks what is still unclear, then plays the process back. Confirm or correct it by voice
-          or with the buttons. {map.version !== undefined && <>Work Map version {map.version}{map.confirmed ? ', confirmed' : ', not confirmed yet'}.</>}
-        </p>
-      )}
-
-      {brain.wired && teachBack.text === null && gaps.length === 0 && (map.guardrails ?? []).length === 0 && (
-        <p className="as-notwired" role="status" data-testid="review-next-step">
-          <strong>Next step:</strong> the Work Map holds no rule yet, so there is no teach-back to confirm. Run Learn first (do the task,
-          answer a few of Clipa&apos;s questions), then come back here. Questions deferred in Learn show up below as open gaps.
-        </p>
+        <NotWired>the debrief and the teach-back ({brain.name}). Questions deferred in Show still appear below.</NotWired>
       )}
 
       <section aria-labelledby="as-gaps-title">
-        <h3 className="as-h3" id="as-gaps-title">Open gaps <span className="as-count">{gaps.length + waiting.length}</span></h3>
+        <h3 className="as-h3" id="as-gaps-title">Open questions <span className="as-count">{gaps.length + waiting.length}</span></h3>
         {gaps.length + waiting.length === 0 ? (
-          <p className="as-empty">No open gaps. Gaps come from the brain and from questions deferred during Learn.</p>
+          <p className="as-empty">No open questions.</p>
         ) : (
           <ul className="as-gaps">
             {gaps.map((g) => (
@@ -71,7 +63,7 @@ function BrainReview() {
             {waiting.map((f) => (
               <li key={f.id} className="as-gap">
                 <p className="as-gap__text">{f.text}</p>
-                <p className="as-note">{f.status === 'deferred' ? 'Deferred in Learn' : 'Not spoken in Learn'} · {f.whyNow}</p>
+                <p className="as-note">{f.status === 'deferred' ? 'Saved for Reflect' : 'Not spoken in Show'}</p>
                 <EvidenceLinks ids={f.evidenceIds} />
               </li>
             ))}
@@ -86,10 +78,7 @@ function BrainReview() {
         {hasText ? (
           <>
             <blockquote className="as-teachback" data-testid="teachback-text">{teachBack.text}</blockquote>
-            <p className="as-note" data-testid="teachback-digest">
-              Confirm and Correct count for exactly this text{teachBack.digest !== null && <> (fingerprint <code>{teachBack.digest}</code>)</>}. Until you confirm
-              it, the rule is provisional and the tutor will not apply it.
-            </p>
+            <p className="as-note">Until you confirm it, the rule is provisional and the tutor does not apply it.</p>
           </>
         ) : (
           <p className="as-empty">No teach-back yet. Clipa repeats the process back once there is enough to repeat; you then confirm it or correct it.</p>
@@ -116,10 +105,12 @@ function BrainReview() {
         )}
       </section>
 
+      <LiveFeed visible={3} empty={running ? 'Changes to the map appear here as you talk.' : 'Nothing yet: start Reflect and talk to Clipa.'} />
+
       <section aria-labelledby="as-rmap-title">
-        <h3 className="as-h3" id="as-rmap-title">Work Map so far <span className="as-count">{map.steps.length} steps{map.version !== undefined ? ` · version ${map.version}` : ''}</span></h3>
+        <h3 className="as-h3" id="as-rmap-title">Work Map so far <span className="as-count">{map.steps.length} steps</span></h3>
         {map.steps.length === 0
-          ? <p className="as-empty">The Work Map fills from the Learn session. Run Learn first, then come back.</p>
+          ? <p className="as-empty">The map fills from Show: run Show first.</p>
           : <StepCards map={map} />}
       </section>
     </div>

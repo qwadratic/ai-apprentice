@@ -263,9 +263,13 @@ export function emptyLedger(): MapLedger {
   return { prev: null, seq: 0, entries: [] };
 }
 
-/** The ledger after a digest was seen at `atMs`; the same object when nothing changed. A null digest (no map) changes nothing. */
+/**
+ * The ledger after a digest was seen at `atMs`; the same object when nothing changed. A null digest (no map: a new Show starts
+ * over) keeps the items but forgets the last map, so the next map reads "Ready" again instead of a list of removals.
+ */
 export function advanceLedger(ledger: MapLedger, next: MapDigest | null, atMs: number): MapLedger {
-  if (next === null || (ledger.prev !== null && ledger.prev.sig === next.sig)) return ledger;
+  if (next === null) return ledger.prev === null ? ledger : { ...ledger, prev: null };
+  if (ledger.prev !== null && ledger.prev.sig === next.sig) return ledger;
   const seq = ledger.seq + 1;
   const added = mapChangeEntries(ledger.prev, next, atMs, seq);
   return { prev: next, seq, entries: [...added, ...ledger.entries].slice(0, MAP_LEDGER_MAX) };
