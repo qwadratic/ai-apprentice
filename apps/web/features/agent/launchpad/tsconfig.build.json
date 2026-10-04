@@ -1,0 +1,13 @@
+{
+  // Sources import each other as "./x.ts" (the repo standard, also runnable by Node's type stripping);
+  // the browser loads plain ES modules, so the emit rewrites those specifiers to "./x.js".
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "allowImportingTsExtensions": false,
+    "rewriteRelativeImportExtensions": true,
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src"]
+}

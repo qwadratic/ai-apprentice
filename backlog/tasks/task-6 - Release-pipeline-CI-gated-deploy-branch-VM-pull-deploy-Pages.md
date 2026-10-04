@@ -5,6 +5,7 @@ status: To Do
 assignee:
   - '@qwadratic'
 created_date: '2026-10-03 23:15'
+updated_date: '2026-10-04 00:51'
 labels:
   - shared
   - infra
@@ -17,7 +18,7 @@ ordinal: 33000
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Implements doc-8: every merged PR reaches the demo automatically, no person or agent logs into the VM for app code. Stream A's part (server entry in apps/api mounting both routers, root tsconfig.base.json, converting A's .mjs) is tracked under TASK-2.
+Implements doc-8 with the 'Change after review' and the webhook: a green push to main publishes Pages (launch page + lab, deploy.json) and calls the VM's signed deploy webhook; the Actions run shows the VM result. DEPLOY_FREEZE stops releases; a manual run with a sha rolls back. No deploy branch and no timer.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria

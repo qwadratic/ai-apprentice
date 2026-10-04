@@ -1,5 +1,5 @@
 [Unit]
-Description=Apprentice deploy (pull DEPLOY_REF, install, build, restart, roll back on failure)
+Description=Apprentice deploy from DEPLOY_SOURCE (pages or ref): manual, or the optional timer
 After=network-online.target
 Wants=network-online.target
 
@@ -11,5 +11,6 @@ Group=apprentice
 # NoNewPrivileges must stay off: deploy.sh restarts the units through sudo.
 EnvironmentFile=/etc/apprentice/env
 ExecStart=/opt/apprentice/bin/apprentice-deploy
+TimeoutStartSec=30min
 StandardOutput=journal
 StandardError=journal

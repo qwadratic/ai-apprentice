@@ -1,9 +1,11 @@
 ---
 id: TASK-3.8
 title: 'App shell, Clipa agent face, Learn mode view'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@qwadratic'
 created_date: '2026-10-03 21:10'
+updated_date: '2026-10-04 01:12'
 labels:
   - stream-b
   - ux

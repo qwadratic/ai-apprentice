@@ -1,10 +1,10 @@
 ---
 id: TASK-6.2
 title: 'VM: deploy the SHA from deploy.json with the timer on'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-03 23:15'
-updated_date: '2026-10-03 23:23'
+updated_date: '2026-10-04 00:51'
 labels:
   - shared
   - infra
@@ -24,8 +24,8 @@ After PR #5 merges: run sudo infra/install.sh once, set DEPLOY_REF=deploy in /et
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Timer enabled; a test commit through release.yml is live on the VM within about 2 minutes; /health shows its SHA
-- [ ] #2 A deliberately failing deploy rolls back and is skipped on the next tick
+- [x] #1 Timer enabled; a test commit through release.yml is live on the VM within about 2 minutes; /health shows its SHA
+- [x] #2 A deliberately failing deploy rolls back and is skipped on the next tick
 <!-- AC:END -->
 
 ## Definition of Done
@@ -40,3 +40,9 @@ After PR #5 merges: run sudo infra/install.sh once, set DEPLOY_REF=deploy in /et
 <!-- SECTION:NOTES:BEGIN -->
 Per doc-8 'Change after review': the VM reads https://qwadratic.github.io/ai-apprentice/deploy.json, verifies the SHA is an ancestor of origin/main, deploys it; service code runs from the deployed checkout.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Pages deploy.json pull deploy worked (deployed_sha matched) and rollback plus skip were verified by the VM agent. Superseded by the signed webhook (PR #13, TASK-6.4); the timer is now disabled by design.
+<!-- SECTION:FINAL_SUMMARY:END -->

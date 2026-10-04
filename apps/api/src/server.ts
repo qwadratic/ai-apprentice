@@ -1,0 +1,10 @@
+import { createApi } from './app.ts';
+import { modules } from './modules.ts';
+const host = process.env.HOST || '0.0.0.0';
+const port = Number(process.env.PORT || 8000);
+if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('Invalid PORT');
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '').split(',').map((s) => s.trim()).filter(Boolean);
+const app = await createApi({allowedOrigins, modules});
+const server = app.listen(port, host, () => { console.info(`API foundation listening on ${host}:${port}`); });
+server.on('error', () => { console.error('API could not listen'); process.exitCode = 1; });
+for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => { server.close(() => { process.exitCode = 0; }); });

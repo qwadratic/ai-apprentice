@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clipa motion demo</title>
+<meta name="description" content="Clipa docks, notices, flies beside a field, speaks, listens, thinks, acknowledges, retreats, warns, points and goes off the record. A fake mail form and a control panel drive the director.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%230f9d94'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f3f6f5; --panel: #ffffff; --ink: #13221f; --muted: #586a66; --line: #d7e1df;
+    --accent: #0b7f74; --accent-soft: #dff4f0; --amber: #9a5a00; --amber-soft: #fff1d6; --danger: #b42318;
+    --mail-bg: #ffffff; --mail-ink: #1f2933; --mail-dim: #66717d; --mail-line: #e3e7eb; --mail-btn: #1f6feb; --mail-chip: #eef2f6;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e1514; --panel: #151f1e; --ink: #e4eeec; --muted: #94a7a3; --line: #263533;
+      --accent: #45cdbd; --accent-soft: #143430; --amber: #f5b54a; --amber-soft: #3a2a10; --danger: #ff8b7e;
+      --mail-bg: #1b2524; --mail-ink: #e4eeec; --mail-dim: #94a7a3; --mail-line: #2c3b39; --mail-btn: #3b82f6; --mail-chip: #243230;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e1514; --panel: #151f1e; --ink: #e4eeec; --muted: #94a7a3; --line: #263533;
+    --accent: #45cdbd; --accent-soft: #143430; --amber: #f5b54a; --amber-soft: #3a2a10; --danger: #ff8b7e;
+    --mail-bg: #1b2524; --mail-ink: #e4eeec; --mail-dim: #94a7a3; --mail-line: #2c3b39; --mail-btn: #3b82f6; --mail-chip: #243230;
+  }
+
+  * { box-sizing: border-box; }
+  html { color-scheme: light dark; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.45 var(--sans); }
+  .page { max-width: 1240px; margin: 0 auto; padding: 20px 16px 40px; display: grid; gap: 16px; }
+  h1 { margin: 0; font-size: 22px; line-height: 1.2; }
+  .sub { margin: 2px 0 0; color: var(--muted); max-width: 70ch; font-size: 15px; }
+  h2 { margin: 0 0 8px; font: 600 12px/1.2 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+
+  .layout { display: grid; grid-template-columns: minmax(0, 360px) minmax(0, 600px) minmax(0, 1fr); gap: 24px; align-items: start; }
+  @media (max-width: 1000px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+
+  /* Controls */
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: grid; gap: 12px; }
+  .hud { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .pill { font: 600 14px/1 var(--mono); padding: 7px 11px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); border: 1px solid var(--accent); }
+  .pill.muted { background: transparent; color: var(--muted); border-color: var(--line); font-weight: 400; }
+  .pill.warn { background: var(--amber-soft); color: var(--amber); border-color: var(--amber); }
+  .caption { margin: 0; min-height: 2.9em; font-size: 14px; color: var(--muted); }
+  .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  button, select, textarea, input[type="text"] { font: inherit; color: inherit; }
+  .btn { cursor: pointer; padding: 8px 6px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); font: 600 13px/1.2 var(--mono); min-width: 0; }
+  .btn:hover { border-color: var(--accent); }
+  .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn:disabled { opacity: 0.5; cursor: default; }
+  :is(.btn, select, textarea, input, summary):focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; font-size: 14px; }
+  .row label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+  select, textarea { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+  textarea { width: 100%; font: 13px/1.4 var(--mono); }
+  details summary { cursor: pointer; font-size: 14px; color: var(--muted); }
+  .log { margin: 0; padding: 0; list-style: none; font: 12px/1.35 var(--mono); height: 150px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+  .log li { padding: 1px 0; color: var(--muted); }
+  .log li.state { color: var(--accent); }
+  .log li.flight { color: var(--ink); }
+  .log li.illegal, .log li.gave-up, .log li.deferred { color: var(--danger); }
+  .log li.waiting, .log li.queued, .log li.dropped { color: var(--amber); }
+
+  /* The fake workspace: a mail composer Clipa moves around */
+  .mail { background: var(--mail-bg); color: var(--mail-ink); border: 1px solid var(--mail-line); border-radius: 12px; overflow: hidden; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06); }
+  .mail-bar { display: flex; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--mail-line); font-weight: 600; font-size: 14px; }
+  .mail-bar span:last-child { color: var(--mail-dim); font-weight: 400; }
+  .mail-body { padding: 14px; display: grid; gap: 10px; }
+  .field { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 8px; align-items: center; font-size: 14px; }
+  .field > span { color: var(--mail-dim); }
+  .mail input[type="text"], .mail textarea { width: 100%; background: transparent; color: inherit; border: 1px solid var(--mail-line); border-radius: 8px; padding: 8px 10px; font: 14px/1.45 var(--sans); }
+  .mail textarea { min-height: 112px; resize: vertical; }
+  .chip { display: inline-flex; gap: 8px; align-items: center; padding: 6px 10px; border-radius: 8px; background: var(--mail-chip); font-size: 13px; width: fit-content; }
+  .chip i { display: inline-block; width: 22px; height: 16px; border-radius: 3px; background: linear-gradient(135deg, #7fd4c8, #3a9bd0); }
+  .mail-foot { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-top: 1px solid var(--mail-line); }
+  .send { cursor: pointer; border: 0; border-radius: 8px; padding: 9px 22px; background: var(--mail-btn); color: #fff; font: 600 14px/1 var(--sans); }
+  .discard { color: var(--mail-dim); font-size: 13px; }
+
+  .replay { margin-top: 14px; background: var(--mail-bg); color: var(--mail-ink); border: 1px dashed var(--mail-line); border-radius: 12px; padding: 12px 14px; display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 12px; align-items: center; font-size: 14px; }
+  .replay .thumb { height: 56px; border-radius: 8px; background: linear-gradient(135deg, var(--accent-soft), var(--mail-chip)); border: 1px solid var(--mail-line); }
+  .replay p { margin: 0; }
+  .replay .meta { color: var(--mail-dim); font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="page">
+  <header>
+    <h1>Clipa motion demo</h1>
+    <p class="sub">The mail form on the right is a fake workspace. Clipa rests in the corner, small and half-transparent. Drive each state by hand, play the scripted sequence, or tick "typing" to see her refuse to move.</p>
+  </header>
+
+  <main class="layout">
+    <section class="panel" aria-label="Controls">
+      <div class="hud">
+        <span class="pill" id="statePill" aria-live="polite">dock</span>
+        <span class="pill muted" id="inputPill">input idle</span>
+      </div>
+      <p class="caption" id="caption">Press "Play auto sequence", or use the buttons.</p>
+
+      <div class="row">
+        <label for="targetSel">Target</label>
+        <select id="targetSel">
+          <option value="email/body" selected>Mail body</option>
+          <option value="email/to">To field</option>
+          <option value="email/subject">Subject field</option>
+          <option value="email/attachment">Attachment</option>
+          <option value="email/send">Send button</option>
+          <option value="evidence/replay">Expert replay</option>
+        </select>
+      </div>
+      <div class="grid" role="group" aria-label="States">
+        <button class="btn" type="button" data-act="notice">Notice</button>
+        <button class="btn" type="button" data-act="approach">Approach</button>
+        <button class="btn" type="button" data-act="speak">Speak</button>
+        <button class="btn" type="button" data-act="listen">Listen</button>
+        <button class="btn" type="button" data-act="think">Think</button>
+        <button class="btn" type="button" data-act="ack">Ack</button>
+        <button class="btn" type="button" data-act="retreat">Retreat</button>
+        <button class="btn" type="button" data-act="warn">Warn (Send)</button>
+        <button class="btn" type="button" data-act="point">Point (replay)</button>
+        <button class="btn" type="button" data-act="off" id="offBtn" aria-pressed="false">Off record</button>
+        <button class="btn primary" type="button" id="autoBtn" style="grid-column: span 2">Play auto sequence</button>
+      </div>
+      <div class="row">
+        <label for="level">Voice level</label>
+        <input id="level" type="range" min="0" max="1" step="0.01" value="0.4">
+      </div>
+      <div class="row">
+        <label><input id="typing" type="checkbox"> Simulate typing</label>
+        <label><input id="reduced" type="checkbox"> Reduced motion</label>
+      </div>
+      <details>
+        <summary>Apply a BrainDecision</summary>
+        <div class="row" style="margin: 8px 0">
+          <select id="example" aria-label="Example decision">
+            <option value="ask">ASK_NOW at the mail body</option>
+            <option value="warn">WARN at Send</option>
+            <option value="point">Pointing at the replay</option>
+            <option value="defer">DEFER</option>
+          </select>
+          <button class="btn" type="button" id="applyBtn">Apply</button>
+        </div>
+        <textarea id="decision" rows="9" spellcheck="false" aria-label="BrainDecision JSON"></textarea>
+      </details>
+      <ol class="log" id="log" aria-label="Event log"></ol>
+    </section>
+
+    <section aria-label="Fake mail workspace">
+      <div class="mail" data-clipa-surface="email">
+        <div class="mail-bar"><span>New message</span><span>Order 4471 &middot; synthetic data</span></div>
+        <div class="mail-body">
+          <label class="field"><span>To</span><input type="text" id="to" value="customer_07@example.test" data-clipa-surface="email" data-clipa-hint="to"></label>
+          <label class="field"><span>Subject</span><input type="text" id="subject" value="Your order is on its way" data-clipa-surface="email" data-clipa-hint="subject"></label>
+          <label class="field"><span>Body</span><textarea id="body" data-clipa-surface="email" data-clipa-hint="body">Delivery address: Example Street 12, 1010 Vienna
+Delivery window: Thursday 9:00-12:00</textarea></label>
+          <div class="field"><span>Attached</span><div class="chip" data-clipa-surface="email" data-clipa-hint="attachment"><i></i>order-template.png</div></div>
+        </div>
+        <div class="mail-foot">
+          <span class="discard">Draft saved</span>
+          <button class="send" type="button" id="send" data-clipa-surface="email" data-clipa-hint="send">Send</button>
+        </div>
+      </div>
+      <div class="replay" data-clipa-surface="evidence" data-clipa-hint="replay">
+        <div class="thumb" aria-hidden="true"></div>
+        <div><p><strong>Sabine's moment</strong></p><p class="meta">Replay: 0:42, address typed into the body</p></div>
+      </div>
+    </section>
+
+    <div aria-hidden="true"></div>
+  </main>
+</div>
+<script type="module" src="demo.js"></script>
+</body>
+</html>

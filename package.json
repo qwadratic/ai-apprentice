@@ -1,0 +1,34 @@
+{
+  "name": "ai-apprentice",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.22.0",
+    "npm": ">=10.9.0"
+  },
+  "workspaces": [
+    "apps/web",
+    "apps/api",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "node scripts/dev.ts",
+    "dev:web": "npm run dev --workspace @apprentice/web",
+    "dev:api": "npm run dev --workspace @apprentice/api",
+    "typecheck": "tsc --noEmit -p tsconfig.json && npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present && npm run test:screen",
+    "test:screen": "node scripts/test-screen.ts",
+    "build": "npm run build --workspace @apprentice/contracts && npm run build --workspace @apprentice/api && npm run build --workspace @apprentice/web",
+    "check": "npm run typecheck && npm test && npm run build",
+    "predev": "npm run build --workspace @apprentice/contracts",
+    "predev:web": "npm run build --workspace @apprentice/contracts",
+    "predev:api": "npm run build --workspace @apprentice/contracts",
+    "pretypecheck": "npm run build --workspace @apprentice/contracts",
+    "pretest": "npm run build --workspace @apprentice/contracts"
+  },
+  "devDependencies": {
+    "typescript": "~7.0.2",
+    "@types/node": "^22.20.5"
+  },
+  "packageManager": "npm@10.9.4"
+}

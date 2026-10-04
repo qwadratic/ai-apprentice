@@ -1,0 +1,27 @@
+[Unit]
+Description=Apprentice deploy webhook (127.0.0.1:8788, reached through the API's /ops/*)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=apprentice
+Group=apprentice
+EnvironmentFile=/etc/apprentice/env
+Environment=NODE_ENV=production OPS_HOST=127.0.0.1 OPS_PORT=8788
+# Code runs from the deployed checkout; deploy.sh restarts it when infra/ops changes.
+WorkingDirectory=/opt/apprentice/repo/infra/ops
+ExecStart=/usr/bin/node /opt/apprentice/repo/infra/ops/server.ts
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+# Writes only the deploy request and status files and the checkout's git refs (fetch).
+ProtectSystem=strict
+ReadWritePaths=/var/lib/apprentice /opt/apprentice/repo/.git
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

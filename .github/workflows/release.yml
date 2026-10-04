@@ -79,6 +79,10 @@ jobs:
             echo "::error::$sha is not on main; refusing to release it"
             exit 1
           fi
+          if [ "$EVENT" = "workflow_dispatch" ] && ! git cat-file -e "$sha:infra/ops/server.ts" 2>/dev/null; then
+            echo "::error::$sha predates the deploy webhook (no infra/ops), so the VM cannot be moved to it. Pick a commit after the webhook merge."
+            exit 1
+          fi
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           if [ "$EVENT" != "workflow_dispatch" ]; then
             head=$(git rev-parse origin/main)
@@ -128,14 +132,26 @@ jobs:
     with:
       ref: ${{ needs.prepare.outputs.sha }}
 
+  # Root workspace (stream A's web and API, stream B's packages): npm ci + npm run check on Node 22.22 and 24.
+  checks-workspace:
+    needs: prepare
+    if: needs.prepare.outputs.publish == 'true'
+    uses: ./.github/workflows/workspace-checks.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+
   pages-build:
     name: build site and deploy.json
-    needs: [prepare, gate, checks-stream-b, checks-backlog]
+    needs: [prepare, gate, checks-stream-b, checks-backlog, checks-workspace]
     if: needs.prepare.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pages: read # configure-pages
+    env:
+      # The one directory that is published: the launch page at its root, the web app (stream A + B) under app/
+      # and deploy.json at the root (the VM's DEPLOY_SOURCE=pages mode reads <pages>/deploy.json).
+      SITE_DIR: _site
     steps:
       - uses: actions/checkout@v4
         with:
@@ -154,39 +170,62 @@ jobs:
             echo "::error::$SHA is no longer the head of main ($head). A re-run must not publish an older commit; use a manual run (with the freeze) for a rollback."
             exit 1
           fi
-      - name: Lab lockfile exists at this commit
+      # Every releasable commit is after the webhook merge (prepare refuses older ones), so both the root
+      # workspace and the launch page exist.
+      - name: Root workspace and launch page exist at this commit
         env:
           SHA: ${{ needs.prepare.outputs.sha }}
         run: |
-          if [ ! -f apps/web/features/agent/lab/package-lock.json ]; then
-            echo "::error::apps/web/features/agent/lab/package-lock.json is missing at $SHA. This commit predates the lab lockfile and cannot be built; pick a newer sha."
-            exit 1
-          fi
+          set -euo pipefail
+          for f in package-lock.json apps/web/package.json apps/web/features/agent/launchpad/package-lock.json; do
+            [ -f "$f" ] || { echo "::error::$f is missing at $SHA; this commit cannot be published."; exit 1; }
+          done
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.22.0
           cache: npm
-          cache-dependency-path: apps/web/features/agent/lab/package-lock.json
-      - name: Build the lab page (tsc to dist/)
-        working-directory: apps/web/features/agent/lab
+          cache-dependency-path: |
+            package-lock.json
+            apps/web/features/agent/launchpad/package-lock.json
+      - name: Build the web app (stream A scaffold + stream B shell) for Pages
+        env:
+          WEB_BASE_PATH: /ai-apprentice/app/
+          VITE_API_BASE: https://apprentice.exe.xyz
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build --workspace @apprentice/contracts
+          npm run build --workspace @apprentice/web
+      - name: Build the launch page (tsc to dist/)
+        working-directory: apps/web/features/agent/launchpad
         run: |
           npm ci
           npm run typecheck
           npm run build
-      - name: Write deploy.json next to the site
+      # The web app stays under app/ until the product shell replaces A's debug view (A asked not to put a
+      # mock-only scaffold at the public root); then the two swap places.
+      - name: Assemble the site (launch page at the root, web app under app/)
+        run: |
+          set -euo pipefail
+          rm -rf "$SITE_DIR"
+          mkdir -p "$SITE_DIR/app"
+          cp -R apps/web/features/agent/launchpad/dist/. "$SITE_DIR/"
+          cp -R apps/web/dist/. "$SITE_DIR/app/"
+          find "$SITE_DIR" -type f | sort
+      - name: Write deploy.json at the site root
         env:
           SHA: ${{ needs.prepare.outputs.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          out=apps/web/features/agent/lab/dist/deploy.json
+          out="$SITE_DIR/deploy.json"
           jq -n --arg sha "$SHA" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg run "$RUN_URL" \
             '{sha: $sha, at: $at, run: $run}' > "$out"
           cat "$out"
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: apps/web/features/agent/lab/dist
+          path: ${{ env.SITE_DIR }}
 
   pages-deploy:
     name: publish to Pages
@@ -201,3 +240,86 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  deploy-vm:
+    name: deploy API to the exe.dev VM
+    # Runs after the site and deploy.json are published, so the web app and the API move together.
+    # The VM verifies the HMAC, the timestamp and that the sha is on main, then deploys it with its own
+    # build, health check and rollback (infra/deploy). This job waits for the result and fails if the
+    # VM rolled back, so every backend deploy is visible here.
+    needs: [prepare, pages-deploy]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      API: https://apprentice.exe.xyz
+      SHA: ${{ needs.prepare.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      # Repeated here because "re-run failed jobs" reuses prepare's outputs and skips the other guards:
+      # a re-run must never move the API back to an older sha or past a freeze.
+      - name: Not frozen, and still the newest releasable commit
+        env:
+          FREEZE: ${{ vars.DEPLOY_FREEZE }}
+          EVENT: ${{ github.event_name }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          if [ "$FREEZE" = "1" ] && ! { [ "$EVENT" = "workflow_dispatch" ] && [ "$CONFIRM" = "true" ]; }; then
+            echo "::error::DEPLOY_FREEZE=1: not deploying the API."
+            exit 1
+          fi
+          if [ "$EVENT" = "workflow_dispatch" ]; then exit 0; fi
+          git fetch --quiet origin main
+          head=$(git rev-parse origin/main)
+          if [ "$SHA" != "$head" ] && ! git diff --quiet "$SHA" "$head" -- . ':(exclude)backlog'; then
+            echo "::error::$SHA is no longer the head of main ($head); a re-run must not deploy an older commit."
+            exit 1
+          fi
+      - name: Request the deploy
+        env:
+          DEPLOY_WEBHOOK_SECRET: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DEPLOY_WEBHOOK_SECRET}" ]; then
+            echo "::error::DEPLOY_WEBHOOK_SECRET is not set; the API cannot be deployed."
+            exit 1
+          fi
+          body=$(jq -cn --arg sha "$SHA" --argjson ts "$(date +%s)" '{sha: $sha, ts: $ts}')
+          # The secret stays in the environment, never in a command line.
+          sig=$(BODY="$body" node -e 'process.stdout.write(require("crypto").createHmac("sha256", process.env.DEPLOY_WEBHOOK_SECRET).update(process.env.BODY).digest("hex"))')
+          # octet-stream: a JSON body parser in front of /ops must leave the signed bytes untouched.
+          code=$(curl -sS -o response.json -w '%{http_code}' --max-time 30 -X POST "$API/ops/deploy" \
+            -H 'Content-Type: application/octet-stream' -H "X-Deploy-Signature: sha256=$sig" --data-raw "$body")
+          cat response.json; echo
+          if [ "$code" != "202" ] && [ "$code" != "200" ]; then
+            echo "::error::The VM refused the deploy request (HTTP $code)."
+            exit 1
+          fi
+      - name: Wait for the VM to finish
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 72); do
+            # A restarting API may answer 502 or an HTML page: treat anything that is not a JSON object as "no news yet".
+            status=$(curl -fsS --max-time 10 "$API/ops/deploy/status" 2>/dev/null) || status='{}'
+            printf '%s' "$status" | jq -e 'type == "object"' >/dev/null 2>&1 || status='{}'
+            last_sha=$(printf '%s' "$status" | jq -r '.last.sha // empty')
+            state=$(printf '%s' "$status" | jq -r '.last.state // empty')
+            deployed=$(printf '%s' "$status" | jq -r '.deployed_sha // empty')
+            echo "$(date -u +%H:%M:%S) state=${state:-?} last=${last_sha:0:12} deployed=${deployed:0:12}"
+            if [ "$last_sha" = "$SHA" ]; then
+              case "$state" in
+                ok) echo "Deployed $SHA"; printf '%s\n' "$status" | jq .; exit 0 ;;
+                failed|rolled_back) printf '%s\n' "$status" | jq .; echo "::error::The VM could not deploy $SHA ($state)."; exit 1 ;;
+              esac
+            fi
+            sleep 5
+          done
+          echo "::error::Timed out after 6 minutes waiting for the VM to deploy $SHA."
+          exit 1
+      - name: Health after deploy
+        run: curl -fsS --max-time 10 "$API/health" | jq .
