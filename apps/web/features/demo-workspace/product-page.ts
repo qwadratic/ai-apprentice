@@ -103,8 +103,8 @@ prepareButton.onclick = async () => {
     mounted = createRuntimeWorkspace({
       workspaceRoot: element('[data-workspace-root]'), screenRoot: element('[data-screen-root]'), apiBase,
       authHeader: () => token,
-      // Called again by the panel in its trusted Start click; that exact instant owns the capture timeline epoch.
-      session: () => ({sessionId, sessionEpochMs: Date.now()}),
+      // The app owns one stable epoch; the panel only opens the picker from its Start click.
+      session: {sessionId, sessionEpochMs: Date.now()},
     });
     cleanup.push(mounted.bridge.onStatus(status => {
       runtimeStatus.textContent = `Screen ${status.state}${status.reason ? ` · ${status.reason}` : ''}`;

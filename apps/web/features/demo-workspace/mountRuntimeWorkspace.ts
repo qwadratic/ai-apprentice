@@ -3,6 +3,7 @@ import {createScreenBridge, mountScreenPanel} from '../screen/index.ts';
 import type {ScreenBridgeRuntime} from '../screen/index.ts';
 import type {WorkspaceSurface} from './activity.ts';
 import {createCheckpointAdapter} from './runtimeAdapter.ts';
+import {bindWorkspaceSession} from './runtimeSession.ts';
 import {mountDemoWorkspace} from './ui.ts';
 import {createWorkspace, type WorkspaceController} from './workspace.ts';
 
@@ -11,7 +12,7 @@ type VisualSurface = Extract<WorkspaceSurface, 'order' | 'email'>;
 export interface RuntimeWorkspaceOptions {
   readonly workspaceRoot: HTMLElement;
   readonly screenRoot: HTMLElement;
-  /** Prepared by the app. A getter may supply its exact epoch at the capture gesture. */
+  /** Prepared by the app. Both session ID and epoch must stay stable throughout this mount. */
   readonly session: SessionStart | (() => SessionStart);
   readonly apiBase: string;
   readonly authHeader: () => string | null;
@@ -59,24 +60,8 @@ export function createAlternatingProvenance(getState: () => WorkspaceSnapshot) {
 
 /** Mounts the real screen runtime and the synthetic workspace as one lifecycle. */
 export function createRuntimeWorkspace(options: RuntimeWorkspaceOptions): RuntimeWorkspaceMount {
-  const configuredSession = options.session;
-  const sessionProvider: () => SessionStart = typeof configuredSession === 'function'
-    ? configuredSession
-    : () => configuredSession;
-  const preparedSession = sessionProvider();
-  if (!preparedSession.sessionId.trim() || !Number.isFinite(preparedSession.sessionEpochMs)) {
-    throw new TypeError('A prepared screen session is required.');
-  }
-  const sessionId = preparedSession.sessionId;
-  let sessionEpochMs = preparedSession.sessionEpochMs;
-  function sessionAtCapture(): SessionStart {
-    const session = sessionProvider();
-    if (session.sessionId !== sessionId || !Number.isFinite(session.sessionEpochMs)) {
-      throw new Error('The prepared screen session changed before capture.');
-    }
-    sessionEpochMs = session.sessionEpochMs;
-    return structuredClone(session);
-  }
+  const sessionBinding = bindWorkspaceSession(options.session);
+  const {sessionId, sessionEpochMs} = sessionBinding.session;
 
   let workspace!: WorkspaceController;
   const provenance = createAlternatingProvenance(() => workspace.getState());
@@ -93,13 +78,20 @@ export function createRuntimeWorkspace(options: RuntimeWorkspaceOptions): Runtim
 
   workspace = createWorkspace({
     sessionId,
+    acquisitionTimeoutMs: 15_000,
+    replyTimeoutMs: 4_000,
     activityClock: {
       now: () => Math.max(0, Date.now() - sessionEpochMs),
       setTimer: (callback, delayMs) => setTimeout(callback, delayMs),
       clearTimer: handle => clearTimeout(handle as ReturnType<typeof setTimeout>),
     },
     onInputActivity(activity) {
-      if (capturing && !workspace.getState().offRecord) adapter.onInputActivity(activity);
+      if (!capturing || workspace.getState().offRecord) return;
+      try { adapter.onInputActivity(activity); }
+      catch {
+        // A queued heartbeat may outlive the runtime session; keep the activity timer usable.
+        console.warn('Workspace activity skipped: screen session unavailable.');
+      }
     },
   });
 
@@ -127,7 +119,7 @@ export function createRuntimeWorkspace(options: RuntimeWorkspaceOptions): Runtim
   const unmountScreen = mountScreenPanel(options.screenRoot, {
     capture: runtime.capture,
     controller: runtime.panelController,
-    session: sessionAtCapture,
+    session: sessionBinding.atCapture,
   });
 
   return {

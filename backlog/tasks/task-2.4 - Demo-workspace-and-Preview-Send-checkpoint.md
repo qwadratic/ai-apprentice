@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@kigulx'
 created_date: '2026-10-03 21:16'
-updated_date: '2026-10-04 02:35'
+updated_date: '2026-10-04 02:53'
 labels:
   - stream-a
   - workspace
@@ -45,6 +45,8 @@ Assigned worker: demo workspace. Own apps/web/features/demo-workspace and its co
 Create the assigned isolated worktree from the published assignment revision. Implement synthetic cases, workspace state, draft revision invalidation and checkpoint behavior with tests, then scoped UI components. Do not edit app shell or root dependencies. Hand off the independent slice; wire the approved ScreenBridge once available.
 
 Integrate canonical workspace with real ScreenBridge runtime on pinned PR21: current vision registry, input activity, checkpoint dispatch/reply, and a working workspace page. Preserve reviewed PR21 and B sources; use distinct file ownership for parallel agents.
+
+Resolve PR33 review: split bounded vision acquisition (15s) from checkpoint reply deadline (4s), expose acquisition state, preserve app off-record after failed resume, reject restarted timelines under a reused session ID, and pin the mount epoch. Verify each with focused regressions before publishing the combined fix.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
