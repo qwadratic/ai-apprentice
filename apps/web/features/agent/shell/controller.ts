@@ -264,7 +264,6 @@ export class ShellController {
     const epochMs = this.deps.now(); // the start click: the only origin of the session timeline
     const run = ++this.runId;
     this.askedCount = 0;
-    this.decisionCount = 0;
     this.clearPendingAsk();
     this.bufferedContext = [];
     this.contextDropNoted = false;
@@ -335,6 +334,8 @@ export class ShellController {
       this.uploader.stopRecording();
     }
     this.store.dispatch({ type: 'OFF_RECORD_SET', on: true });
+    // A live source coordinates the workspace and the capture itself (also before capture has started).
+    try { await this.source?.setOffRecord?.(true); } catch (e) { this.err(`The workspace could not go off the record cleanly: ${errMsg(e)}`); }
     this.deps.presenter.say('');
     this.deps.presenter.setTarget(null);
     await this.teardown('Off the record: session ended, microphone closed. What was already sent is not deleted or recalled.');
@@ -607,7 +608,31 @@ export class ShellController {
     if (this.source || !this.session) return;
     const info = this.state.session;
     const scenario: SampleScenarioId = info?.mode === 'teach' ? this.state.teach.sampleCase : info?.mode === 'learn' ? 'learn' : 'neutral';
-    const source = this.deps.createSampleSource(scenario);
+    await this.attach(this.deps.createSampleSource(scenario), run, true);
+  }
+
+  /**
+   * Stream A's integrated runtime (the real bridge behind the demo workspace) attaches here once its mount exists. It replaces a
+   * sample source, and is never started by the shell: the real bridge's start opens the screen picker, which only the person's own
+   * click in the panel may do. The controller listens to its observations, status and checkpoints and answers every checkpoint.
+   */
+  async attachLiveSource(source: ObservationSource): Promise<void> {
+    if (this.state.phase !== 'live' || !this.session) {
+      source.dispose();
+      return;
+    }
+    if (this.source) await this.stopSource();
+    await this.attach(source, this.runId, false);
+  }
+
+  /** `Bearer <token>` of the live session for the real bridge's own requests, or null (placeholder API, no session). The token is never stored or logged. */
+  authHeader(): string | null {
+    const header = this.session?.events().headers['Authorization'];
+    return header ?? null;
+  }
+
+  private async attach(source: ObservationSource, run: number, autoStart: boolean): Promise<void> {
+    if (!this.session) return;
     this.source = source;
     this.evidenceSources = [...this.evidenceSources.filter((s) => s !== source), source].slice(-6);
     this.sourceOff = [
@@ -616,7 +641,8 @@ export class ShellController {
       source.onCheckpoint((c) => { if (this.source === source) void this.onCheckpoint(c); }),
     ];
     this.store.dispatch({ type: 'SCREEN_SOURCE', source: { label: source.label, synthetic: source.synthetic } });
-    this.sys(`Observation source: ${source.label}. Invented data, not your screen.`);
+    this.sys(`Observation source: ${source.label}.${source.synthetic ? ' Invented data, not your screen.' : ''}`);
+    if (!autoStart) return;
     try {
       await source.start({ sessionId: this.session.sessionId, sessionEpochMs: this.epochMs });
     } catch (e) {
@@ -642,6 +668,7 @@ export class ShellController {
     this.store.dispatch({ type: 'SAMPLE_SET', on });
     const info = this.state.session;
     if (this.state.phase !== 'live' || !info || info.mode === 'review') return;
+    if (this.source && !this.source.synthetic) return; // the real screen is attached: the sample never replaces it
     if (on) await this.startSample(this.runId);
     else await this.stopSource();
   }

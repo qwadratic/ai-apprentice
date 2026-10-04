@@ -117,7 +117,10 @@ export function reduce(state: ShellState, action: Action): ShellState {
     case 'SESSION_STARTING':
       return {
         ...state,
-        ...(action.mode === 'learn' ? learnReset(state) : { banner: withoutError(state.banner) }),
+        ...(action.mode === 'learn'
+          ? learnReset(state)
+          // Review and Teach keep what Learn produced; a new Teach case starts without the previous case's checkpoint card.
+          : { banner: withoutError(state.banner), replay: { evidenceId: null }, clipaHint: null, teach: { ...state.teach, checkpoint: action.mode === 'teach' ? null : state.teach.checkpoint } }),
         phase: 'starting',
         session: null,
         voice: { phase: 'idle', thinking: false, error: null },

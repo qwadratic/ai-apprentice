@@ -37,7 +37,12 @@ export class InputGuard {
 }
 
 /** Listens for key presses and input events anywhere in the page. Returns the function that removes the listeners. */
-export function watchPageInput(guard: InputGuard, target: Pick<Document, 'addEventListener' | 'removeEventListener'>): () => void {
+export interface PageEventTarget {
+  addEventListener(type: string, listener: () => void, capture?: boolean): void;
+  removeEventListener(type: string, listener: () => void, capture?: boolean): void;
+}
+
+export function watchPageInput(guard: InputGuard, target: PageEventTarget): () => void {
   const onInput = (): void => guard.noteInput();
   target.addEventListener('keydown', onInput, true);
   target.addEventListener('input', onInput, true);

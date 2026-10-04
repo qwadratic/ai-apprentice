@@ -1,5 +1,7 @@
 // Wires the real world (browser fetch, timers, ElevenLabs, localStorage, the Clipa motion director) into the controller.
 import { createClipaDirector } from '../clipa/src/index.ts';
+import '../../demo-workspace/workspace.css';
+import { createDemoWorkspaceAdapter } from './slots/demo-workspace-adapter.ts';
 import type { WorkspaceAdapter } from './slots/workspace-adapter.ts';
 import { createAgentApi } from './api.ts';
 import type { FetchLike } from './api.ts';
@@ -13,7 +15,9 @@ import { API_BASE } from './config.ts';
 import { ShellController } from './controller.ts';
 import type { ControllerTimers, KeyValueStorage } from './controller.ts';
 import { SampleObservationSource } from './screen/sample-source.ts';
+import { LiveMount } from './screen/live-mount.ts';
 import { SAMPLE_CUSTOMERS } from './screen/sample-scenarios.ts';
+import type { CreateRuntimeWorkspace } from './screen/runtime-workspace-source.ts';
 import { connectElevenLabs } from './voice/elevenlabs.ts';
 
 export interface ShellRuntime {
@@ -21,6 +25,8 @@ export interface ShellRuntime {
   clipa: ClipaStore;
   /** Stream A's demo workspace behind the seam of slots/workspace-adapter.ts; null until it is wired (the slot shows stand-ins). */
   workspace: WorkspaceAdapter | null;
+  /** Stream A's integrated runtime (real bridge, screen panel, workspace) mounted per session; null until A's commit is on main. */
+  live: LiveMount | null;
   /** Removes the Clipa layer and the page listeners. The controller is disposed separately. */
   dispose(): void;
 }
@@ -43,6 +49,12 @@ function newId(): string {
     ? crypto.randomUUID()
     : `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
+
+/**
+ * Stream A's `createRuntimeWorkspace` (apps/web/features/demo-workspace/index.ts, not on main yet). When it lands, replace this
+ * null with the import: the shell then mounts it per session and uses its bridge instead of the sample source. Nothing else changes.
+ */
+const createRuntimeWorkspace: CreateRuntimeWorkspace | null = null;
 
 export function createRuntime(): ShellRuntime {
   const store = createClipaStore();
@@ -78,13 +90,17 @@ export function createRuntime(): ShellRuntime {
     storage: browserStorage,
   });
   note = (type, text) => controller.note(type, text);
+  const live = createRuntimeWorkspace === null ? null : new LiveMount({ factory: createRuntimeWorkspace, controller, apiBase: API_BASE });
   // The sample source is the only observation source until stream A's bridge is wired in: it is on, and labelled synthetic.
-  void controller.setSampleObservations(true);
+  if (live === null) void controller.setSampleObservations(true);
   return {
     controller,
     clipa: store,
-    workspace: null,
+    // Stream A's demo workspace; its checkpoint port (A's adapter over the real bridge, PR #21) plugs in here when it lands.
+    workspace: createDemoWorkspaceAdapter(),
+    live,
     dispose() {
+      live?.dispose();
       stopWatching();
       presenter.dispose();
     },

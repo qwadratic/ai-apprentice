@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useShell, useShellState } from '../hooks.ts';
 import type { WorkspaceAdapter } from './workspace-adapter.ts';
 
@@ -9,17 +9,30 @@ import type { WorkspaceAdapter } from './workspace-adapter.ts';
  * nothing outside this file: the real workspace's elements get the same marks through the mount adapter (doc-9, section 3.2).
  */
 export function WorkspaceSlot({ adapter = null }: { adapter?: WorkspaceAdapter | null }) {
-  const { controller } = useShell();
+  const { controller, live: liveMount } = useShell();
   const sessionId = useShellState((s) => s.session?.id ?? null);
   const offRecord = useShellState((s) => s.offRecord);
   const ref = useRef<HTMLElement | null>(null);
   const mountRef = useRef<HTMLDivElement | null>(null);
   const adapterRef = useRef<WorkspaceAdapter | null>(null);
+  // The sample source (invented observations) is what the brain reads until the real screen bridge lands, so the stand-ins are the
+  // default; the person can switch to the real workspace to look at it. Its Preview is not connected to the agent yet.
+  const [useReal, setUseReal] = useState(false);
+  const mounted = adapter !== null && useReal;
+  const liveRef = useRef<HTMLDivElement | null>(null);
+
+  // With stream A's integrated runtime the workspace mounts here for the session, with the real bridge behind it.
+  useEffect(() => {
+    const root = liveRef.current;
+    if (!root || liveMount === null) return undefined;
+    liveMount.setRoots({ workspace: root });
+    return () => liveMount.setRoots({ workspace: null });
+  }, [liveMount]);
 
   // A real workspace mounts once per adapter (not per session): a new session or off the record only calls the adapter's setters.
   useEffect(() => {
     const root = mountRef.current;
-    if (adapter === null || root === null) return undefined;
+    if (adapter === null || !useReal || root === null) return undefined;
     adapterRef.current = adapter;
     const unmount = adapter.mount(root, {
       sessionId: () => controller.store.getState().session?.id ?? null,
@@ -27,7 +40,7 @@ export function WorkspaceSlot({ adapter = null }: { adapter?: WorkspaceAdapter |
       reportInput: (typing) => controller.reportInput(typing),
     });
     return () => { unmount(); adapterRef.current = null; };
-  }, [adapter, controller]);
+  }, [adapter, controller, useReal]);
   useEffect(() => { adapterRef.current?.setSession?.(sessionId); }, [sessionId]);
   useEffect(() => { adapterRef.current?.setOffRecord?.(offRecord); }, [offRecord]);
 
@@ -42,13 +55,25 @@ export function WorkspaceSlot({ adapter = null }: { adapter?: WorkspaceAdapter |
   return (
     <section className="as-card as-workspace" aria-labelledby="as-workspace-title" ref={ref} data-clipa-surface="workspace">
       <div className="as-card__head">
-        <h2 className="as-card__title" id="as-workspace-title">{adapter ? adapter.label : 'Workspace (stream A)'}</h2>
-        {adapter === null && <span className="as-tag as-tag--muted">not mounted</span>}
+        <h2 className="as-card__title" id="as-workspace-title">{mounted && adapter ? adapter.label : 'Workspace (stream A)'}</h2>
+        {!mounted && <span className="as-tag as-tag--muted">{adapter === null ? 'not mounted' : 'stand-ins'}</span>}
       </div>
-      {adapter !== null && <div ref={mountRef} className="as-workspace__mount" />}
-      {adapter === null && <><p className="as-note">
-        The demo workspace (order table, email draft, ticket) mounts here when stream A delivers it. The boxes below are stand-ins for
-        it: Clipa flies to them, nothing is simulated in them, and nothing in them is clickable.
+      {liveMount !== null && <div ref={liveRef} className="as-workspace__mount" data-testid="live-workspace" />}
+      {liveMount === null && adapter !== null && (
+        <label className="as-switch">
+          <input type="checkbox" checked={useReal} onChange={(e) => setUseReal(e.target.checked)} />
+          <span>
+            <strong>Show the real demo workspace</strong>
+            <span className="as-switch__hint">
+              Its Preview is not connected to the agent until the real screen bridge is wired in: it says &quot;No agent is connected&quot; and
+              checks nothing. The sample observations do not follow what you do in it.
+            </span>
+          </span>
+        </label>
+      )}
+      {liveMount === null && mounted && <div ref={mountRef} className="as-workspace__mount" />}
+      {liveMount === null && !mounted && <><p className="as-note">
+        The demo workspace (order table, email draft, ticket) is stream A&apos;s. The boxes below are stand-ins for it: Clipa flies to them, nothing is simulated in them, and nothing in them is clickable.
       </p>
       <div className="as-standin" aria-label="Stand-ins for the workspace surfaces">
         <div className="as-standin__box" data-clipa-surface="order"><strong>Order</strong> <span>customer, order, address, window</span></div>

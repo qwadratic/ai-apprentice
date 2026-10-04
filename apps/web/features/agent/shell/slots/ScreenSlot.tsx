@@ -15,13 +15,22 @@ import { useShell, useShellState } from '../hooks.ts';
  * the session must exist first: Start a mode, then choose the window.
  */
 export function ScreenSlot({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
-  const { controller } = useShell();
+  const { controller, live: liveMount } = useShell();
   const live = useShellState((s) => s.phase === 'live');
   const rootRef = useRef<HTMLDivElement | null>(null);
 
+  // With stream A's integrated runtime, its own screen panel mounts in this box for the session and owns the capture: this slot
+  // then starts no capture of its own (the screen is never captured twice).
   useEffect(() => {
     const root = rootRef.current;
-    if (!root) return undefined;
+    if (!root || liveMount === null) return undefined;
+    liveMount.setRoots({ screen: root });
+    return () => liveMount.setRoots({ screen: null });
+  }, [liveMount]);
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root || liveMount !== null) return undefined;
     const capture = new ScreenCapture();
     const unregister = controller.registerCapture(capture);
     const unmount = mountScreenPanel(root, { capture, session: () => controller.captureSession() });
@@ -30,7 +39,7 @@ export function ScreenSlot({ collapsed, onToggle }: { collapsed: boolean; onTogg
       unregister();
       capture.dispose();
     };
-  }, [controller]);
+  }, [controller, liveMount]);
 
   return (
     <section className="as-card as-screen" aria-labelledby="as-screen-title" data-collapsed={collapsed ? 'true' : 'false'}>
@@ -50,7 +59,7 @@ export function ScreenSlot({ collapsed, onToggle }: { collapsed: boolean; onTogg
         ref={rootRef}
         className="as-screen__mount"
         hidden={collapsed}
-        inert={!live}
+        inert={liveMount === null && !live}
         data-live={live ? 'true' : 'false'}
       />
     </section>

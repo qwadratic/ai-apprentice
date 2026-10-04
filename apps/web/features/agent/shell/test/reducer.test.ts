@@ -159,3 +159,27 @@ test('the store notifies only on a real change', () => {
   store.dispatch({ type: 'MODE_SET', mode: 'review' });
   assert.equal(calls, 1);
 });
+
+test('a new Teach session clears the previous checkpoint card but keeps the mastery and the case; Review keeps both', () => {
+  const card = { checkpointId: 'cp-1', status: 'warn' as const, message: 'm', evidenceIds: ['e'], atMs: 5, deliveryError: null };
+  let s = reduce(initialState(), { type: 'SAMPLE_CASE_SET', caseId: 't3' });
+  s = reduce(s, { type: 'CHECKPOINT_RESULT', card });
+  s = reduce(s, { type: 'MASTERY_SET', mastery: { mastered: ['a'], practise: ['b'] } });
+  const review = reduce(s, { type: 'SESSION_STARTING', mode: 'review' });
+  assert.equal(review.teach.checkpoint, card);
+  const teach = reduce(s, { type: 'SESSION_STARTING', mode: 'teach' });
+  assert.equal(teach.teach.checkpoint, null);
+  assert.deepEqual(teach.teach.mastery, { mastered: ['a'], practise: ['b'] });
+  assert.equal(teach.teach.sampleCase, 't3');
+  const learn = reduce(s, { type: 'SESSION_STARTING', mode: 'learn' });
+  assert.equal(learn.teach.mastery, null, 'a new Learn session starts the Teach progress over');
+  assert.equal(learn.teach.sampleCase, 't3', 'but keeps the chosen case');
+});
+
+test('the feed takes a `said` item and ignores a second item with the same id', () => {
+  const item = { id: 'd-1', decision: 'WARN' as const, topic: 'checkpoint', text: 'Hold on', status: 'said' as const, note: null, whyNow: 'x', evidenceIds: [], atMs: 1, answer: null };
+  let s = reduce(initialState(), { type: 'FEED_ADD', item });
+  s = reduce(s, { type: 'FEED_ADD', item: { ...item, text: 'again' } });
+  assert.equal(s.feed.length, 1);
+  assert.equal(s.feed[0]?.status, 'said');
+});

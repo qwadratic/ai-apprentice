@@ -88,7 +88,7 @@
         "ev-f-0003"
       ],
       "facts": {
-        "recipientRef": "contact_customer_07",
+        "recipientRef": "customer_07",
         "subject": "Delivery details for order ORD-2041",
         "bodyText": "",
         "attachments": [],
@@ -139,7 +139,7 @@
         "ev-f-0004"
       ],
       "facts": {
-        "recipientRef": "contact_customer_07",
+        "recipientRef": "customer_07",
         "subject": "Delivery details for order ORD-2041",
         "bodyText": "",
         "attachments": [
@@ -195,7 +195,7 @@
         "ev-clip-template-replaced"
       ],
       "facts": {
-        "recipientRef": "contact_customer_07",
+        "recipientRef": "customer_07",
         "subject": "Delivery details for order ORD-2041",
         "bodyText": "",
         "attachments": [],
@@ -246,7 +246,7 @@
         "ev-clip-template-replaced"
       ],
       "facts": {
-        "recipientRef": "contact_customer_07",
+        "recipientRef": "customer_07",
         "subject": "Delivery details for order ORD-2041",
         "bodyText": "Hello, here are the delivery details for order ORD-2041.\nAddress: 14 Sample Lane, 1010 Exampletown",
         "attachments": [],
@@ -313,7 +313,7 @@
         "ev-clip-template-replaced"
       ],
       "facts": {
-        "recipientRef": "contact_customer_07",
+        "recipientRef": "customer_07",
         "subject": "Delivery details for order ORD-2041",
         "bodyText": "Hello, here are the delivery details for order ORD-2041.\nAddress: 14 Sample Lane, 1010 Exampletown\nDelivery window: 2026-10-12 14:00-16:00",
         "attachments": [],
@@ -380,7 +380,7 @@
         "ev-f-0014"
       ],
       "facts": {
-        "recipientRef": "contact_customer_07",
+        "recipientRef": "customer_07",
         "subject": "Delivery details for order ORD-2041",
         "bodyText": "Hello, here are the delivery details for order ORD-2041.\nAddress: 14 Sample Lane, 1010 Exampletown\nDelivery window: 2026-10-12 14:00-16:00",
         "attachments": [],

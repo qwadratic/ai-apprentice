@@ -305,7 +305,7 @@ test('the brain tick receives the signals of the shell', async () => {
   await rig.controller.start('learn');
   rig.timers.advance(500);
   assert.deepEqual(seen[0], {
-    sessionId: 'sess-1', mode: 'learn', persona: 'quiet', offRecord: false, voiceConnected: true, agentSpeaking: false, asked: 0,
+    sessionId: 'sess-1', mode: 'learn', persona: 'quiet', offRecord: false, voiceConnected: true, agentSpeaking: false, humanSpeaking: false, asked: 0,
   });
 });
 

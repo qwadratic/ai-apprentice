@@ -230,7 +230,7 @@ export interface Rig {
   capture: FakeCapture;
 }
 
-export function createRig(options: { responders?: Responder[]; brain?: Brain; base?: string } = {}): Rig {
+export function createRig(options: { responders?: Responder[]; brain?: Brain; createBrain?: (log: (line: string) => void) => Brain; base?: string; scenarios?: boolean } = {}): Rig {
   const timers = new FakeTimers();
   const clock = { base: 1_700_000_000_000, now: () => clock.base + timers.now };
   const { fetch, calls } = recordingFetch(...(options.responders ?? [modernApi()]));
@@ -240,14 +240,16 @@ export function createRig(options: { responders?: Responder[]; brain?: Brain; ba
   const presenter = new FakePresenter();
   const capture = new FakeCapture();
   capture.order = trace;
-  const brain = options.brain ?? new NullBrain();
+  let brain: Brain = options.brain ?? new NullBrain();
   const sources: ObservationSource[] = [];
   const api: AgentApi = createAgentApi({ base: options.base ?? 'https://api.example.invalid', fetch, now: clock.now, newId: () => 'legacy-session-id' });
   const memory = new Map<string, string>();
   const deps: ControllerDeps = {
-    api, fetch, connectVoice: voice.connector, createBrain: () => brain,
-    createSampleSource: () => {
-      const source = new SampleObservationSource(clock.now, timers);
+    api, fetch, connectVoice: voice.connector,
+    createBrain: (log) => { brain = options.createBrain ? options.createBrain(log) : brain; return brain; },
+    // `scenarios: true` plays the scripts of the product (the customer_07 Learn run and the Teach cases); by default the neutral sample.
+    createSampleSource: (scenario) => {
+      const source = new SampleObservationSource(clock.now, timers, options.scenarios ? scenario : 'neutral');
       const stop = source.stop.bind(source);
       source.stop = async () => { trace.push('source.stop'); await stop(); };
       sources.push(source);
@@ -256,7 +258,8 @@ export function createRig(options: { responders?: Responder[]; brain?: Brain; ba
     presenter, now: clock.now, perfNow: () => timers.now, timers, isHidden: () => false,
     storage: { get: (k) => memory.get(k) ?? null, set: (k, v) => { memory.set(k, v); } },
   };
-  return { controller: new ShellController(deps), timers, voice, presenter, brain, calls, clock, sources, trace, capture };
+  const controller = new ShellController(deps);
+  return { controller, timers, voice, presenter, brain, calls, clock, sources, trace, capture };
 }
 
 /** Lets pending promise callbacks run. */
