@@ -262,6 +262,42 @@ test('a runtime starts each session id once and accepts a distinct app session',
   instance.dispose();
 });
 
+test('a delayed resume failure cannot latch privacy on a replacement session', async () => {
+  const harness = createHarness(); let oldResumeCalls = 0; let failOldResume!: () => void;
+  const oldResumeFailure = new Promise<Response>(resolve => {
+    failOldResume = () => resolve(Response.json({ok: false}, {status: 503}));
+  });
+  const instance = createScreenBridgeRuntime({apiBase: '', authHeader: () => 'Bearer browser-session-token-12345',
+    sourceRevision: () => null, captureRuntime: harness.runtime, fetch: async (input, init) => {
+      const url = new URL(String(input), 'https://test');
+      const sessionId = decodeURIComponent(url.pathname.split('/')[3]!);
+      if (url.pathname.endsWith('/start')) return Response.json({sessionId, generation: 1, nextCursor: 0,
+        status: {schemaVersion: 1, sessionId, state: 'capturing'}}, {status: 201});
+      if (url.pathname.endsWith('/updates')) return Response.json({sessionId, generation: 1, observations: [], statuses: [], nextCursor: 0});
+      const body = JSON.parse(String(init?.body));
+      if (sessionId === 'old' && body.command === 'resume' && ++oldResumeCalls === 2) return oldResumeFailure;
+      return Response.json({sessionId, generation: body.generation + 1, nextCursor: 0,
+        status: {schemaVersion: 1, sessionId, state: body.command === 'pause' ? 'paused' : 'capturing'}}, {status: 200});
+    }});
+  await instance.bridge.start({sessionId: 'old', sessionEpochMs: 0});
+  instance.capture.confirmMasks(instance.capture.getSnapshot().geometry!.revision);
+  await instance.bridge.resume(); await instance.bridge.pause();
+  const staleResume = instance.bridge.resume();
+  await tick();
+
+  const stoppingOld = instance.bridge.stop();
+  const replacement = createHarness();
+  harness.runtime.getDisplayMedia = async () => replacement.stream as unknown as MediaStream;
+  await instance.bridge.start({sessionId: 'new', sessionEpochMs: 10});
+  failOldResume();
+  await assert.rejects(staleResume, /http_503/);
+  await stoppingOld;
+  instance.capture.confirmMasks(instance.capture.getSnapshot().geometry!.revision);
+  await instance.panelController.resume();
+  assert.equal(instance.capture.getSnapshot().state, 'capturing', 'old failure must not latch privacy on the new session');
+  instance.dispose();
+});
+
 function observation() {
   return {schemaVersion: 1, id: 'o', sessionId: 's', sequence: 1, timestampMs: 1, source: 'vision', frameId: 'f',
     sourceRevision: 'order-r1', kind: 'order_view', facts: {customerRef: null, orderId: null, deliveryAddress: null, deliveryWindow: null},

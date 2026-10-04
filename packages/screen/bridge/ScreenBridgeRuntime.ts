@@ -252,7 +252,7 @@ class Runtime implements ScreenBridgeRuntime {
         active.serverReady = true; this.#emitStatus('capturing'); this.#schedulePoll(active, 0);
       }
     } catch (error) {
-      if (appOwned) this.#offRecord = true;
+      if (appOwned && this.#active === active) this.#offRecord = true;
       if (this.#current(active, privacyGeneration)) {
         this.#captureCommand = true; try { this.capture.pause('user-paused'); } finally { this.#captureCommand = false; }
         this.#emitStatus('error', transportReason(error));
