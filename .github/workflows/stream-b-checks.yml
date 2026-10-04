@@ -44,7 +44,7 @@ jobs:
       - name: Type-check every package that has a lockfile
         run: |
           set -euo pipefail
-          for dir in packages/agent apps/api/agent/elevenlabs apps/web/features/agent/lab apps/web/features/agent/launchpad; do
+          for dir in packages/agent apps/api/agent/elevenlabs apps/web/features/agent/lab apps/web/features/agent/launchpad apps/web/features/agent/clipa; do
             if [ -f "$dir/package-lock.json" ]; then
               echo "::group::typecheck $dir"
               (cd "$dir" && npm ci && npm run typecheck)
@@ -84,4 +84,17 @@ jobs:
             npm run build
           else
             echo "::notice::skipping launch page build (no package-lock.json yet)"
+          fi
+
+      - name: Clipa motion tests and build
+        run: |
+          set -euo pipefail
+          dir=apps/web/features/agent/clipa
+          if [ -f "$dir/package-lock.json" ]; then
+            cd "$dir"
+            npm ci
+            npm test
+            npm run build
+          else
+            echo "::notice::skipping Clipa motion (no package-lock.json yet)"
           fi

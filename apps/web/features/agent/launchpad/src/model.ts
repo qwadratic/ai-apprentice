@@ -63,11 +63,19 @@ export interface ApiHealth {
   ok: boolean;
   runner: string | null;
   deployedSha: string | null;
+  /** Where runner and deployedSha came from: /ops/vm-health (apps/api) or /health itself (the placeholder API). */
+  source: 'vm-health' | 'health';
 }
 
 export function parseHealth(data: unknown): ApiHealth | null {
   if (!isRecord(data) || typeof data['ok'] !== 'boolean') return null;
-  return { ok: data['ok'], runner: asText(data['runner']), deployedSha: asSha(data['deployed_sha']) };
+  return { ok: data['ok'], runner: asText(data['runner']), deployedSha: asSha(data['deployed_sha']), source: 'health' };
+}
+
+/** /ops/vm-health: {ok, runner: "up"|"down", git_sha, deployed_sha}. */
+export function parseVmHealth(data: unknown): ApiHealth | null {
+  if (!isRecord(data) || typeof data['ok'] !== 'boolean') return null;
+  return { ok: data['ok'], runner: asText(data['runner']), deployedSha: asSha(data['deployed_sha']), source: 'vm-health' };
 }
 
 // ---- VM: /ops/deploy/status ------------------------------------------------
