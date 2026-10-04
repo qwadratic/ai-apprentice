@@ -18,6 +18,8 @@ export interface LiveMountDeps {
    * screen (bridge-mount.ts) leaves the workspace slot to the shell's own adapter and stand-ins.
    */
   providesWorkspace: boolean;
+  /** Runs once per mount, after the controller attached it; returns its cleanup (the shell's Preview port, checkpoint-binding.ts). */
+  bind?: (mount: RuntimeWorkspaceMount) => () => void;
 }
 
 export class LiveMount {
@@ -25,7 +27,7 @@ export class LiveMount {
   readonly providesWorkspace: boolean;
   private workspaceRoot: HTMLElement | null = null;
   private screenRoot: HTMLElement | null = null;
-  private mounted: { sessionId: string; mount: RuntimeWorkspaceMount; unregisterCapture: () => void } | null = null;
+  private mounted: { sessionId: string; mount: RuntimeWorkspaceMount; unregisterCapture: () => void; unbind: () => void } | null = null;
   /** The session whose mount failed: it is not tried again (the failure note changes the store, which would call sync again). */
   private failedFor: string | null = null;
   private readonly off: () => void;
@@ -79,10 +81,16 @@ export class LiveMount {
     const root = this.workspaceRoot;
     if (this.providesWorkspace && root !== null && typeof root.querySelector === 'function') markClipaTargets(root);
     // `mounted` is set first: registering the capture changes the store, which calls sync again.
-    const current = { sessionId: wanted, mount, unregisterCapture: (): void => {} };
+    const current = { sessionId: wanted, mount, unregisterCapture: (): void => {}, unbind: (): void => {} };
     this.mounted = current;
     current.unregisterCapture = controller.registerCapture(mount.capture);
     await controller.attachLiveSource(new RuntimeWorkspaceSource(mount));
+    if (this.mounted !== current || this.deps.bind === undefined) return;
+    try {
+      current.unbind = this.deps.bind(mount);
+    } catch (e) {
+      controller.note('SCREEN', `The workspace check could not be connected: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
   private release(): void {
@@ -90,6 +98,7 @@ export class LiveMount {
     this.mounted = null;
     if (current === null) return;
     // The session is ending: the capture stops with it (the controller no longer holds it once it is unregistered).
+    try { current.unbind(); } catch { /* already gone */ }
     try { current.mount.capture.stop(); } catch { /* already stopped */ }
     current.unregisterCapture();
     current.mount.dispose();

@@ -49,6 +49,12 @@ export interface BrainSignals {
   humanSpeaking: boolean;
   /** Spoken decisions of this session so far. */
   asked: number;
+  /**
+   * Session time of the last key press or text input anywhere in the page (the demo workspace included), or null. The policy's
+   * typing channel reads it as well as the workspace heartbeats, which stop reaching the bridge whenever the screen runtime is not
+   * in its `capturing` state.
+   */
+  lastInputAtMs?: number | null;
 }
 
 export interface TranscriptTurn {

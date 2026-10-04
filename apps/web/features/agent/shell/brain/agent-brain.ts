@@ -24,6 +24,10 @@ import type {
 } from './types.ts';
 
 const REVIEW_GAP_MS = 1500;
+/** Learn says why it is not asking at most this often (a SKIP line in the decision log; never spoken). */
+export const WAITING_NOTE_MS = 20_000;
+/** A typing heartbeat built from the page's own input events counts as typing for this long after the last key. */
+const PAGE_TYPING_MS = 2000;
 /** A question that did not reach the person is not asked again for this long. */
 export const NOT_SPOKEN_BACKOFF_MS = 10_000;
 const MAX_OBSERVATIONS = 300;
@@ -121,6 +125,12 @@ export class AgentBrain implements Brain {
   private teach: TeachProgress | null = null;
   private outcomes: CaseOutcome[] = [];
   private notJudged: Array<{ caseId: string; title: string; why: string }> = [];
+  /** Last page input fed to the policy (session ms), and the last "why no question" note. */
+  private fedInputAtMs = Number.NEGATIVE_INFINITY;
+  private pageInputSeq = 0;
+  private waitingNote: { atMs: number; text: string } | null = null;
+  private lastLearnDecisionAtMs = 0;
+  private emptyNoted = false;
 
   constructor(options: AgentBrainOptions) {
     this.options = options;
@@ -146,6 +156,10 @@ export class AgentBrain implements Brain {
     this.lastAnsweredAtMs = null;
     this.asked = new Set();
     this.holdUntilMs = 0;
+    this.fedInputAtMs = Number.NEGATIVE_INFINITY;
+    this.waitingNote = null;
+    this.lastLearnDecisionAtMs = 0;
+    this.emptyNoted = false;
     this.clarifier = new ReviewClarifier();
     this.heard = null;
     this.buttons = false;
@@ -197,6 +211,40 @@ export class AgentBrain implements Brain {
     }
   }
 
+  /** Page key presses reach the policy's typing channel as heartbeats (a no-op when the workspace's own ones already arrived). */
+  private feedPageInput(policy: ConversationPolicy, nowMs: number, lastInputAtMs: number | null): void {
+    if (lastInputAtMs === null || lastInputAtMs <= this.fedInputAtMs || this.mode === 'review') return;
+    const last = Math.min(lastInputAtMs, nowMs);
+    this.fedInputAtMs = lastInputAtMs;
+    const heartbeat = {
+      schemaVersion: 1, id: `page-input-${++this.pageInputSeq}`, sessionId: this.sessionId, sequence: 0, timestampMs: nowMs,
+      source: 'workspace', frameId: null, sourceRevision: null, entityRef: null, evidenceIds: [], kind: 'input_activity',
+      facts: { surface: 'email', typing: nowMs - last < PAGE_TYPING_MS, lastInputAtMs: last, idleMs: nowMs - last },
+    } as unknown as ScreenObservation;
+    try { policy.observe(heartbeat); } catch (e) { this.options.log(`page input could not be used: ${errMsg(e)}`); }
+  }
+
+  /** Why Learn asks nothing right now, in plain words. */
+  private whyNoQuestion(policy: ConversationPolicy): string {
+    const pending = policy.candidates.filter((c) => c.state === 'pending').length;
+    const seen = this.observations.filter((o) => o.kind !== 'input_activity').length;
+    if (pending > 0) return `${pending} question${pending === 1 ? '' : 's'} wait for a natural pause`;
+    if (seen === 0) return 'no screen observation has arrived yet (share the window with the demo workspace)';
+    return `${seen} screen observation${seen === 1 ? '' : 's'}, and no change worth a question yet. Clipa asks when an attachment is removed or added, the recipient changes, the order details are typed into the message, Preview opens or the ticket is closed`;
+  }
+
+  /** A SKIP line for the decision log that says why nothing is asked, at most every WAITING_NOTE_MS and only after a quiet stretch. */
+  private waiting(nowMs: number, why: string): BrainDecision[] {
+    if (this.mode !== 'learn') return [];
+    const note = this.waitingNote;
+    if (nowMs - this.lastLearnDecisionAtMs < WAITING_NOTE_MS) return [];
+    if (note !== null && nowMs - note.atMs < WAITING_NOTE_MS) return [];
+    this.waitingNote = { atMs: nowMs, text: why };
+    return [{
+      decision: 'SKIP', topic: 'waiting', kind: 'waiting', evidenceIds: [], whyNow: `No question yet: ${why}.`, expectsAnswer: false,
+    }];
+  }
+
   onStatus(s: ScreenStatus): void {
     this.options.log(`screen status ${s.state}${s.reason ? ` (${s.reason})` : ''}`);
   }
@@ -222,11 +270,16 @@ export class AgentBrain implements Brain {
     if (this.mode === 'review') return [...out, ...this.reviewTick(nowMs, signals)];
     const policy = this.policy;
     if (policy === null) return out;
+    this.feedPageInput(policy, nowMs, signals?.lastInputAtMs ?? null);
     // Nothing is asked while the voice is not connected (it would only pile up "not spoken" items), and a question that did not
     // reach the person waits before it is asked again. Candidates stay in the policy's queue (and age into Review).
-    if (signals !== undefined && !signals.voiceConnected) return out;
+    if (signals !== undefined && !signals.voiceConnected) return [...out, ...this.waiting(nowMs, 'the voice is not connected, so Clipa cannot ask; questions wait in the queue')];
     if (nowMs < this.holdUntilMs) return out;
     for (const d of policy.tick(nowMs)) out.push(this.fromPolicy(d, policy));
+    if (this.mode === 'learn') {
+      if (out.length > 0) this.lastLearnDecisionAtMs = nowMs;
+      else out.push(...this.waiting(nowMs, this.whyNoQuestion(policy)));
+    }
     return out;
   }
 
@@ -508,7 +561,19 @@ export class AgentBrain implements Brain {
       return this.outbox.splice(0);
     }
     // After two unclear replies the buttons take over: nothing is asked again until one is pressed.
-    if (this.buttons || map.guardrails.length === 0) return [];
+    if (map.guardrails.length === 0 && !this.buttons) {
+      // Nothing to play back: say the next step once instead of going quiet.
+      if (!this.emptyNoted) {
+        this.emptyNoted = true;
+        return [{
+          decision: 'ASK_NOW', topic: 'review_empty', kind: 'review_empty', evidenceIds: [], expectsAnswer: false, clipa: { state: 'speaking' },
+          whyNow: 'The Work Map holds no rule yet, so there is no teach-back to confirm.',
+          utterance: { text: 'The map does not hold a rule yet, so I have nothing to play back. Run Learn first: do the task and answer a few questions. Then come back to Review.' },
+        }];
+      }
+      return [];
+    }
+    if (this.buttons) return [];
     // Planned here, stated in onSpoken (when it reaches the voice): a confirmation counts only for what the expert was told.
     const tb = stateTeachBack(this.state).teachBack;
     const questionId = `rv-${++this.reviewSeq}`;

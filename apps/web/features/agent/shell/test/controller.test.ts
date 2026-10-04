@@ -566,24 +566,32 @@ test('voice roles: Learn and Review talk to the interviewer, Teach requests role
   await rig.controller.end();
 });
 
-test('switching from a live Review to Teach ends the interviewer session and starts a tutor session', async () => {
+test('a tab click never ends or starts a session; the explicit switch ends Review and starts Teach with the tutor', async () => {
   const rig = createRig();
-  await rig.controller.start('review');
-  assert.match(must(rig.calls.find((c) => c.url.includes('/signed-url'))).url, /role=interviewer$/);
+  await rig.controller.start('learn');
   const first = must(rig.controller.store.getState().session).id;
+  const signedBefore = rig.calls.filter((c) => c.url.includes('/signed-url')).length;
+  // Tabs back and forth, many times: nothing starts, nothing ends, no loop.
+  for (let i = 0; i < 5; i++) {
+    for (const m of ['review', 'teach', 'learn'] as const) rig.controller.setMode(m);
+  }
+  rig.controller.setMode('review');
+  await settle();
+  let s = rig.controller.store.getState();
+  assert.equal(s.phase, 'live');
+  assert.equal(must(s.session).id, first, 'the Learn session is still the one running');
+  assert.equal(rig.calls.filter((c) => c.url.includes('/signed-url')).length, signedBefore, 'no new voice session from a tab click');
+  assert.equal(rig.calls.filter((c) => c.url.endsWith('/api/agent/sessions')).length, 1, 'no new server session from a tab click');
+  assert.equal(rig.voice.ended, false);
+  // The person's explicit switch: Learn ends, Teach starts with the tutor agent.
   rig.controller.setMode('teach');
-  await settle();
-  await settle();
-  const s = rig.controller.store.getState();
+  await rig.controller.switchSession('teach');
+  s = rig.controller.store.getState();
   assert.equal(s.phase, 'live');
   assert.equal(must(s.session).mode, 'teach');
   const roles = rig.calls.filter((c) => c.url.includes('/signed-url')).map((c) => /role=(\w+)/.exec(c.url)?.[1]);
   assert.deepEqual(roles, ['interviewer', 'tutor']);
-  assert.ok(s.events.some((e) => e.text.includes('Review ended')), `the Review session (${first}) was ended`);
-  // Switching back to Learn only ends the tutor session: a new Learn map is the person's choice.
-  rig.controller.setMode('learn');
-  await settle();
-  assert.notEqual(rig.controller.store.getState().phase, 'live');
+  assert.ok(s.events.some((e) => e.text.includes('Learn ended: the person started Teach')));
 });
 
 test('audio tags never reach an [ASK] line or a transcript', () => {

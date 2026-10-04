@@ -17,6 +17,8 @@ import type { ControllerTimers, KeyValueStorage } from './controller.ts';
 import { SampleObservationSource } from './screen/sample-source.ts';
 import { createRuntimeWorkspace } from '../../demo-workspace/index.ts';
 import { LiveMount } from './screen/live-mount.ts';
+import { bindWorkspaceCheckpoint } from './screen/checkpoint-binding.ts';
+import type { BindableWorkspace } from './screen/checkpoint-binding.ts';
 import { SAMPLE_CUSTOMERS } from './screen/sample-scenarios.ts';
 import type { CreateRuntimeWorkspace } from './screen/runtime-workspace-source.ts';
 import { connectElevenLabs } from './voice/elevenlabs.ts';
@@ -83,6 +85,9 @@ export function createRuntime(): ShellRuntime {
   let note: (type: string, text: string) => void = () => {};
   const guard = new InputGuard(() => performance.now());
   const stopWatching = watchPageInput(guard, document);
+  // The policy's typing channel: page key presses (the workspace's own heartbeats stop whenever the screen is not `capturing`).
+  let lastInputAt: number | null = null;
+  const stopInputClock = watchPageInput({ noteInput: () => { lastInputAt = Date.now(); } }, document);
   const director = createClipaDirector({
     root: document.body,
     dock: 'bottom-right',
@@ -109,10 +114,15 @@ export function createRuntime(): ShellRuntime {
     timers: browserTimers,
     isHidden: () => document.hidden,
     storage: browserStorage,
+    lastInputAt: () => lastInputAt,
   });
   note = (type, text) => controller.note(type, text);
   // A's createRuntimeWorkspace mounts the demo workspace itself (providesWorkspace).
-  const live = new LiveMount({ factory: liveFactory, controller, apiBase: API_BASE, providesWorkspace: true });
+  const live = new LiveMount({
+    factory: liveFactory, controller, apiBase: API_BASE, providesWorkspace: true,
+    // Preview & check is answered by the tutor whenever Teach runs, whatever state A's capture status is in.
+    bind: (mount) => bindWorkspaceCheckpoint({ workspace: mount.workspace as BindableWorkspace, bridge: mount.bridge, host: controller, now }),
+  });
   // The real screen is the default. The sample (invented data, labelled synthetic) is an opt-in switch: it never runs unasked, so
   // a Work Map is not mixed from invented and real observations.
   const runtime: ShellRuntime = {
@@ -124,6 +134,7 @@ export function createRuntime(): ShellRuntime {
     dispose() {
       live?.dispose();
       stopWatching();
+      stopInputClock();
       presenter.dispose();
     },
   };

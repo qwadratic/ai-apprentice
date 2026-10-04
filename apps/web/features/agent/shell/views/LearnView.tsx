@@ -18,6 +18,7 @@ export function LearnView() {
   const observations = useShellState((s) => s.observations);
   const synthetic = useShellState((s) => s.screen.source?.synthetic ?? false);
   const sawSynthetic = observations.some((o) => o.synthetic);
+  const waitingWhy = useShellState((s) => [...s.decisions].reverse().find((d) => d.topic === 'waiting')?.whyNow ?? null);
   const counts = {
     asked: feed.filter((f) => f.status === 'asked' || f.status === 'answered' || f.status === 'said').length,
     deferred: feed.filter((f) => f.status === 'deferred' || f.status === 'unspoken').length,
@@ -42,7 +43,10 @@ export function LearnView() {
       <section aria-labelledby="as-feed-title">
         <h3 className="as-h3" id="as-feed-title">Questions <span className="as-count">{counts.asked} asked · {counts.deferred} deferred</span></h3>
         {feed.length === 0 ? (
-          <p className="as-empty">No questions yet. Questions appear here as Clipa asks them, and deferred ones wait for Review.</p>
+          <>
+            <p className="as-empty">No questions yet. Questions appear here as Clipa asks them, and deferred ones wait for Review.</p>
+            {waitingWhy !== null && <p className="as-note" role="status" data-testid="learn-waiting">{waitingWhy}</p>}
+          </>
         ) : (
           <ol className="as-feed" aria-live="polite">
             {feed.map((item) => (
