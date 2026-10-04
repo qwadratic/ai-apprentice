@@ -3,13 +3,19 @@ import type { ScreenObservation } from '@apprentice/contracts';
 
 const MAX_QUESTION_CHARS = 400;
 
+const AUDIO_TAG = /\[[^\]]+\]/g;
+
+/** Text without bracketed audio tags ("[warmly]", "[pause]"): what was really said, for comparing and for the record. */
+export function stripAudioTags(text: string): string {
+  return text.replace(AUDIO_TAG, ' ').replace(/\s+/g, ' ').trim();
+}
+
 /**
- * The live agent says what follows [ASK] verbatim and otherwise calls skip_turn. The live model is flash_v2,
- * which would read intonation tags aloud, so no audio tags are added here (they come with a model that
- * understands them).
+ * The live agents (interviewer and tutor, v4 turbo) say what follows [ASK] verbatim and otherwise call skip_turn. v4 turbo would
+ * perform a bracketed audio tag, so none reaches an [ASK] line by accident: the question text is stripped of them.
  */
 export function askMessage(text: string): string {
-  const clean = text.replace(/\s+/g, ' ').trim().replace(/^\[ASK\]\s*/i, '').slice(0, MAX_QUESTION_CHARS);
+  const clean = stripAudioTags(text.replace(/^\s*\[ASK\]\s*/i, '')).slice(0, MAX_QUESTION_CHARS);
   return `[ASK] ${clean}`;
 }
 

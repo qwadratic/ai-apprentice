@@ -214,3 +214,17 @@ test('the teach-back text is shown verbatim, including what is assumed from the 
   const guardrails = must(review.map.guardrails);
   assert.ok(guardrails.some((g) => g.text.includes('The expert:')));
 });
+
+test('a case the tutor could not judge is "not judged", never mastered, and its title is not doubled', async () => {
+  const rig = productRig();
+  const state = { handled: 0 };
+  await learnThenReview(rig, state, withTeachBackReplies([]), 60_000);
+  const card = await teachCheckpoint(rig, state, 't1');
+  assert.equal(card.status, 'unknown');
+  const m = must(rig.controller.store.getState().teach.mastery);
+  assert.deepEqual(m.mastered, [], 'nothing is mastered without a judgement');
+  assert.deepEqual(m.practise, []);
+  assert.equal(m.notJudged?.length, 1);
+  assert.match(must(m.notJudged?.[0]), /not judged/);
+  assert.doesNotMatch(must(m.notJudged?.[0]), /T1 T1/);
+});

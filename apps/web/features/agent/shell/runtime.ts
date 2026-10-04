@@ -20,6 +20,7 @@ import { LiveMount } from './screen/live-mount.ts';
 import { SAMPLE_CUSTOMERS } from './screen/sample-scenarios.ts';
 import type { CreateRuntimeWorkspace } from './screen/runtime-workspace-source.ts';
 import { connectElevenLabs } from './voice/elevenlabs.ts';
+import type { VoiceConnector } from './voice/types.ts';
 
 export interface ShellRuntime {
   controller: ShellController;
@@ -57,7 +58,26 @@ function newId(): string {
  */
 const liveFactory: CreateRuntimeWorkspace = createRuntimeWorkspace;
 
+/**
+ * Seam for the browser harness only (end-to-end runs where no microphone or real speech exists): a hook the harness puts on
+ * `window.__APPRENTICE_HARNESS__` before the page loads. Nothing sets it in normal use; then the real voice is used.
+ */
+export interface HarnessHook {
+  connectVoice?: VoiceConnector;
+  onRuntime?(runtime: ShellRuntime): void;
+}
+
+function harnessHook(): HarnessHook | null {
+  try {
+    const hook = (window as unknown as { __APPRENTICE_HARNESS__?: HarnessHook }).__APPRENTICE_HARNESS__;
+    return hook !== undefined && hook !== null && typeof hook === 'object' ? hook : null;
+  } catch {
+    return null;
+  }
+}
+
 export function createRuntime(): ShellRuntime {
+  const harness = harnessHook();
   const store = createClipaStore();
   // The director logs refused or illegal commands: they go to the debug log once the controller exists.
   let note: (type: string, text: string) => void = () => {};
@@ -79,7 +99,7 @@ export function createRuntime(): ShellRuntime {
   const controller = new ShellController({
     api,
     fetch: fetchFn,
-    connectVoice: connectElevenLabs,
+    connectVoice: harness?.connectVoice ?? connectElevenLabs,
     // The real policy, Work Map and tutor of packages/agent (TASK-3.29); model calls go through the session's LLM route.
     createBrain: (log) => new AgentBrain({ log, customers: SAMPLE_CUSTOMERS }),
     createSampleSource: (scenario) => new SampleObservationSource(now, browserTimers, scenario),
@@ -95,7 +115,7 @@ export function createRuntime(): ShellRuntime {
   const live = new LiveMount({ factory: liveFactory, controller, apiBase: API_BASE, providesWorkspace: true });
   // The real screen is the default. The sample (invented data, labelled synthetic) is an opt-in switch: it never runs unasked, so
   // a Work Map is not mixed from invented and real observations.
-  return {
+  const runtime: ShellRuntime = {
     controller,
     clipa: store,
     // Stream A's demo workspace; its checkpoint port (A's adapter over the real bridge, PR #21) plugs in here when it lands.
@@ -107,4 +127,6 @@ export function createRuntime(): ShellRuntime {
       presenter.dispose();
     },
   };
+  harness?.onRuntime?.(runtime);
+  return runtime;
 }

@@ -179,3 +179,28 @@ test('on the placeholder API the brain says it has no LLM route and uses heurist
   const log = rig.controller.store.getState().events.map((e) => e.text).join('\n');
   assert.match(log, /No LLM route/);
 });
+
+test('Review: a follow-up that was not spoken is asked again after the back-off; Review never stalls', async () => {
+  const { brain, feed } = learnBrain();
+  feed(23_000);
+  const ask = must(brain.tick(23_000, signals()).find((d) => d.decision === 'ASK_NOW'));
+  await brain.onAnswer({ questionId: 'd-1', topic: ask.topic, text: expertAnswer('reason'), atMs: 30_000, kind: 'answer' });
+  feed(120_000);
+  brain.begin({ sessionId: 's2', mode: 'review', persona: 'plain', llm: null });
+  const rs = (): BrainSignals => signals({ mode: 'review', sessionId: 's2' });
+  const question = (d: { decision: string; expectsAnswer?: boolean }): boolean => d.decision === 'ASK_NOW' && d.expectsAnswer === true;
+  const first = must(brain.tick(1000, rs()).find(question));
+  assert.ok(must(first.questionId).startsWith('rv-'), 'a Review follow-up has an id');
+  brain.onNotSpoken(first);
+  assert.equal(brain.tick(2000, rs()).some(question), false, 'it waits before it is asked again');
+  const again = must(brain.tick(1000 + NOT_SPOKEN_BACKOFF_MS + 500, rs()).find(question));
+  assert.equal(again.topic, first.topic, 'the same follow-up comes back');
+  assert.notEqual(again.questionId, first.questionId);
+});
+
+test('Learn asks nothing while the voice is not connected (no pile of "not spoken" items)', () => {
+  const { brain, feed } = learnBrain();
+  feed(23_000);
+  assert.equal(brain.tick(23_000, signals({ voiceConnected: false })).some((d) => d.decision === 'ASK_NOW'), false);
+  assert.ok(brain.tick(23_500, signals()).some((d) => d.decision === 'ASK_NOW'), 'the question waited in the queue');
+});

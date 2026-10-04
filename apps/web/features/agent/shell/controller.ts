@@ -23,7 +23,7 @@ import type { Store } from './state/store.ts';
 import { MODES, PERSONAS } from './state/types.ts';
 import type { Action } from './state/reducer.ts';
 import type { CaptureInfo, DecisionEntry, FeedItem, Mode, Persona, ShellState } from './state/types.ts';
-import { observationToContext, summarizeObservation } from './voice/context.ts';
+import { observationToContext, stripAudioTags, summarizeObservation } from './voice/context.ts';
 import { scrub } from './voice/scrub.ts';
 import { SpeechGate } from './voice/speech-gate.ts';
 import type { VoiceConnector, VoiceEvents, VoiceMode } from './voice/types.ts';
@@ -94,9 +94,11 @@ function errMsg(e: unknown): string {
   return e instanceof Error && e.message ? e.message : String(e);
 }
 
-/** Voice role per mode. Teach moves to 'tutor' when the VM has a tutor agent (the API serves the interviewer only). */
-export function voiceRoleFor(_mode: Mode): VoiceRole {
-  return 'interviewer';
+/** Voice role per mode: Learn and Review talk to the interviewer agent, Teach to the tutor agent (its own voice, PR #38). */
+const MODE_NAMES: Record<Mode, string> = { learn: 'Learn', review: 'Review', teach: 'Teach' };
+
+export function voiceRoleFor(mode: Mode): VoiceRole {
+  return mode === 'teach' ? 'tutor' : 'interviewer';
 }
 
 interface PendingAsk {
@@ -210,6 +212,15 @@ export class ShellController {
   setMode(mode: Mode): void {
     this.store.dispatch({ type: 'MODE_SET', mode });
     if (mode === 'review') this.loadReview();
+    // One voice agent per session: a live session whose agent is not the one of the new mode ends. Teach starts its own session
+    // with the tutor at once; leaving Teach only ends the tutor session (starting Learn is the person's choice: it begins a new map).
+    const s = this.state;
+    if (s.phase !== 'live' || s.session === null || voiceRoleFor(s.session.mode) === voiceRoleFor(mode)) return;
+    const from = MODE_NAMES[s.session.mode];
+    void this.end(`${from} ended: ${MODE_NAMES[mode]} talks to the ${voiceRoleFor(mode)} agent.`).then(() => {
+      if (mode === 'teach' && this.state.mode === 'teach' && this.state.phase !== 'live') return this.start('teach');
+      return undefined;
+    });
   }
 
   setPersona(persona: Persona): void {
@@ -529,7 +540,8 @@ export class ShellController {
       onMode: (mode) => { if (live()) this.onVoiceMode(mode); },
       onMessage: (m) => {
         if (!live()) return;
-        const turn: TranscriptTurn = { role: m.source === 'ai' ? 'agent' : 'user', text: m.text, atMs: this.deps.now() - this.epochMs };
+        // v4 turbo may carry audio tags ("[warmly]"): they are not words, so they never reach the brain or the feed.
+        const turn: TranscriptTurn = { role: m.source === 'ai' ? 'agent' : 'user', text: stripAudioTags(m.text), atMs: this.deps.now() - this.epochMs };
         this.log('recv', turn.role === 'agent' ? 'AGENT' : 'USER', m.text);
         this.safe('onTranscript', () => this.brain.onTranscript(turn), undefined);
         if (turn.role === 'agent') this.store.dispatch({ type: 'VOICE_THINKING', thinking: false });
