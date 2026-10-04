@@ -4,6 +4,7 @@ Two videos for the submission (TASK-3.19). The web app header links to both ("De
 
 | File | What it covers | Script |
 | --- | --- | --- |
+| `apps/web/public/videos/clipa-story.mp4` | The story in 52 s: the problem, Meet Clipa, Show → Reflect → Pass it on on the customer_07 case, the closing line. Illustrated, synthetic data, AI voice; made by the team outside this toolkit | — |
 | `apps/web/public/videos/clipa-demo.mp4` | The product: the problem, then the whole journey Show → Reflect → Pass it on in the live web app | [video-demo.md](video-demo.md) |
 | `apps/web/public/videos/clipa-tech.mp4` | How it is built: architecture, the screen contract, the Conductor, the Work Map, the tutor check, how we built it, honest limits | [video-tech.md](video-tech.md) |
 
