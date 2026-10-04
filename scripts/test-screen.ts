@@ -8,8 +8,14 @@ const required = [
   'packages/screen/bridge',
   'apps/api/screen',
 ];
+const optional = [
+  'packages/screen/recording',
+  'packages/screen/evidence',
+  'apps/api/screen/recording',
+  'apps/web/features/screen/ReplayPanel',
+];
 const demo = 'apps/web/features/demo-workspace/tests';
-const directories = existsSync(demo) ? [...required, demo] : required;
+const directories = [...required, ...optional.filter(directory => existsSync(directory)), ...(existsSync(demo) ? [demo] : [])];
 const files: string[] = [];
 for (const directory of directories) {
   const tests = readdirSync(directory)
