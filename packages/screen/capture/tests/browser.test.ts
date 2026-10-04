@@ -10,6 +10,10 @@ type BrowserFrame = { image: Blob; timestampMs: number; geometry: { width: numbe
 type BrowserLease = { isCurrent(): boolean };
 type BrowserCapture = {
   canvas: HTMLCanvasElement;
+  start(session: { sessionId: string; sessionEpochMs: number }): Promise<void>;
+  pause(): void;
+  resume(): boolean;
+  stop(): void;
   createProcessedStream(): MediaStream;
   getSnapshot(): { geometry: { width: number } | null; masks: readonly unknown[]; state: string; reason?: string };
 };
@@ -19,6 +23,7 @@ declare global {
     framesReceived: BrowserFrame[];
     leases: BrowserLease[];
     requests: unknown[];
+    controllerCalls: string[];
     capture: BrowserCapture;
     processed: MediaStream;
     rawTrack: MediaStreamTrack;
@@ -92,6 +97,7 @@ test('Chromium: real canvas/PNG/processed stream pixels, panel masks, lifecycle 
       window.framesReceived = [];
       window.leases = [];
       window.requests = [];
+      window.controllerCalls = [];
       window.capture = new ScreenCapture({
         runtime: { ...browserCaptureRuntime(), getDisplayMedia: async (options: unknown) => { window.requests.push(options); return raw; } },
         frameIntervalMs: 100, renderIntervalMs: 15,
@@ -99,6 +105,15 @@ test('Chromium: real canvas/PNG/processed stream pixels, panel masks, lifecycle 
       });
       window.unmount = mountScreenPanel(document.querySelector('#panel'), {
         capture: window.capture, session: () => ({ sessionId: 'browser-synthetic', sessionEpochMs: Date.now() - 5000 }),
+        controller: {
+          start: async (session: { sessionId: string; sessionEpochMs: number }) => {
+            window.controllerCalls.push('start');
+            await window.capture.start(session);
+          },
+          pause: () => { window.controllerCalls.push('pause'); window.capture.pause(); },
+          resume: () => { window.controllerCalls.push('resume'); window.capture.resume(); },
+          stop: () => { window.controllerCalls.push('stop'); window.capture.stop(); },
+        },
       });
       window.resizeSource = () => {
         source.width = 640; source.height = 360; paint();
@@ -116,6 +131,7 @@ test('Chromium: real canvas/PNG/processed stream pixels, panel masks, lifecycle 
     await page.waitForFunction(() => window.capture.getSnapshot().geometry?.width === 320);
     assert.equal(await page.evaluate(() => window.framesReceived.length), 0);
     assert.deepEqual(await page.evaluate(() => window.requests), [{ video: true, audio: false }]);
+    assert.deepEqual(await page.evaluate(() => window.controllerCalls), ['start']);
     // Accessible coordinate entry covers the complete synthetic email.
     await page.getByLabel('Left (%)').fill('6.25');
     await page.getByLabel('Top (%)').fill('20');
@@ -165,8 +181,10 @@ test('Chromium: real canvas/PNG/processed stream pixels, panel masks, lifecycle 
     await page.waitForTimeout(300);
     assert.equal(await page.evaluate(() => window.framesReceived.length), paused.count);
     assert.equal(paused.stale, true); assert.equal(paused.enabled, false);
+    assert.deepEqual(await page.evaluate(() => window.controllerCalls.slice(-1)), ['pause']);
     await page.getByRole('button', { name: 'Resume', exact: true }).click();
     await page.waitForFunction((count: number) => window.framesReceived.length > count, paused.count);
+    assert.deepEqual(await page.evaluate(() => window.controllerCalls.slice(-1)), ['resume']);
     await page.evaluate(() => window.resizeSource());
     await page.waitForFunction(() => window.capture.getSnapshot().reason === 'geometry-changed');
     const resized = await page.evaluate(() => ({
