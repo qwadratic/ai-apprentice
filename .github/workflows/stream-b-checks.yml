@@ -44,7 +44,7 @@ jobs:
       - name: Type-check every package that has a lockfile
         run: |
           set -euo pipefail
-          for dir in packages/agent apps/api/agent/elevenlabs apps/web/features/agent/lab apps/web/features/agent/launchpad apps/web/features/agent/clipa; do
+          for dir in packages/agent apps/api/agent/elevenlabs apps/web/features/agent/launchpad apps/web/features/agent/clipa; do
             if [ -f "$dir/package-lock.json" ]; then
               echo "::group::typecheck $dir"
               (cd "$dir" && npm ci && npm run typecheck)
@@ -60,17 +60,6 @@ jobs:
           cd packages/agent
           if [ -f package-lock.json ]; then npm ci; fi
           npm test
-
-      - name: Agent lab build
-        run: |
-          set -euo pipefail
-          cd apps/web/features/agent/lab
-          if [ -f package-lock.json ]; then
-            npm ci
-            npm run build
-          else
-            echo "::notice::skipping lab build (no package-lock.json yet)"
-          fi
 
       # The launch page does not exist at commits before it; release.yml may check such a commit for a rollback,
       # so test for the lockfile before changing into the directory.
@@ -97,4 +86,19 @@ jobs:
             npm run build
           else
             echo "::notice::skipping Clipa motion (no package-lock.json yet)"
+          fi
+
+      # The briefing board (TASK-3.11) lives in the root workspace (React, contracts, @apprentice/agent), so it needs the root install.
+      # release.yml may check a commit from before the board existed, so test for the directory first.
+      - name: Briefing board tests
+        run: |
+          set -euo pipefail
+          dir=apps/web/features/agent/workmap
+          if [ -d "$dir/test" ]; then
+            npm ci
+            npm run build --workspace @apprentice/contracts
+            cd apps/web
+            node --import ./features/agent/workmap/test/register.mjs --test "features/agent/workmap/test/*.test.ts"
+          else
+            echo "::notice::skipping briefing board (not on this commit)"
           fi

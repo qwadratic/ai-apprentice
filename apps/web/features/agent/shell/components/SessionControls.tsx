@@ -20,7 +20,7 @@ export function SessionControls() {
   const busy = phase === 'starting' || phase === 'ending';
 
   return (
-    <section className="as-card" aria-labelledby="as-controls-title">
+    <section className="as-card as-session" aria-labelledby="as-controls-title">
       <h2 className="as-card__title" id="as-controls-title">Session</h2>
 
       {offRecord && (
@@ -31,9 +31,16 @@ export function SessionControls() {
 
       <div className="as-row">
         {running ? (
-          <button type="button" className="as-btn as-btn--primary" onClick={() => void controller.end('Session ended.')}>
-            End session
-          </button>
+          <>
+            <button type="button" className="as-btn as-btn--primary" onClick={() => void controller.end('Session ended.')}>
+              End session
+            </button>
+            {session && session.mode !== mode && (
+              <button type="button" className="as-btn" data-testid="switch-session" disabled={offRecord} onClick={() => void controller.switchSession(mode)}>
+                End {MODE_LABELS[session.mode]} and start {label}
+              </button>
+            )}
+          </>
         ) : (
           <button
             type="button"
@@ -47,7 +54,7 @@ export function SessionControls() {
       </div>
 
       {running && session && session.mode !== mode && (
-        <p className="as-note" role="status">A {MODE_LABELS[session.mode]} session is running. Its data stays here while you look at {label}.</p>
+        <p className="as-note" role="status">A {MODE_LABELS[session.mode]} session is running. Switching tabs does not end it; its data stays here while you look at {label}.</p>
       )}
       {!running && !offRecord && <p className="as-note">{START_HINT[mode]}</p>}
       {session && (
@@ -67,7 +74,7 @@ export function SessionControls() {
         <span>
           <strong>Use sample observations</strong> <span className="as-tag as-tag--warn">synthetic</span>
           <span className="as-switch__hint">
-            Invented screen events instead of your screen: a stand-in until stream A&apos;s vision is wired.
+            Invented screen events instead of your screen: the fallback that runs until you share a window in the Screen panel.
             {mode === 'review' ? ' Review does not use the screen.' : ''}
           </span>
         </span>

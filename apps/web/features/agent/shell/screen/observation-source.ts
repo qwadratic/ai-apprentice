@@ -11,6 +11,8 @@ export interface ObservationSource extends ScreenBridge {
   readonly synthetic: boolean;
   /** Synthetic sources can raise a sample checkpoint on demand (Teach). Real sources do not have this. */
   raiseSampleCheckpoint?(): void;
+  /** A live source coordinates the workspace and the capture for the off-the-record switch. Optional. */
+  setOffRecord?(on: boolean): Promise<void>;
   /** Stops timers and listeners. Idempotent. */
   dispose(): void;
 }

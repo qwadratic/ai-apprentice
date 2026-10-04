@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import './shell.css';
 import { Banner } from './components/Banner.tsx';
 import { DebugDrawer } from './components/DebugDrawer.tsx';
@@ -6,6 +6,7 @@ import { Header } from './components/Header.tsx';
 import { SessionControls } from './components/SessionControls.tsx';
 import { StatusBar } from './components/StatusBar.tsx';
 import { ClipaAgent } from './clipa/ClipaAgent.tsx';
+import { setClipaFavicon } from './components/ClipaLogo.tsx';
 import { ShellContext, useShellState } from './hooks.ts';
 import { createRuntime } from './runtime.ts';
 import { ReplaySlot } from './slots/ReplaySlot.tsx';
@@ -35,6 +36,12 @@ function ModePanels() {
   );
 }
 
+/** The main area carries the mode, so each mode gets its own layout (shell.css) while every slot stays mounted. */
+function ModeLayout({ children }: { children: ReactNode }) {
+  const mode = useShellState((s) => s.mode);
+  return <main className="as-main" data-mode={mode}>{children}</main>;
+}
+
 /** The product page: mode switcher, status bar, workspace area on the left, Clipa and the mode view on the right. */
 export function AppShell() {
   const [runtime] = useState(createRuntime);
@@ -43,7 +50,8 @@ export function AppShell() {
 
   useEffect(() => {
     const { controller } = runtime;
-    document.title = 'AI Apprentice';
+    document.title = 'Clipa';
+    setClipaFavicon();
     const onVisibility = (): void => controller.onVisibilityChange(document.hidden);
     const onPageHide = (): void => controller.onPageHide();
     document.addEventListener('visibilitychange', onVisibility);
@@ -52,6 +60,7 @@ export function AppShell() {
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('pagehide', onPageHide);
       controller.dispose();
+      runtime.dispose();
     };
   }, [runtime]);
 
@@ -61,10 +70,10 @@ export function AppShell() {
         <Header debugOpen={debugOpen} onToggleDebug={() => setDebugOpen((v) => !v)} />
         <StatusBar />
         <Banner />
-        <main className="as-main">
+        <ModeLayout>
           <div className="as-left">
             <ScreenSlot collapsed={screenCollapsed} onToggle={() => setScreenCollapsed((v) => !v)} />
-            <WorkspaceSlot />
+            <WorkspaceSlot adapter={runtime.workspace} />
           </div>
           <div className="as-right">
             <section className="as-card as-clipa-card" aria-label="Clipa">
@@ -74,7 +83,7 @@ export function AppShell() {
             <ModePanels />
             <ReplaySlot />
           </div>
-        </main>
+        </ModeLayout>
         <DebugDrawer open={debugOpen} onClose={() => setDebugOpen(false)} />
       </div>
     </ShellContext.Provider>

@@ -1,0 +1,110 @@
+/* The simulated desktop. Everything is scoped under .sim-desktop: no bare element selectors, nothing leaks into the workspace. */
+.sim-desktop {
+  --sim-bar: #0d2d33;
+  --sim-bar-ink: #e8f6f4;
+  --sim-accent: #0f9d94;
+  --sim-flag: #ffd66b;
+  --sim-wall-a: #1f6f78;
+  --sim-wall-b: #17485c;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 560px;
+  overflow: hidden;
+  border-radius: 10px;
+  border: 1px solid #2f5a62;
+  font: 14px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif;
+  color: var(--sim-bar-ink);
+  background: var(--sim-bar);
+}
+.sim-desktop .sim-banner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  align-items: baseline;
+  padding: 6px 14px;
+  background: #3a2c00;
+  color: #fff3c9;
+  border-bottom: 2px solid var(--sim-flag);
+}
+.sim-desktop .sim-banner strong { color: var(--sim-flag); letter-spacing: 0.02em; }
+.sim-desktop .sim-banner span { font-size: 12.5px; opacity: 0.9; }
+.sim-desktop .sim-wallpaper {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  padding: 14px;
+  display: flex;
+  background: linear-gradient(135deg, var(--sim-wall-a), var(--sim-wall-b));
+}
+.sim-desktop .sim-window {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #f3f6f1;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+}
+.sim-desktop .sim-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  background: var(--sim-bar);
+  color: var(--sim-bar-ink);
+  font-weight: 600;
+}
+.sim-desktop .sim-dots {
+  width: 38px;
+  height: 11px;
+  background:
+    radial-gradient(circle at 5px 5.5px, #ff6b6b 4.5px, transparent 5.5px),
+    radial-gradient(circle at 19px 5.5px, #ffd66b 4.5px, transparent 5.5px),
+    radial-gradient(circle at 33px 5.5px, #6bd88b 4.5px, transparent 5.5px);
+}
+.sim-desktop .sim-window-body { flex: 1; min-height: 0; overflow: auto; padding: 10px; }
+.sim-desktop .sim-taskbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: var(--sim-bar);
+  color: var(--sim-bar-ink);
+}
+.sim-desktop .sim-start { background: var(--sim-accent); color: #fff; border-radius: 4px; padding: 2px 12px; font-weight: 700; }
+.sim-desktop .sim-task { border: 1px solid #2f5a62; border-radius: 4px; padding: 2px 12px; background: #17454d; }
+.sim-desktop .sim-note { color: #9be7df; font-size: 12.5px; }
+.sim-desktop .sim-tag { margin-left: auto; color: var(--sim-flag); font-weight: 700; letter-spacing: 0.06em; font-size: 12px; }
+.sim-desktop .sim-clock { font-variant-numeric: tabular-nums; }
+.sim-desktop .sim-cursor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 50;
+  pointer-events: none;
+  transition-property: transform;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  filter: drop-shadow(0 2px 3px rgb(0 0 0 / 0.5));
+}
+.sim-desktop .sim-cursor.clicking::after {
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: -8px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--sim-flag);
+  animation: sim-click 0.45s ease-out forwards;
+}
+@keyframes sim-click {
+  from { transform: scale(0.4); opacity: 1; }
+  to { transform: scale(1.8); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sim-desktop .sim-cursor.clicking::after { animation: none; opacity: 0; }
+}

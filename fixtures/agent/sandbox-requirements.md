@@ -19,7 +19,7 @@ Per observation: `schemaVersion: 1`, `id`, `sessionId`, `sequence`, `timestampMs
 | kind | facts |
 | --- | --- |
 | `order_view` | `customerRef` (`customer_07` ... ), `orderId`, `deliveryAddress`, `deliveryWindow`; each is `null` when unreadable, masked or unknown |
-| `email_draft` | `recipientRef` (or `null`), `subject`, `bodyText`, `attachments[]` = `{kind: image\|pdf\|other, ocrText?}`, `previewState` = `editing\|preview\|sent` |
+| `email_draft` | `recipientRef` (the visible recipient customer, e.g. `customer_07`, as in the workspace; not a separate contact id; or `null`), `subject`, `bodyText`, `attachments[]` = `{kind: image\|pdf\|other, ocrText?}`, `previewState` = `editing\|preview\|sent` |
 | `ticket` | `ticketId`, `orderId`, `customerRef`, `status` = `open\|done`, `summary` |
 | `input_activity` | `surface` = `order\|email\|ticket`, `typing` (bool), `idleMs`, `lastInputAtMs` (session-relative time of the last actual input); always `idleMs = timestampMs - lastInputAtMs` (within 1 ms), `lastInputAtMs <= timestampMs` |
 
@@ -45,7 +45,7 @@ The agent uses it only to stay quiet while the expert types and to detect a paus
 | Teach T1, T2 | `customer_07` | a second, different order (`ORD-2057`, other address and window) | T1: image only, expected to be caught before Send. T2: full text plus image, expected to be allowed. The same customer must have two clearly different orders. |
 | Teach T3 | another known customer, e.g. `customer_03` | one order | The personal rule must not be applied automatically. |
 | Teach T4 | unknown customer: not in the customer list, `customerRef: null` | one order | The agent must ask, not guess a match to `customer_07`. |
-| Live new-fact test | spare `customer_12` | **two** orders: `ORD-3001` (expert order) and `ORD-3002` (novice order), different addresses and windows, no hint in the data about any preference | During the show the expert processes `ORD-3001` and states a new rule about `customer_12` out loud; the tutor must apply it on the novice order `ORD-3002`. Keep both orders untouched until then. |
+| Live new-fact test | spare `customer_12` | **two** orders: `DEMO-1201` (expert order) and `DEMO-1202` (novice order), different addresses and windows, no hint in the data about any preference | During the show the expert processes `DEMO-1201` and states a new rule about `customer_12` out loud; the tutor must apply it on the novice order `DEMO-1202`. Keep both orders untouched until then. |
 
 Customer names, e-mail addresses and addresses are invented. No real people or companies.
 
@@ -53,13 +53,13 @@ Customer names, e-mail addresses and addresses are invented. No real people or c
 
 - **Preview** switches the email to `previewState: "preview"`, emits an observation, then sends an `ActionCheckpoint` `{schemaVersion: 1, id, sessionId, timestampMs, observationIds, revisions: {order, email}, action: "send"}`. `revisions` are opaque strings that change on every edit and never carry content. There are no `facts` on the checkpoint: the agent reads the order and email facts from the referenced vision observations (doc-7 section 3).
 - `observationIds` must include the latest `order_view` observation and the latest `email_draft` observation (more are fine).
-- The workspace waits for the agent's reply `{checkpointId, status: clear|warn|unknown, message, evidenceIds, basedOn: {order, email}}` and shows the message in the preview panel only if `basedOn` equals the current revisions (checked again on Send). `warn` and `unknown` do not disable **Send**: the human decides.
+- The workspace waits for the agent's reply `{checkpointId, status: clear|warn|unknown, message, evidenceIds, basedOn: {order, email}}` and shows the message in the preview panel only if `basedOn` equals the current revisions (checked again on Send). On `warn` and `unknown` **Send** needs an explicit acknowledgement from the person (a separate checkbox, cleared by every new check or edit); a `clear` result enables Send. The decision always stays with the human, and nothing is sent automatically.
 - Timeout (provisional 4 s after dispatch, per doc-7) or error: show "check did not complete" and never display it as a pass.
 - **Send** sets `previewState: "sent"` and emits an observation. The checkpoint belongs to this workspace only; do not describe it as blocking clicks in other apps.
 
 ## Reset and rehearsal
 
-- A visible **Reset scenario** button (and a URL parameter such as `?scenario=teach-t1`) restores all orders, the email draft, the ticket and customer data to the table above, and starts a new `sessionId` flow.
+- A visible **Reset scenario** button (and a URL parameter such as `?scenario=teach-t1`) restores all orders, the email draft, the ticket and customer data to the table above. The shell then starts a new session (a new `sessionId` and epoch); the confirmed Work Map is kept.
 - Scenario selection is possible without code changes: the case list is data.
 - Reset must not emit observations from before the reset after it happened (same rule as `pause()`).
 

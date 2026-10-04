@@ -10,6 +10,7 @@ Scripts never print the API key or signed URLs. The agent id is not committed; e
 | --- | --- | --- |
 | `ELEVENLABS_API_KEY` | all scripts | ElevenLabs API key (server side only; never in git, never in the browser). |
 | `ELEVENLABS_AGENT_ID_INTERVIEWER` | `signed-url.ts`, `textonly-test.ts` | Agent id printed by `provision.ts`. |
+| `ELEVENLABS_AGENT_ID_TUTOR` | API `signed-url?role=tutor` | The Teach agent `apprentice-tutor-dev`: same verbatim `[ASK]` protocol, its own voice (Alice) and tutor prompt, eleven_v4_turbo, call limits 2 concurrent / 20 a day / no bursting. Created on 4 Oct via the API; the interviewer moved to eleven_v4_turbo with the Sarah voice and limits 2 / 30 a day / no bursting. |
 | `PHASE_A_MS` | `textonly-test.ts` | Optional. Length of the silence phase in ms (default 60000; 9000 with `--quick`). |
 
 See `.env.example`.

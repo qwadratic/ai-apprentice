@@ -9,12 +9,15 @@ export function ReviewView() {
   const gaps = useShellState((s) => s.review.gaps);
   const feed = useShellState((s) => s.feed);
   const teachBack = useShellState((s) => s.review.teachBack);
+  const buttons = useShellState((s) => s.review.buttons);
+  const notice = useShellState((s) => s.review.notice);
   const map = useShellState((s) => s.draftMap);
   const [correcting, setCorrecting] = useState(false);
   const [draft, setDraft] = useState('');
 
   // Questions that were not asked live wait here: deferred by the policy, or not spoken because the voice was away.
-  const waiting = feed.filter((f) => f.status === 'deferred' || f.status === 'unspoken');
+  // With the real brain they are part of the gaps (the policy holds them for Review); only the NullBrain leaves them in the feed.
+  const waiting = brain.wired ? [] : feed.filter((f) => f.status === 'deferred' || f.status === 'unspoken');
   const hasText = teachBack.text !== null;
 
   const submitCorrection = (): void => {
@@ -28,8 +31,21 @@ export function ReviewView() {
       {!brain.wired && (
         <NotWired>
           the debrief and the teach-back ({brain.name}): the brain writes the gap questions and the teach-back text, and decides when
-          the debrief is done (TASK-3.10). Questions deferred in Learn do show up below.
+          the debrief is done. Questions deferred in Learn do show up below.
         </NotWired>
+      )}
+      {brain.wired && (
+        <p className="as-note" data-testid="review-hint">
+          Start Review for a spoken debrief: Clipa asks what is still unclear, then plays the process back. Confirm or correct it by voice
+          or with the buttons. {map.version !== undefined && <>Work Map version {map.version}{map.confirmed ? ', confirmed' : ', not confirmed yet'}.</>}
+        </p>
+      )}
+
+      {brain.wired && teachBack.text === null && gaps.length === 0 && (map.guardrails ?? []).length === 0 && (
+        <p className="as-notwired" role="status" data-testid="review-next-step">
+          <strong>Next step:</strong> the Work Map holds no rule yet, so there is no teach-back to confirm. Run Learn first (do the task,
+          answer a few of Clipa&apos;s questions), then come back here. Questions deferred in Learn show up below as open gaps.
+        </p>
       )}
 
       <section aria-labelledby="as-gaps-title">
@@ -60,10 +76,17 @@ export function ReviewView() {
           {teachBack.status !== 'none' && <span className={`as-tag as-tag--${teachBack.status === 'pending' ? 'accent' : 'ok'}`}>{teachBack.status}</span>}
         </h3>
         {hasText ? (
-          <blockquote className="as-teachback" data-testid="teachback-text">{teachBack.text}</blockquote>
+          <>
+            <blockquote className="as-teachback" data-testid="teachback-text">{teachBack.text}</blockquote>
+            <p className="as-note" data-testid="teachback-digest">
+              Confirm and Correct count for exactly this text{teachBack.digest !== null && <> (fingerprint <code>{teachBack.digest}</code>)</>}. Until you confirm
+              it, the rule is provisional and the tutor will not apply it.
+            </p>
+          </>
         ) : (
           <p className="as-empty">No teach-back yet. Clipa repeats the process back once there is enough to repeat; you then confirm it or correct it.</p>
         )}
+        {notice !== null && <p className="as-note as-note--attention" role="status" data-testid="review-notice">{notice}</p>}
         {teachBack.correction && <p className="as-feed__answer"><span className="as-step__key">Your correction</span> <q>{teachBack.correction}</q></p>}
         {correcting ? (
           <div className="as-correct">
@@ -80,14 +103,15 @@ export function ReviewView() {
           <div className="as-row">
             <button type="button" className="as-btn as-btn--primary" disabled={!hasText || teachBack.status === 'confirmed'} onClick={() => controller.confirmTeachBack()}>Confirm</button>
             <button type="button" className="as-btn" disabled={!hasText} onClick={() => { setDraft(teachBack.correction ?? ''); setCorrecting(true); }}>Correct</button>
+            {buttons && <button type="button" className="as-btn" data-testid="skip-teachback" onClick={() => controller.skipTeachBack()}>Skip</button>}
           </div>
         )}
       </section>
 
       <section aria-labelledby="as-rmap-title">
-        <h3 className="as-h3" id="as-rmap-title">Work Map so far <span className="as-count">{map.steps.length} steps</span></h3>
+        <h3 className="as-h3" id="as-rmap-title">Work Map so far <span className="as-count">{map.steps.length} steps{map.version !== undefined ? ` · version ${map.version}` : ''}</span></h3>
         {map.steps.length === 0
-          ? <p className="as-empty">The clickable timeline is the Work Map UI (TASK-3.11). It stays empty until the brain produces steps.</p>
+          ? <p className="as-empty">The Work Map fills from the Learn session. Run Learn first, then come back.</p>
           : <StepCards map={map} />}
       </section>
     </div>

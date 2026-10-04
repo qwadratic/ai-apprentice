@@ -4,13 +4,22 @@ import type { Json } from './config.ts';
 import { isRecord } from './config.ts';
 import { system as answerExtractionSystem } from './prompts/answer-extraction.ts';
 import { system as entityResolutionSystem } from './prompts/entity-resolution.ts';
+import { system as genericQuestionSystem } from './prompts/generic-question.ts';
+import { system as guardrailCheckSystem } from './prompts/guardrail-check.ts';
+import { system as mapSynthesisSystem } from './prompts/map-synthesis.ts';
 import { system as replyClassificationSystem } from './prompts/reply-classification.ts';
 
 export interface RunnerRequest { system: string; prompt: string; schema: Json }
 export type Prepared =
   | { ok: true; request: RunnerRequest; check(raw: unknown): unknown } // check: the validated output, or null if the runner's JSON breaks the schema
   | { ok: false; field: string };
-export interface LlmTask { prepare(body: unknown): Prepared }
+export interface LlmTask {
+  prepare(body: unknown): Prepared;
+  /** Request body cap for this task; the configured default when absent. */
+  readonly maxInputBytes?: number;
+  /** Runner timeout for this task; the configured default when absent. */
+  readonly timeoutMs?: number;
+}
 
 // ---- input parsing ---------------------------------------------------------
 type Parsed<T> = { ok: true; value: T } | { ok: false; field: string };
@@ -44,7 +53,7 @@ const stringArray: Json = { type: 'array', items: STRING };
 const isStr = (v: unknown, max: number, min = 0): v is string => typeof v === 'string' && v.length >= min && v.length <= max;
 const strList = (v: unknown, maxItems: number, maxLen: number): v is string[] => Array.isArray(v) && v.length <= maxItems && v.every((x) => isStr(x, maxLen, 1));
 // Structured outputs do not enforce maxLength, so the free-text caps are enforced here and stated in the prompts.
-export const CAPS = { rationale: 300, correction: 300, condition: 200, requiredAction: 200, listItems: 5, listItemLength: 200 } as const;
+export const CAPS = { rationale: 300, correction: 300, condition: 200, requiredAction: 200, listItems: 5, listItemLength: 200, question: 240, goal: 160, escalateTo: 120, teachBack: 1500 } as const;
 
 // ---- quote matching ---------------------------------------------------------
 // The model's quote and the answer are compared after folding: NFKC, curly to straight quotes, dashes, collapsed
@@ -227,8 +236,294 @@ const entityResolution: LlmTask = {
   },
 };
 
+// ---- generic screen input (any app, any workflow) ---------------------------
+// Shared by generic_question, map_synthesis and guardrail_check: what the screen showed and what was said.
+export interface GenericRegion { id: string; label: string }
+export interface GenericObservation { id: string; atMs: number; app: string | null; surface: string; summary: string; change: string | null; pendingAction: string | null; regions: GenericRegion[] }
+export interface GenericTurn { role: 'expert' | 'agent'; text: string; atMs: number }
+
+const ID_RE = /^[A-Za-z0-9._:-]{1,64}$/;
+function id(v: unknown, field: string): Parsed<string> {
+  return typeof v === 'string' && ID_RE.test(v) ? { ok: true, value: v } : fail(field);
+}
+function nullableText(v: unknown, field: string, max: number): Parsed<string | null> {
+  return v === null ? { ok: true, value: null } : text(v, field, max);
+}
+function ms(v: unknown, field: string): Parsed<number> {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 604_800_000 ? { ok: true, value: Math.round(v) } : fail(field);
+}
+function language(v: unknown, field: string): Parsed<string | null> {
+  if (v === null) return { ok: true, value: null };
+  return typeof v === 'string' && /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})?$/.test(v) ? { ok: true, value: v } : fail(field);
+}
+
+function parseObservations(v: unknown, field: string, maxItems: number): Parsed<GenericObservation[]> {
+  if (!Array.isArray(v) || v.length < 1 || v.length > maxItems) return fail(field);
+  const out: GenericObservation[] = [];
+  const seen = new Set<string>();
+  for (const [i, o] of (v as unknown[]).entries()) {
+    const f = `${field}.${i}`;
+    if (!isRecord(o) || !onlyKeys(o, ['id', 'atMs', 'app', 'surface', 'summary', 'change', 'pendingAction', 'regions'])) return fail(f);
+    const oid = id(o.id, `${f}.id`); if (!oid.ok) return oid;
+    if (seen.has(oid.value)) return fail(`${f}.id`);
+    seen.add(oid.value);
+    const at = ms(o.atMs ?? 0, `${f}.atMs`); if (!at.ok) return at;
+    const app = nullableText(o.app ?? null, `${f}.app`, 80); if (!app.ok) return app;
+    const surface = text(o.surface, `${f}.surface`, 120); if (!surface.ok) return surface;
+    const summary = text(o.summary, `${f}.summary`, 400); if (!summary.ok) return summary;
+    const change = nullableText(o.change ?? null, `${f}.change`, 300); if (!change.ok) return change;
+    const pending = nullableText(o.pendingAction ?? null, `${f}.pendingAction`, 80); if (!pending.ok) return pending;
+    const rawRegions = o.regions ?? [];
+    if (!Array.isArray(rawRegions) || rawRegions.length > 8) return fail(`${f}.regions`);
+    const regions: GenericRegion[] = [];
+    for (const [j, r] of (rawRegions as unknown[]).entries()) {
+      if (!isRecord(r) || !onlyKeys(r, ['id', 'label'])) return fail(`${f}.regions.${j}`);
+      const rid = id(r.id, `${f}.regions.${j}.id`); if (!rid.ok) return rid;
+      const label = text(r.label, `${f}.regions.${j}.label`, 120); if (!label.ok) return label;
+      regions.push({ id: rid.value, label: label.value });
+    }
+    out.push({ id: oid.value, atMs: at.value, app: app.value, surface: surface.value, summary: summary.value, change: change.value, pendingAction: pending.value, regions });
+  }
+  return { ok: true, value: out };
+}
+
+function parseTranscript(v: unknown, field: string, maxItems: number): Parsed<GenericTurn[]> {
+  if (!Array.isArray(v) || v.length > maxItems) return fail(field);
+  const out: GenericTurn[] = [];
+  for (const [i, t] of (v as unknown[]).entries()) {
+    const f = `${field}.${i}`;
+    if (!isRecord(t) || !onlyKeys(t, ['role', 'text', 'atMs'])) return fail(f);
+    if (t.role !== 'expert' && t.role !== 'agent') return fail(`${f}.role`);
+    const body = text(t.text, `${f}.text`, 1000); if (!body.ok) return body;
+    const at = ms(t.atMs ?? 0, `${f}.atMs`); if (!at.ok) return at;
+    out.push({ role: t.role, text: body.value, atMs: at.value });
+  }
+  return { ok: true, value: out };
+}
+
+/** Ids from `wanted` that are in `allowed`, deduplicated, in order, at most `max`. */
+function pick(wanted: unknown, allowed: ReadonlySet<string>, max: number): string[] | null {
+  if (!Array.isArray(wanted) || !wanted.every((x) => typeof x === 'string')) return null;
+  return [...new Set((wanted as string[]).filter((x) => allowed.has(x)))].slice(0, max);
+}
+const idEnum = (ids: readonly string[]): Json => (ids.length ? { type: 'array', items: { type: 'string', enum: [...new Set(ids)] } } : { type: 'array', items: STRING, maxItems: 0 });
+const regionIdsOf = (obs: readonly GenericObservation[]): string[] => [...new Set(obs.flatMap((o) => o.regions.map((r) => r.id)))];
+const sameText = (a: string, b: string): boolean => a.trim().toLowerCase().replace(/\s+/g, ' ') === b.trim().toLowerCase().replace(/\s+/g, ' ');
+
+/** The span of an expert turn that `quote` designates, with that turn's time; null when no expert turn holds it. */
+export function expertQuote(transcript: readonly GenericTurn[], quote: unknown): { quote: string; atMs: number } | null {
+  if (typeof quote !== 'string' || quote.trim() === '') return null;
+  for (const turn of transcript) {
+    if (turn.role !== 'expert') continue;
+    const span = findQuoteSpan(turn.text, quote);
+    if (span !== null) return { quote: span, atMs: turn.atMs };
+  }
+  return null;
+}
+
+// ---- generic_question -------------------------------------------------------
+const GENERIC_TOPICS = ['reason', 'limit', 'exception', 'scope', 'stop_and_ask'] as const;
+export interface GenericQuestionOutput { question: string | null; topic: (typeof GENERIC_TOPICS)[number]; observationIds: string[]; regionIds: string[] }
+
+const genericQuestion: LlmTask = {
+  maxInputBytes: 32 * 1024,
+  prepare(body) {
+    if (!isRecord(body) || !onlyKeys(body, ['observations', 'transcript', 'asked', 'language'])) return fail('body');
+    const observations = parseObservations(body.observations, 'observations', 8); if (!observations.ok) return observations;
+    const transcript = parseTranscript(body.transcript ?? [], 'transcript', 16); if (!transcript.ok) return transcript;
+    const asked = textList(body.asked ?? [], 'asked', 20, 300); if (!asked.ok) return asked;
+    const lang = language(body.language ?? null, 'language'); if (!lang.ok) return lang;
+    const obs = observations.value;
+    const obsIds = obs.map((o) => o.id);
+    const regionIds = regionIdsOf(obs);
+    const input = { observations: obs, transcript: transcript.value, asked: asked.value, language: lang.value };
+    const schema: Json = {
+      type: 'object', additionalProperties: false, required: ['question', 'topic', 'observationIds', 'regionIds'],
+      properties: { question: nullable(STRING), topic: { type: 'string', enum: [...GENERIC_TOPICS] }, observationIds: idEnum(obsIds), regionIds: idEnum(regionIds) },
+    };
+    return {
+      ok: true, request: { system: genericQuestionSystem, prompt: prompt(input), schema },
+      check(raw): GenericQuestionOutput | null {
+        if (!isRecord(raw) || !exactKeys(raw, ['question', 'topic', 'observationIds', 'regionIds'])) return null;
+        const { question, topic } = raw;
+        if (typeof topic !== 'string' || !(GENERIC_TOPICS as readonly string[]).includes(topic)) return null;
+        const observationIds = pick(raw.observationIds, new Set(obsIds), 4);
+        const regions = pick(raw.regionIds, new Set(regionIds), 4);
+        if (observationIds === null || regions === null) return null;
+        if (question === null || (typeof question === 'string' && question.trim() === '')) return { question: null, topic: topic as GenericQuestionOutput['topic'], observationIds: [], regionIds: [] };
+        if (!isStr(question, CAPS.question, 1)) return null;
+        // A repeat of a question already asked is no question at all.
+        if (asked.value.some((a) => sameText(a, question))) return { question: null, topic: topic as GenericQuestionOutput['topic'], observationIds: [], regionIds: [] };
+        const newest = obsIds[obsIds.length - 1];
+        return { question: question.trim(), topic: topic as GenericQuestionOutput['topic'], observationIds: observationIds.length ? observationIds : (newest ? [newest] : []), regionIds: regions };
+      },
+    };
+  },
+};
+
+// ---- map_synthesis ----------------------------------------------------------
+export interface GenericDecision { summary: string; reason: string | null; quote: string | null; quoteAtMs: number | null }
+export interface GenericStep { id: string; kind: 'action' | 'judgment'; goal: string; action: string; decision: GenericDecision | null; evidenceIds: string[] }
+export interface GenericGuardrail { id: string; condition: string; requiredAction: string; reason: string | null; quote: string | null; quoteAtMs: number | null; escalateTo: string | null; exceptions: string[]; evidenceIds: string[] }
+export interface GenericGap { question: string; targetId: string | null; evidenceIds: string[]; regionIds: string[] }
+export interface MapSynthesisOutput { steps: GenericStep[]; guardrails: GenericGuardrail[]; gaps: GenericGap[]; teachBack: string }
+
+const STEP_KEYS = ['id', 'kind', 'goal', 'action', 'decision', 'evidenceIds'] as const;
+const DECISION_KEYS = ['summary', 'reason', 'quote'] as const;
+const RULE_KEYS = ['id', 'condition', 'requiredAction', 'reason', 'quote', 'escalateTo', 'exceptions', 'evidenceIds'] as const;
+const GAP_KEYS = ['question', 'targetId', 'evidenceIds', 'regionIds'] as const;
+
+function mapSchema(obsIds: readonly string[]): Json {
+  const ev = idEnum(obsIds);
+  return {
+    type: 'object', additionalProperties: false, required: ['steps', 'guardrails', 'gaps', 'teachBack'],
+    properties: {
+      steps: { type: 'array', items: { type: 'object', additionalProperties: false, required: [...STEP_KEYS], properties: {
+        id: STRING, kind: { type: 'string', enum: ['action', 'judgment'] }, goal: STRING, action: STRING,
+        decision: nullable({ type: 'object', additionalProperties: false, required: [...DECISION_KEYS], properties: { summary: STRING, reason: nullable(STRING), quote: nullable(STRING) } }),
+        evidenceIds: ev,
+      } } },
+      guardrails: { type: 'array', items: { type: 'object', additionalProperties: false, required: [...RULE_KEYS], properties: {
+        id: STRING, condition: STRING, requiredAction: STRING, reason: nullable(STRING), quote: nullable(STRING), escalateTo: nullable(STRING), exceptions: stringArray, evidenceIds: ev,
+      } } },
+      gaps: { type: 'array', items: { type: 'object', additionalProperties: false, required: [...GAP_KEYS], properties: {
+        question: STRING, targetId: nullable(STRING), evidenceIds: ev, regionIds: { type: 'array', items: STRING },
+      } } },
+      teachBack: STRING,
+    },
+  };
+}
+
+/**
+ * Checks the model's map and makes it safe to show: a reason stands only with a quote found in an expert turn (else both
+ * are dropped and the item is unexplained), evidence ids are kept only when they name an input observation, ids are
+ * renumbered s1.. and g1.., and gaps point at the renumbered ids.
+ */
+export function checkMap(raw: unknown, obs: readonly GenericObservation[], transcript: readonly GenericTurn[]): MapSynthesisOutput | null {
+  if (!isRecord(raw) || !exactKeys(raw, ['steps', 'guardrails', 'gaps', 'teachBack'])) return null;
+  const { steps, guardrails, gaps, teachBack } = raw;
+  if (!Array.isArray(steps) || !Array.isArray(guardrails) || !Array.isArray(gaps)) return null;
+  if (!isStr(teachBack, CAPS.teachBack, 1)) return null;
+  const allowed = new Set(obs.map((o) => o.id));
+  const regionIds = new Set(regionIdsOf(obs));
+  const renamed = new Map<string, string>();
+  const outSteps: GenericStep[] = [];
+  for (const s of steps.slice(0, 10)) {
+    if (!isRecord(s) || !exactKeys(s, STEP_KEYS)) return null;
+    if (s.kind !== 'action' && s.kind !== 'judgment') return null;
+    if (!isStr(s.goal, CAPS.goal, 1) || !isStr(s.action, CAPS.requiredAction, 1)) return null;
+    const evidenceIds = pick(s.evidenceIds, allowed, 8); if (evidenceIds === null) return null;
+    let decision: GenericDecision | null = null;
+    if (s.decision !== null) {
+      const d = s.decision;
+      if (!isRecord(d) || !exactKeys(d, DECISION_KEYS) || !isStr(d.summary, CAPS.condition, 1)) return null;
+      if (d.reason !== null && !isStr(d.reason, CAPS.rationale)) return null;
+      const q = expertQuote(transcript, d.quote);
+      decision = { summary: d.summary, reason: q && typeof d.reason === 'string' && d.reason.trim() ? d.reason : null, quote: q?.quote ?? null, quoteAtMs: q?.atMs ?? null };
+    }
+    const newId = `s${outSteps.length + 1}`;
+    if (typeof s.id === 'string') renamed.set(s.id, newId);
+    outSteps.push({ id: newId, kind: s.kind, goal: s.goal, action: s.action, decision, evidenceIds });
+  }
+  const outRules: GenericGuardrail[] = [];
+  for (const g of guardrails.slice(0, 8)) {
+    if (!isRecord(g) || !exactKeys(g, RULE_KEYS)) return null;
+    if (!isStr(g.condition, CAPS.condition, 1) || !isStr(g.requiredAction, CAPS.requiredAction, 1)) return null;
+    if (g.reason !== null && !isStr(g.reason, CAPS.rationale)) return null;
+    if (g.escalateTo !== null && !isStr(g.escalateTo, CAPS.escalateTo)) return null;
+    if (!strList(g.exceptions, CAPS.listItems, CAPS.listItemLength)) return null;
+    const evidenceIds = pick(g.evidenceIds, allowed, 8); if (evidenceIds === null) return null;
+    const q = expertQuote(transcript, g.quote);
+    const newId = `g${outRules.length + 1}`;
+    if (typeof g.id === 'string') renamed.set(g.id, newId);
+    outRules.push({
+      id: newId, condition: g.condition, requiredAction: g.requiredAction,
+      reason: q && typeof g.reason === 'string' && g.reason.trim() ? g.reason : null, quote: q?.quote ?? null, quoteAtMs: q?.atMs ?? null,
+      escalateTo: typeof g.escalateTo === 'string' && g.escalateTo.trim() ? g.escalateTo : null, exceptions: g.exceptions, evidenceIds,
+    });
+  }
+  const outGaps: GenericGap[] = [];
+  for (const q of gaps.slice(0, 6)) {
+    if (!isRecord(q) || !exactKeys(q, GAP_KEYS) || !isStr(q.question, CAPS.question, 1)) return null;
+    if (q.targetId !== null && typeof q.targetId !== 'string') return null;
+    const evidenceIds = pick(q.evidenceIds, allowed, 4);
+    const regions = pick(q.regionIds, regionIds, 4);
+    if (evidenceIds === null || regions === null) return null;
+    outGaps.push({ question: q.question, targetId: typeof q.targetId === 'string' ? renamed.get(q.targetId) ?? null : null, evidenceIds, regionIds: regions });
+  }
+  return { steps: outSteps, guardrails: outRules, gaps: outGaps, teachBack };
+}
+
+const mapSynthesis: LlmTask = {
+  maxInputBytes: 96 * 1024,
+  timeoutMs: 55_000,
+  prepare(body) {
+    if (!isRecord(body) || !onlyKeys(body, ['observations', 'transcript', 'correction', 'previousTeachBack'])) return fail('body');
+    const observations = parseObservations(body.observations, 'observations', 40); if (!observations.ok) return observations;
+    const transcript = parseTranscript(body.transcript ?? [], 'transcript', 60); if (!transcript.ok) return transcript;
+    const correction = nullableText(body.correction ?? null, 'correction', 600); if (!correction.ok) return correction;
+    const previous = nullableText(body.previousTeachBack ?? null, 'previousTeachBack', 3000); if (!previous.ok) return previous;
+    const obs = observations.value;
+    const turns = transcript.value;
+    const input = { observations: obs, transcript: turns, correction: correction.value, previousTeachBack: previous.value };
+    return { ok: true, request: { system: mapSynthesisSystem, prompt: prompt(input), schema: mapSchema(obs.map((o) => o.id)) }, check: (raw) => checkMap(raw, obs, turns) };
+  },
+};
+
+// ---- guardrail_check --------------------------------------------------------
+export interface GuardrailCheckOutput { status: 'clear' | 'warn' | 'unknown'; guardrailId: string | null; message: string | null; regionIds: string[] }
+
+const guardrailCheck: LlmTask = {
+  maxInputBytes: 32 * 1024,
+  prepare(body) {
+    if (!isRecord(body) || !onlyKeys(body, ['guardrails', 'observations', 'transcript', 'language'])) return fail('body');
+    const rules = body.guardrails;
+    if (!Array.isArray(rules) || rules.length < 1 || rules.length > 10) return fail('guardrails');
+    const parsedRules: Array<{ id: string; condition: string; requiredAction: string; reason: string | null; quote: string | null }> = [];
+    for (const [i, g] of (rules as unknown[]).entries()) {
+      const f = `guardrails.${i}`;
+      if (!isRecord(g) || !onlyKeys(g, ['id', 'condition', 'requiredAction', 'reason', 'quote'])) return fail(f);
+      const gid = id(g.id, `${f}.id`); if (!gid.ok) return gid;
+      const condition = text(g.condition, `${f}.condition`, 300); if (!condition.ok) return condition;
+      const action = text(g.requiredAction, `${f}.requiredAction`, 300); if (!action.ok) return action;
+      const reason = nullableText(g.reason ?? null, `${f}.reason`, 400); if (!reason.ok) return reason;
+      const quote = nullableText(g.quote ?? null, `${f}.quote`, 600); if (!quote.ok) return quote;
+      parsedRules.push({ id: gid.value, condition: condition.value, requiredAction: action.value, reason: reason.value, quote: quote.value });
+    }
+    const observations = parseObservations(body.observations, 'observations', 6); if (!observations.ok) return observations;
+    const transcript = parseTranscript(body.transcript ?? [], 'transcript', 8); if (!transcript.ok) return transcript;
+    const lang = language(body.language ?? null, 'language'); if (!lang.ok) return lang;
+    const ruleIds = [...new Set(parsedRules.map((g) => g.id))];
+    const latest = observations.value[observations.value.length - 1];
+    const latestRegions = latest ? latest.regions.map((r) => r.id) : [];
+    const input = { guardrails: parsedRules, observations: observations.value, transcript: transcript.value, language: lang.value };
+    const schema: Json = {
+      type: 'object', additionalProperties: false, required: ['status', 'guardrailId', 'message', 'regionIds'],
+      properties: { status: { type: 'string', enum: ['clear', 'warn', 'unknown'] }, guardrailId: nullable({ type: 'string', enum: ruleIds }), message: nullable(STRING), regionIds: idEnum(latestRegions) },
+    };
+    return {
+      ok: true, request: { system: guardrailCheckSystem, prompt: prompt(input), schema },
+      check(raw): GuardrailCheckOutput | null {
+        if (!isRecord(raw) || !exactKeys(raw, ['status', 'guardrailId', 'message', 'regionIds'])) return null;
+        const { status, guardrailId, message } = raw;
+        if (status !== 'clear' && status !== 'warn' && status !== 'unknown') return null;
+        if (guardrailId !== null && (typeof guardrailId !== 'string' || !ruleIds.includes(guardrailId))) return null;
+        if (message !== null && !isStr(message, CAPS.question)) return null;
+        const regions = pick(raw.regionIds, new Set(latestRegions), 4); if (regions === null) return null;
+        // A warning must name its rule and say something; without either it cannot be explained, so it is unknown.
+        if (status === 'warn' && (guardrailId === null || typeof message !== 'string' || message.trim() === '')) return { status: 'unknown', guardrailId, message: null, regionIds: [] };
+        if (status === 'clear') return { status, guardrailId, message: null, regionIds: [] };
+        return { status, guardrailId, message: typeof message === 'string' && message.trim() ? message.trim() : null, regionIds: regions };
+      },
+    };
+  },
+};
+
 export const LLM_TASKS: Readonly<Record<string, LlmTask>> = Object.freeze({
   answer_extraction: answerExtraction,
   reply_classification: replyClassification,
   entity_resolution: entityResolution,
+  generic_question: genericQuestion,
+  map_synthesis: mapSynthesis,
+  guardrail_check: guardrailCheck,
 });

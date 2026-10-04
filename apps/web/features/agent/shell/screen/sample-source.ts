@@ -1,7 +1,8 @@
 import type { ActionCheckpoint, CheckpointReply, EvidenceRef, ScreenObservation, ScreenStatus, SessionStart, Unsubscribe } from '@apprentice/contracts';
-import { createScreenFixtures } from '@apprentice/contracts/fixtures';
 import { MockScreenBridge } from '@apprentice/contracts/mock';
 import type { ObservationSource } from './observation-source.ts';
+import { buildScenario, scenarioLabel } from './sample-scenarios.ts';
+import type { SampleScenarioId } from './sample-scenarios.ts';
 
 export const SAMPLE_LABEL = 'Sample observations (synthetic)';
 /** How often the manual mock clock is advanced to the wall clock. */
@@ -13,29 +14,28 @@ export interface SampleTimers {
 }
 
 /**
- * The contracts' MockScreenBridge, driven by the wall clock. Its fixture is neutral and synthetic. The unknown-order
- * observation is left out, so that the latest order always has a tracked revision and a sample checkpoint can be raised
- * at any time after the email preview. Everything it emits is labelled synthetic in the shell.
+ * The contracts' MockScreenBridge, driven by the wall clock. The default scenario is neutral and synthetic: the unknown-order
+ * observation is left out, so that the latest order always has a tracked revision and a sample checkpoint can be raised at any
+ * time after the email preview. The `learn` and Teach case scenarios (sample-scenarios.ts) play the customer_07 run and the
+ * new cases. Everything it emits is labelled synthetic in the shell.
  */
 export class SampleObservationSource implements ObservationSource {
-  readonly label = SAMPLE_LABEL;
+  readonly label: string;
   readonly synthetic = true;
+  readonly scenario: SampleScenarioId;
   private readonly mock: MockScreenBridge;
   private readonly now: () => number;
   private readonly timers: SampleTimers;
   private timer: unknown = null;
   private clockMs: number;
 
-  constructor(now: () => number, timers: SampleTimers) {
+  constructor(now: () => number, timers: SampleTimers, scenario: SampleScenarioId = 'neutral') {
     this.now = now;
     this.timers = timers;
+    this.scenario = scenario;
+    this.label = scenario === 'neutral' ? SAMPLE_LABEL : scenarioLabel(scenario);
     this.clockMs = now();
-    this.mock = new MockScreenBridge(this.clockMs, (sessionId) => {
-      const all = createScreenFixtures(sessionId);
-      const observations = all.observations.filter((o) => o.id !== 'order-unknown');
-      const used = new Set(observations.flatMap((o) => o.evidenceIds));
-      return { observations, evidence: all.evidence.filter((e) => used.has(e.id)) };
-    });
+    this.mock = new MockScreenBridge(this.clockMs, (sessionId) => buildScenario(scenario, sessionId));
   }
 
   /** Advances the mock clock to the wall clock. The timer calls this; tests call it with a fake `now`. */

@@ -89,8 +89,13 @@ export function registerAgentRoutes(app: Express, rt: AgentRuntime): void {
 
   app.get('/api/agent/elevenlabs/signed-url', async (req, res) => {
     if (!originOk(req)) { forbidOrigin(res); return; }
-    if (!config.interviewerAgentId || !config.elevenLabsApiKey) {
-      reply(res, 503, { ok: false, error: 'elevenlabs_not_configured', missing: [!config.interviewerAgentId && 'ELEVENLABS_AGENT_ID_INTERVIEWER', !config.elevenLabsApiKey && 'ELEVENLABS_API_KEY'].filter(Boolean) });
+    // Learn and Review talk to the interviewer, Teach to the tutor: each role has its own agent, voice and prompt.
+    const role = req.query.role === undefined ? 'interviewer' : req.query.role;
+    if (role !== 'interviewer' && role !== 'tutor') { reply(res, 400, { ok: false, error: 'invalid_role' }); return; }
+    const agentId = role === 'tutor' ? config.tutorAgentId : config.interviewerAgentId;
+    const agentEnv = role === 'tutor' ? 'ELEVENLABS_AGENT_ID_TUTOR' : 'ELEVENLABS_AGENT_ID_INTERVIEWER';
+    if (!agentId || !config.elevenLabsApiKey) {
+      reply(res, 503, { ok: false, error: 'elevenlabs_not_configured', missing: [!agentId && agentEnv, !config.elevenLabsApiKey && 'ELEVENLABS_API_KEY'].filter(Boolean) });
       return;
     }
     if (signedUrlLimited(clientIp(req))) { limited(res); return; }
@@ -101,7 +106,7 @@ export function registerAgentRoutes(app: Express, rt: AgentRuntime): void {
       if (!auth.ok) { denied(res, auth); return; }
     }
     try {
-      const r = await eleven.signedUrl();
+      const r = await eleven.signedUrl(agentId);
       if (r.signedUrl) reply(res, 200, { signed_url: r.signedUrl });
       else reply(res, 502, { ok: false, error: 'elevenlabs_error', upstream_status: r.status });
     } catch { reply(res, 502, { ok: false, error: 'elevenlabs_unreachable' }); }

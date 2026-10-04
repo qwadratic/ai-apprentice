@@ -4,7 +4,7 @@
 #   On the VM (local, through port 8000):  infra/check.sh
 #   From a Mac (public proxy):
 #     T=$(ssh apprentice.exe.xyz "sudo grep ^API_TOKEN= /etc/apprentice/env | cut -d= -f2") \
-#       BASE=https://apprentice.exe.xyz bash <(ssh apprentice.exe.xyz cat work/ai-apprentice/infra/check.sh)
+#       BASE=https://apprentice.exe.xyz bash <(ssh apprentice.exe.xyz cat work/clipa/infra/check.sh)
 #   ORIGIN (default https://qwadratic.github.io) must be one of ALLOWED_ORIGINS.
 #   T is API_TOKEN (the admin routes); DEPLOY_WEBHOOK_SECRET (or sudo on the VM) enables the signed webhook test.
 # Needs curl and jq; node only for the signed webhook test. Takes a few seconds, no model calls.

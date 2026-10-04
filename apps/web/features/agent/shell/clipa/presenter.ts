@@ -1,5 +1,6 @@
-// The only surface through which the shell talks to Clipa. The views never import the web component:
-// TASK-3.28 (the motion director) can implement ClipaPresenter and replace ClipaAgent.tsx without touching them.
+// The only surface through which the shell talks to Clipa. The views never import the web component. The real implementation
+// (director-presenter.ts) drives the motion director of apps/web/features/agent/clipa; tests use a recording fake.
+import type { BrainDecision } from '../brain/types.ts';
 
 export const CLIPA_STATES = ['idle', 'listening', 'thinking', 'speaking', 'warning', 'happy', 'pointing', 'off'] as const;
 export type ClipaState = (typeof CLIPA_STATES)[number];
@@ -18,6 +19,12 @@ export interface ClipaPresenter {
   say(text: string): void;
   /** Where Clipa should point. null: nowhere. */
   setTarget(rect: TargetRect | null): void;
+  /** A spoken decision (ASK_NOW, PREDICT, WARN): fly to its target, speak, then listen. Optional: a presenter without motion ignores it. */
+  play?(decision: BrainDecision): void;
+  /** The person answered: nod, then go home. */
+  ack?(): void;
+  /** The person's input: true while they type (in the page or in the workspace). Clipa never starts a flight while it is true. */
+  noteInput?(typing: boolean): void;
 }
 
 export interface ClipaSnapshot {

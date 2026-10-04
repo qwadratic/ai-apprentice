@@ -4,7 +4,9 @@
 import type { ActionCheckpoint, CheckpointReply, EvidenceRef, ScreenObservation, ScreenStatus } from '@apprentice/contracts';
 import { parseCheckpointReply } from '@apprentice/contracts';
 import type { AgentApi, AgentSession, FetchLike, VoiceRole } from './api.ts';
-import type { AnswerInput, Brain, BrainDecision, BrainSignals, ClipaTargetRef, TranscriptTurn } from './brain/types.ts';
+import { createLlmClient } from './brain/llm-transport.ts';
+import type { AbortableLlmClient } from './brain/llm-transport.ts';
+import type { AnswerInput, AnswerResult, Brain, BrainDecision, BrainSignals, ClipaTargetRef, DraftMap, TranscriptTurn } from './brain/types.ts';
 import { isSpoken } from './brain/types.ts';
 import type { ClipaPresenter, ClipaState, TargetRect } from './clipa/presenter.ts';
 import { SessionLimits } from './limits.ts';
@@ -12,20 +14,38 @@ import type { LimitTimers } from './limits.ts';
 import { EventUploader } from './log/uploader.ts';
 import type { LogDir, Timers } from './log/uploader.ts';
 import type { ObservationSource } from './screen/observation-source.ts';
+import { teachCase } from './screen/sample-scenarios.ts';
+import type { SampleScenarioId, TeachCaseId } from './screen/sample-scenarios.ts';
 import { SESSION_LIMIT_MS, deadlineOf } from './session-clock.ts';
 import { deriveClipaState } from './state/derive.ts';
 import { createStore } from './state/store.ts';
 import type { Store } from './state/store.ts';
 import { MODES, PERSONAS } from './state/types.ts';
+import type { Action } from './state/reducer.ts';
 import type { CaptureInfo, DecisionEntry, FeedItem, Mode, Persona, ShellState } from './state/types.ts';
-import { observationToContext, summarizeObservation } from './voice/context.ts';
+import { observationToContext, stripAudioTags, summarizeObservation } from './voice/context.ts';
 import { scrub } from './voice/scrub.ts';
+import { SpeechGate } from './voice/speech-gate.ts';
 import type { VoiceConnector, VoiceEvents, VoiceMode } from './voice/types.ts';
 import { VoiceSession } from './voice/voice-session.ts';
 
 export const BRAIN_TICK_MS = 500;
+/** The workspace waits for the checkpoint reply for 4 s (doc-7); after that the shell answers `unknown` itself. */
+/** Below the workspace's own 4 s reply deadline, so that even `unknown` reaches it in time. */
+export const CHECKPOINT_TIMEOUT_MS = 3500;
+/** A WARN that has to wait for the agent to finish speaking is dropped after this long. */
+export const WARN_HOLD_MS = 15000;
 /** A spoken question that produces no agent audio within this time stops looking "thinking". */
 export const ASK_AUDIO_TIMEOUT_MS = 12000;
+/** What the person is told when a reply did not confirm or correct the teach-back. */
+const REVIEW_NOTICES: Readonly<Record<string, string>> = {
+  unclear: 'I could not tell whether that was a confirmation or a correction, so nothing changed. Say it again, or use the buttons.',
+  stale: 'The teach-back changed since you read it, so nothing was confirmed. Read the new one and confirm that.',
+  refused: 'The teach-back cannot be confirmed yet: an item of the Work Map lacks the expert\'s words or a screen moment. Answer the open questions first.',
+  skipped: 'Skipped. The rule stays provisional: in Teach the tutor will say it does not know instead of applying it.',
+  corrected: 'Corrected. The new version is provisional until you confirm the new teach-back.',
+  needs_words: 'Say or type what is different, and Clipa will update the map.',
+};
 export const PERSONA_STORAGE_KEY = 'apprentice.shell.persona';
 const MAX_BUFFERED_CONTEXT = 20;
 
@@ -49,7 +69,8 @@ export interface ControllerDeps {
   fetch: FetchLike;
   connectVoice: VoiceConnector;
   createBrain(log: (line: string) => void): Brain;
-  createSampleSource(): ObservationSource;
+  /** The sample source for a scenario: `learn` for Learn, a Teach case for Teach, `neutral` otherwise. */
+  createSampleSource(scenario: SampleScenarioId): ObservationSource;
   presenter: ClipaPresenter;
   /** Date.now() */
   now(): number;
@@ -59,6 +80,8 @@ export interface ControllerDeps {
   isHidden(): boolean;
   storage: KeyValueStorage;
   store?: Store;
+  /** Epoch ms of the last key press or text input in the page (the demo workspace included), or null. */
+  lastInputAt?: () => number | null;
 }
 
 export function parsePersona(value: string | null): Persona {
@@ -73,14 +96,19 @@ function errMsg(e: unknown): string {
   return e instanceof Error && e.message ? e.message : String(e);
 }
 
-/** Voice role per mode. Teach moves to 'tutor' when the VM has a tutor agent (the API serves the interviewer only). */
-export function voiceRoleFor(_mode: Mode): VoiceRole {
-  return 'interviewer';
+/** Voice role per mode: Learn and Review talk to the interviewer agent, Teach to the tutor agent (its own voice, PR #38). */
+const MODE_NAMES: Record<Mode, string> = { learn: 'Learn', review: 'Review', teach: 'Teach' };
+
+export function voiceRoleFor(mode: Mode): VoiceRole {
+  return mode === 'teach' ? 'tutor' : 'interviewer';
 }
 
 interface PendingAsk {
   decisionId: string;
   fromPerfMs: number;
+  decision: BrainDecision;
+  /** The decision is a question (the next thing the person says answers it), not a statement. */
+  answerable: boolean;
 }
 
 export class ShellController {
@@ -92,7 +120,15 @@ export class ShellController {
   private uploader: EventUploader | null = null;
   private voice: VoiceSession | null = null;
   private source: ObservationSource | null = null;
-  private evidenceSource: ObservationSource | null = null;
+  /** Every source of this page, newest last: evidence of an earlier session (the expert's moment) stays resolvable in Teach. */
+  private evidenceSources: ObservationSource[] = [];
+  /** A real source that waits for the person to share a screen while a sample source runs. */
+  private standby: ObservationSource | null = null;
+  private standbyOff: Array<() => void> = [];
+  private readonly speech = new SpeechGate();
+  /** The LLM client of the live session; cut off on off the record and on teardown. */
+  private llm: AbortableLlmClient | null = null;
+  private held: { decision: BrainDecision; atPerfMs: number } | null = null;
   private sourceOff: Array<() => void> = [];
   private readonly limits: SessionLimits;
   private tickTimer: unknown = null;
@@ -144,6 +180,15 @@ export class ShellController {
     this.store.dispatch({ type: 'LOG', t: this.deps.now(), dir, logType: type, text: clean });
     this.uploader?.enqueue(dir, type, clean);
   }
+  /**
+   * A structured record for the server's session log (the existing /events route, next to the transcript that /finish stores):
+   * the expert's answers, the Work Map versions and the checkpoint results. It is not shown in the visible log, it respects off the
+   * record (nothing is queued after the switch) and the token never reaches it.
+   */
+  private persist(type: string, payload: Record<string, unknown>): void {
+    this.uploader?.enqueue('sys', type, JSON.stringify(payload));
+  }
+  private lastPersistedMap = '';
   private sys(text: string): void { this.log('sys', 'SYS', text); }
   private err(text: string): void { this.log('err', 'ERR', text); }
 
@@ -166,19 +211,57 @@ export class ShellController {
 
   // ---- Settings -----------------------------------------------------------
 
+  /**
+   * A tab click only changes what is shown. It never ends or starts a session: the running session (and its voice agent) stays until
+   * the person ends it or presses "End ... and start ..." (switchSession).
+   */
   setMode(mode: Mode): void {
+    if (this.state.mode === mode) return;
     this.store.dispatch({ type: 'MODE_SET', mode });
     if (mode === 'review') this.loadReview();
+  }
+
+  /** The person's explicit switch: the running session ends, then a session of `mode` starts (with that mode's voice agent). */
+  async switchSession(mode: Mode): Promise<void> {
+    const s = this.state;
+    if (s.phase === 'live' && s.session !== null) {
+      await this.end(`${MODE_NAMES[s.session.mode]} ended: the person started ${MODE_NAMES[mode]}.`);
+    }
+    if (this.state.phase === 'live' || this.state.phase === 'starting' || this.state.phase === 'ending') return;
+    if (this.state.mode !== mode) this.store.dispatch({ type: 'MODE_SET', mode });
+    await this.start(mode);
   }
 
   setPersona(persona: Persona): void {
     this.store.dispatch({ type: 'PERSONA_SET', persona });
     this.writeStorage(PERSONA_STORAGE_KEY, persona);
-    this.sys(`Persona: ${persona} (stored; the brain and the voice do not use it yet).`);
+    this.sys(`Persona: ${persona}. The policy reads it when the next session starts.`);
   }
 
   setTargetResolver(resolver: TargetResolver | null): void {
     this.resolveTarget = resolver;
+  }
+
+  /** The person is typing in the workspace (or stopped): Clipa holds still. Called by the workspace adapter's host. */
+  reportInput(typing: boolean): void {
+    this.deps.presenter.noteInput?.(typing);
+  }
+
+  /** A line for the debug log from outside the controller (the Clipa director's refusals). */
+  note(type: string, text: string): void {
+    this.log('sys', type, text);
+  }
+
+  /** Which sample case the next Teach session plays. */
+  setSampleCase(caseId: TeachCaseId): void {
+    this.store.dispatch({ type: 'SAMPLE_CASE_SET', caseId });
+  }
+
+  /** Teach: ends the running session and starts a new one on this sample case (a reset starts a new session). */
+  async runSampleCase(caseId: TeachCaseId): Promise<void> {
+    this.setSampleCase(caseId);
+    if (this.state.phase === 'live') await this.end('Session ended: a new sample case starts a new session.');
+    await this.start('teach');
   }
 
   dismissBanner(): void {
@@ -190,14 +273,31 @@ export class ShellController {
   registerCapture(capture: CaptureLike): () => void {
     this.captureOff?.();
     this.capture = capture;
+    let last: string | null = null;
     const off = capture.subscribe((snapshot) => {
+      const was = last;
+      last = snapshot.state;
       this.store.dispatch({ type: 'CAPTURE_SNAPSHOT', capture: { state: snapshot.state, reason: snapshot.reason ?? null } });
+      if (was !== snapshot.state && (snapshot.state === 'stopped' || snapshot.state === 'error')) this.onCaptureEnded(snapshot.reason ?? null);
     });
     this.captureOff = off;
     return () => {
       off();
       if (this.capture === capture) { this.capture = null; this.captureOff = null; }
     };
+  }
+
+  /**
+   * A cancelled picker or a Stop ends the capture for good: the screen runtime does not share again inside the same session id. The
+   * person is told plainly what to do; nothing restarts on its own (a new Learn session would start a new Work Map).
+   */
+  private onCaptureEnded(reason: string | null): void {
+    const s = this.state;
+    if (s.phase !== 'live' || s.offRecord || s.session === null || s.session.mode === 'review') return;
+    const mode = s.session.mode === 'learn' ? 'Learn' : 'Teach';
+    const text = `Screen sharing ended${reason ? ` (${reason})` : ''}. This session cannot share a screen again: press End, then start ${mode} again for a new session and share the window.`;
+    this.sys(text);
+    this.store.dispatch({ type: 'BANNER_SET', banner: { kind: 'warn', text } });
   }
 
   /** What ScreenPanel needs at its start click: the live session and its one epoch. */
@@ -217,7 +317,6 @@ export class ShellController {
     const epochMs = this.deps.now(); // the start click: the only origin of the session timeline
     const run = ++this.runId;
     this.askedCount = 0;
-    this.decisionCount = 0;
     this.clearPendingAsk();
     this.bufferedContext = [];
     this.contextDropNoted = false;
@@ -246,6 +345,10 @@ export class ShellController {
     });
     this.sys(`Session ${session.sessionId} started in ${mode} mode. Events, transcript and audio recording are stored on our server.`);
     if (session.legacy) this.sys('The server still runs the placeholder API: legacy routes, no session token.');
+    this.speech.reset();
+    this.held = null;
+    this.lastPersistedMap = '';
+    this.beginBrain(session, mode);
     this.limits.start(this.deps.isHidden());
     this.sys('The session auto-ends after 10 minutes, or after 2 minutes with this tab hidden.');
     this.tickTimer = this.deps.timers.setInterval(() => this.tickBrain(), BRAIN_TICK_MS);
@@ -253,6 +356,22 @@ export class ShellController {
     if (mode !== 'review' && this.state.screen.sampleOn) await this.startSample(run);
     if (!this.isCurrent(run)) return;
     await this.startVoice(run, session, mode);
+  }
+
+  private beginBrain(session: AgentSession, mode: Mode): void {
+    const caseId = mode === 'teach' ? this.state.teach.sampleCase : null;
+    this.llm?.abort();
+    const llm = createLlmClient({ session, fetch: this.deps.fetch, log: (line) => this.log('sys', 'LLM', line) });
+    this.llm = llm;
+    this.safe('begin', () => this.brain.begin?.({
+      sessionId: session.sessionId,
+      mode,
+      persona: this.state.persona,
+      llm,
+      caseId,
+      caseTitle: caseId === null ? null : teachCase(caseId).title,
+    }), undefined);
+    if (llm === null) this.sys('No LLM route (placeholder API): the brain reads answers with its heuristics.');
   }
 
   /** Ends the session: voice first, then the screen, then the log. */
@@ -264,12 +383,19 @@ export class ShellController {
   /** Off the record stops both channels. It does not delete or recall what was already sent. */
   async goOffRecord(): Promise<void> {
     if (this.state.offRecord) return;
+    // Before anything else: pending and queued model calls are cut off, so no expert words are posted after the switch.
+    this.llm?.abort();
     if (this.uploader?.isRecording()) {
       // This is the last line that is queued: nothing after the switch reaches the server.
       this.sys('Off the record: capture and upload stopped.');
       this.uploader.stopRecording();
     }
     this.store.dispatch({ type: 'OFF_RECORD_SET', on: true });
+    // A live source coordinates the workspace and the capture itself (also before capture has started).
+    try {
+      await this.source?.setOffRecord?.(true);
+      await this.standby?.setOffRecord?.(true);
+    } catch (e) { this.err(`The workspace could not go off the record cleanly: ${errMsg(e)}`); }
     this.deps.presenter.say('');
     this.deps.presenter.setTarget(null);
     await this.teardown('Off the record: session ended, microphone closed. What was already sent is not deleted or recalled.');
@@ -294,15 +420,19 @@ export class ShellController {
     if (this.state.phase === 'live') this.store.dispatch({ type: 'SESSION_ENDING' });
     this.limits.stop();
     this.stopTick();
+    // No model call is sent or left waiting once the session is over.
+    this.llm?.abort();
     const voice = this.voice;
     this.voice = null;
     // The microphone closes first: nothing below may keep it open.
     if (voice) await voice.end();
     await this.stopSource();
+    this.dropStandby();
     this.capture?.stop();
     this.deps.presenter.say('');
     this.deps.presenter.setTarget(null);
     this.clearPendingAsk();
+    this.expireOpenQuestions();
     this.bufferedContext = [];
     this.sys(reason);
     const uploader = this.uploader;
@@ -315,6 +445,13 @@ export class ShellController {
     }
     this.session = null;
     if (active) this.store.dispatch({ type: 'SESSION_ENDED', reason });
+  }
+
+  /** A question that is still waiting for an answer when its session ends will never get one: it stops looking open. */
+  private expireOpenQuestions(): void {
+    for (const f of this.state.feed) {
+      if (f.status === 'asked') this.store.dispatch({ type: 'FEED_STATUS', id: f.id, status: 'unspoken', note: 'the session ended before it was answered' });
+    }
   }
 
   private stopTick(): void {
@@ -341,6 +478,7 @@ export class ShellController {
     this.limits.stop();
     this.stopTick();
     void this.stopSource();
+    this.dropStandby();
     const voice = this.voice;
     this.voice = null;
     if (voice) void voice.end();
@@ -411,13 +549,15 @@ export class ShellController {
       onMode: (mode) => { if (live()) this.onVoiceMode(mode); },
       onMessage: (m) => {
         if (!live()) return;
-        const turn: TranscriptTurn = { role: m.source === 'ai' ? 'agent' : 'user', text: m.text, atMs: this.deps.now() - this.epochMs };
+        // v4 turbo may carry audio tags ("[warmly]"): they are not words, so they never reach the brain or the feed.
+        const turn: TranscriptTurn = { role: m.source === 'ai' ? 'agent' : 'user', text: stripAudioTags(m.text), atMs: this.deps.now() - this.epochMs };
         this.log('recv', turn.role === 'agent' ? 'AGENT' : 'USER', m.text);
         this.safe('onTranscript', () => this.brain.onTranscript(turn), undefined);
         if (turn.role === 'agent') this.store.dispatch({ type: 'VOICE_THINKING', thinking: false });
         else this.captureAnswer(turn);
       },
       onError: (message) => { if (live()) this.err(message); },
+      onVadScore: (score) => { if (live()) this.speech.onScore(score, this.deps.perfNow()); },
     };
   }
 
@@ -433,14 +573,22 @@ export class ShellController {
     this.askTimer = this.deps.timers.setTimeout(() => {
       this.askTimer = null;
       if (!this.isCurrent(run) || !this.pendingAsk) return;
+      const lost = this.pendingAsk;
       this.pendingAsk = null;
       this.store.dispatch({ type: 'VOICE_THINKING', thinking: false });
       this.err(`The agent did not start speaking within ${ASK_AUDIO_TIMEOUT_MS / 1000} s after the question.`);
+      this.deps.presenter.say('');
+      // The question never reached the person: it goes back to the brain's queue and the feed no longer waits for an answer.
+      this.store.dispatch({ type: 'FEED_STATUS', id: lost.decisionId, status: 'unspoken', note: 'not spoken: the agent did not start speaking' });
+      this.safe('onNotSpoken', () => this.brain.onNotSpoken?.(lost.decision), undefined);
     }, ASK_AUDIO_TIMEOUT_MS);
   }
 
   private onVoiceMode(mode: VoiceMode): void {
-    this.log('recv', 'MODE', mode);
+    // The voice SDK's speaking/listening switch (not the Learn/Review/Teach tab). Logged only when it changes.
+    const was = this.state.voice.phase;
+    if ((mode === 'speaking') === (was === 'speaking') && (was === 'speaking' || was === 'listening')) return;
+    this.log('recv', 'VOICE_MODE', mode);
     this.store.dispatch({ type: 'VOICE_PHASE', phase: mode === 'speaking' ? 'speaking' : 'listening' });
     if (mode === 'speaking' && this.pendingAsk) {
       const ms = Math.max(0, Math.round(this.deps.perfNow() - this.pendingAsk.fromPerfMs));
@@ -475,31 +623,161 @@ export class ShellController {
 
   /** The first thing the person says after a spoken question counts as its answer. */
   private captureAnswer(turn: TranscriptTurn): void {
-    const open = [...this.state.feed].reverse().find((f) => f.status === 'asked');
+    // Only a question of this session takes the answer: an item left over from an earlier session never does.
+    const sessionId = this.state.session?.id;
+    const open = [...this.state.feed].reverse().find((f) => f.status === 'asked' && f.sessionId === sessionId);
     if (!open) return;
     this.store.dispatch({ type: 'FEED_ANSWER', id: open.id, text: turn.text, atMs: turn.atMs });
     this.store.dispatch({ type: 'VOICE_THINKING', thinking: false });
     this.deps.presenter.say('');
+    this.deps.presenter.ack?.();
     this.clearPendingAsk();
     const input: AnswerInput = { questionId: open.id, topic: open.topic, text: turn.text, atMs: turn.atMs, kind: 'answer' };
-    this.safe('onAnswer', () => this.brain.onAnswer(input), undefined);
+    this.persist('ANSWER', { kind: 'answer', mode: this.state.session?.mode ?? null, topic: open.topic, questionId: open.id, atMs: turn.atMs, text: turn.text, evidenceIds: open.evidenceIds });
+    const run = this.runId;
+    this.afterAnswer(this.safe('onAnswer', () => this.brain.onAnswer(input), undefined), null, turn.text, run);
     this.mapDirty = true;
+  }
+
+  /**
+   * What the brain says about an answer: it may be asynchronous (a model reads it), and it may change the Work Map, the review
+   * and the teach-back. `fallback` is what a brain that reports nothing (a test double) means for a button press.
+   */
+  private afterAnswer(
+    outcome: AnswerResult | void | Promise<AnswerResult | void> | undefined,
+    fallback: Action | null,
+    text: string,
+    run: number | null,
+  ): void {
+    const apply = (result: AnswerResult | void): void => {
+      if (run !== null && !this.isCurrent(run)) return;
+      if (!result) {
+        if (fallback) this.store.dispatch(fallback);
+        this.refreshAfterAnswer();
+        return;
+      }
+      if (result.teachBack === 'confirmed') this.store.dispatch({ type: 'TEACHBACK_CONFIRM' });
+      else if (result.teachBack === 'corrected') this.store.dispatch({ type: 'TEACHBACK_CORRECT', text: text.trim() });
+      if (result.changed || result.teachBack !== undefined) this.refreshAfterAnswer();
+      // The notice comes after the reload: a new teach-back clears the old one.
+      const notice = REVIEW_NOTICES[result.teachBack ?? ''];
+      if (notice !== undefined) this.store.dispatch({ type: 'REVIEW_NOTICE', notice });
+    };
+    if (outcome instanceof Promise) {
+      outcome.then(apply, (e: unknown) => this.err(`${this.brain.name} answer failed: ${errMsg(e)}`));
+    } else {
+      apply(outcome);
+    }
+  }
+
+  private refreshAfterAnswer(): void {
+    this.loadReview();
+    this.refreshMastery();
+  }
+
+  private refreshMastery(): void {
+    const mastery = this.safe('mastery', () => this.brain.mastery?.() ?? null, null);
+    if (mastery) this.store.dispatch({ type: 'MASTERY_SET', mastery });
   }
 
   // ---- Observations -------------------------------------------------------
 
   private async startSample(run: number): Promise<void> {
     if (this.source || !this.session) return;
-    const source = this.deps.createSampleSource();
+    const info = this.state.session;
+    const scenario: SampleScenarioId = info?.mode === 'teach' ? this.state.teach.sampleCase : info?.mode === 'learn' ? 'learn' : 'neutral';
+    await this.attach(this.deps.createSampleSource(scenario), run, true);
+  }
+
+  /**
+   * The real screen (stream A's bridge, alone or inside the integrated runtime) attaches here once its mount exists. It is never
+   * started by the shell: the real bridge's start opens the screen picker, which only the person's own click in the panel may do.
+   * While a sample source is running it waits in standby, and takes over the moment the bridge reports `capturing`: the sample is a
+   * labelled fallback for when no screen is shared, never mixed with a real screen. The controller listens to the real source's
+   * observations, status and checkpoints, and answers every checkpoint.
+   */
+  async attachLiveSource(source: ObservationSource): Promise<void> {
+    if (this.state.phase !== 'live' || !this.session) {
+      source.dispose();
+      return;
+    }
+    this.dropStandby();
+    // The sample runs (or is about to: the session's own start continues after this) until a screen is shared.
+    const sampleWanted = this.source === null && this.state.screen.sampleOn && this.state.session?.mode !== 'review';
+    if (this.source?.synthetic || sampleWanted) {
+      this.standby = source;
+      this.evidenceSources = [...this.evidenceSources.filter((x) => x !== source), source].slice(-6);
+      this.standbyOff = [source.onStatus((st) => {
+        if (this.standby === source && st.state === 'capturing') void this.promoteStandby(source, st);
+      })];
+      this.sys('The real screen is ready: choose a window in the Screen panel. Until then the sample observations run (synthetic).');
+      return;
+    }
+    if (this.source) await this.stopSource();
+    await this.attach(source, this.runId, false);
+  }
+
+  private async promoteStandby(source: ObservationSource, status: ScreenStatus): Promise<void> {
+    const run = this.runId;
+    this.standby = null;
+    for (const off of this.standbyOff) off();
+    this.standbyOff = [];
+    await this.stopSource();
+    if (!this.isCurrent(run) || !this.session) return;
+    this.sys('A screen is shared: the sample observations stopped. From now on the brain reads your screen.');
+    this.restartForRealScreen();
+    await this.attach(source, run, false);
+    this.onScreenStatus(status);
+  }
+
+  /**
+   * The real screen replaced the sample: nothing the sample produced may stay in a Work Map, a feed or a tutor's record. The brain
+   * begins again for this session (Learn: a new map; Teach: the same confirmed map, no case progress from invented data) and the
+   * voice agent is told that the earlier lines were invented.
+   */
+  private restartForRealScreen(): void {
+    const session = this.session;
+    const info = this.state.session;
+    if (!session || !info) return;
+    this.askedCount = 0;
+    this.held = null;
+    this.clearPendingAsk();
+    this.lastPersistedMap = '';
+    this.store.dispatch({ type: 'SOURCE_TAKEOVER', mode: info.mode });
+    this.beginBrain(session, info.mode);
+    this.sendContext('[screen] The earlier screen lines were invented sample data (synthetic) and no longer apply. From now on the lines describe the person\'s real screen.', this.voice);
+  }
+
+  private dropStandby(): void {
+    for (const off of this.standbyOff) off();
+    this.standbyOff = [];
+    const standby = this.standby;
+    this.standby = null;
+    if (standby) {
+      void standby.stop().catch(() => {});
+      standby.dispose();
+    }
+  }
+
+  /** `Bearer <token>` of the live session for the real bridge's own requests, or null (placeholder API, no session). The token is never stored or logged. */
+  authHeader(): string | null {
+    const header = this.session?.events().headers['Authorization'];
+    return header ?? null;
+  }
+
+  private async attach(source: ObservationSource, run: number, autoStart: boolean): Promise<void> {
+    if (!this.session) return;
     this.source = source;
-    this.evidenceSource = source;
+    this.safe('setSource', () => this.brain.setSource?.(source.synthetic), undefined);
+    this.evidenceSources = [...this.evidenceSources.filter((s) => s !== source), source].slice(-6);
     this.sourceOff = [
       source.onObservation((o) => { if (this.source === source) this.onObservation(o); }),
       source.onStatus((s) => { if (this.source === source) this.onScreenStatus(s); }),
       source.onCheckpoint((c) => { if (this.source === source) void this.onCheckpoint(c); }),
     ];
     this.store.dispatch({ type: 'SCREEN_SOURCE', source: { label: source.label, synthetic: source.synthetic } });
-    this.sys(`Observation source: ${source.label}. Invented data, not your screen.`);
+    this.sys(`Observation source: ${source.label}.${source.synthetic ? ' Invented data, not your screen.' : ''}`);
+    if (!autoStart) return;
     try {
       await source.start({ sessionId: this.session.sessionId, sessionEpochMs: this.epochMs });
     } catch (e) {
@@ -525,6 +803,7 @@ export class ShellController {
     this.store.dispatch({ type: 'SAMPLE_SET', on });
     const info = this.state.session;
     if (this.state.phase !== 'live' || !info || info.mode === 'review') return;
+    if (this.source && !this.source.synthetic) return; // the real screen is attached: the sample never replaces it
     if (on) await this.startSample(this.runId);
     else await this.stopSource();
   }
@@ -539,16 +818,24 @@ export class ShellController {
       },
     });
     this.log('sys', 'OBS', `${o.kind} #${o.sequence} ${o.id} t=${o.timestampMs} ms${o.evidenceIds.length ? ` evidence ${o.evidenceIds.join(',')}` : ''}`);
+    if (o.kind === 'input_activity') this.deps.presenter.noteInput?.(o.facts.typing);
     this.safe('onObservation', () => this.brain.onObservation(o), undefined);
     this.mapDirty = true;
-    const context = observationToContext(o);
+    const context = observationToContext(o, this.source?.synthetic ?? false);
     if (context !== null) this.sendContext(context, this.voice);
   }
 
   private onScreenStatus(s: ScreenStatus): void {
+    this.safe('onStatus', () => this.brain.onStatus(s), undefined);
+    // A frame the vision could not read (no order, email or ticket in view: vision_incomplete, a model timeout) is reported by the
+    // server as an `error` status while the capture keeps running. It does not stop observation, so it is not shown as a stop.
+    if (s.state === 'error' && this.state.screen.capture?.state === 'capturing') {
+      this.store.dispatch({ type: 'SCREEN_STATUS', state: 'capturing', reason: `last frame skipped: ${s.reason ?? 'vision error'}` });
+      this.log('sys', 'SCREEN', `frame skipped (${s.reason ?? 'vision error'}); capture continues`);
+      return;
+    }
     this.store.dispatch({ type: 'SCREEN_STATUS', state: s.state, reason: s.reason ?? null });
     this.log('sys', 'SCREEN', `${s.state}${s.reason ? ` (${s.reason})` : ''}`);
-    this.safe('onStatus', () => this.brain.onStatus(s), undefined);
     if (s.state === 'error') {
       this.store.dispatch({ type: 'BANNER_SET', banner: { kind: 'error', text: `Screen observation stopped${s.reason ? `: ${s.reason}` : ''}.` } });
     }
@@ -565,13 +852,25 @@ export class ShellController {
       offRecord: s.offRecord,
       voiceConnected: this.voice?.isConnected() ?? false,
       agentSpeaking: s.voice.phase === 'speaking',
+      humanSpeaking: this.speech.isSpeaking(this.deps.perfNow()),
       asked: this.askedCount,
+      ...(this.deps.lastInputAt ? { lastInputAtMs: this.sessionTime(this.deps.lastInputAt()) } : {}),
     };
+  }
+
+  /** An epoch-ms instant as session time, or null (before the session started, or none). */
+  private sessionTime(epochMs: number | null): number | null {
+    return epochMs === null || epochMs < this.epochMs ? null : epochMs - this.epochMs;
   }
 
   private tickBrain(): void {
     if (this.state.phase !== 'live') return;
     const nowMs = this.deps.now() - this.epochMs;
+    const held = this.held;
+    if (held && this.state.voice.phase !== 'speaking') {
+      this.held = null;
+      if (this.deps.perfNow() - held.atPerfMs <= WARN_HOLD_MS) this.applyDecision(held.decision, nowMs);
+    }
     const decisions = this.safe('tick', () => this.brain.tick(nowMs, this.signals()), [] as BrainDecision[]);
     for (const d of decisions) this.applyDecision(d, nowMs);
     if (this.mapDirty) {
@@ -589,6 +888,7 @@ export class ShellController {
     return {
       id: entry.id, decision: entry.decision, topic: entry.topic, text: entry.text ?? '', status, note,
       whyNow: entry.whyNow, evidenceIds: entry.evidenceIds, atMs: entry.atMs, answer: null,
+      ...(this.state.session ? { sessionId: this.state.session.id } : {}),
     };
   }
 
@@ -615,24 +915,38 @@ export class ShellController {
     let status: FeedItem['status'] = 'unspoken';
     if (s.offRecord) note = 'off the record';
     else if (!voice || !voice.isConnected()) note = 'the voice is not connected';
-    else if (s.voice.phase === 'speaking') { note = 'the agent was already speaking'; status = 'deferred'; }
+    else if (s.voice.phase === 'speaking') {
+      if (d.decision === 'WARN') {
+        // A warning is never dropped: it waits until the agent has finished the sentence it is saying.
+        this.held = { decision: d, atPerfMs: this.deps.perfNow() };
+        this.record({ ...entry, note: 'waits for the agent to finish speaking' });
+        return;
+      }
+      note = 'the agent was already speaking';
+      status = 'deferred';
+    }
     if (note !== null) {
       this.record({ ...entry, note: `not spoken: ${note}` });
       this.store.dispatch({ type: 'FEED_ADD', item: this.feedItem(entry, status, `not spoken: ${note}`) });
+      this.safe('onNotSpoken', () => this.brain.onNotSpoken?.(d), undefined);
       return;
     }
     const sent = voice?.ask(text) ?? null;
     if (sent === null) {
       this.record({ ...entry, note: 'not spoken: the voice is not connected' });
       this.store.dispatch({ type: 'FEED_ADD', item: this.feedItem(entry, 'unspoken', 'not spoken: the voice is not connected') });
+      this.safe('onNotSpoken', () => this.brain.onNotSpoken?.(d), undefined);
       return;
     }
     this.askedCount += 1;
     this.log('sent', 'USER_MSG', sent);
+    this.safe('onSpoken', () => this.brain.onSpoken?.(d), undefined);
     this.record({ ...entry, spoken: true });
-    this.store.dispatch({ type: 'FEED_ADD', item: this.feedItem(entry, 'asked', null) });
+    // A question waits for the answer; a warning, a piece of feedback or a closing line is only said.
+    const expectsAnswer = d.expectsAnswer ?? d.decision !== 'WARN';
+    this.store.dispatch({ type: 'FEED_ADD', item: this.feedItem(entry, expectsAnswer ? 'asked' : 'said', null) });
     this.store.dispatch({ type: 'VOICE_THINKING', thinking: true });
-    this.pendingAsk = { decisionId: id, fromPerfMs: this.lastObservationPerfMs ?? this.deps.perfNow() };
+    this.pendingAsk = { decisionId: id, fromPerfMs: this.lastObservationPerfMs ?? this.deps.perfNow(), decision: d, answerable: expectsAnswer };
     this.armAskTimer();
     this.deps.presenter.say(text);
     const cue = d.clipa?.state;
@@ -640,6 +954,7 @@ export class ShellController {
     this.store.dispatch({ type: 'CLIPA_HINT', hint });
     const target = d.clipa?.target;
     this.deps.presenter.setTarget(target && this.resolveTarget ? this.resolveTarget(target) : null);
+    this.deps.presenter.play?.(d);
   }
 
   // ---- Review and the map -------------------------------------------------
@@ -651,26 +966,62 @@ export class ShellController {
 
   /** Asks the brain for the draft map, the gaps and the teach-back. */
   loadReview(): void {
-    const review = this.safe('review', () => this.brain.review(), null);
+    // On the Review view the teach-back text is on screen: that counts as stating it, like speaking it (the confirmation gate).
+    const shown = this.state.mode === 'review';
+    const review = this.safe('review', () => this.brain.review(shown), null);
     if (!review) return;
     this.store.dispatch({ type: 'MAP_SET', map: review.map });
-    this.store.dispatch({ type: 'REVIEW_SET', gaps: review.gaps, teachBack: review.teachBack });
+    this.store.dispatch({
+      type: 'REVIEW_SET', gaps: review.gaps, teachBack: review.teachBack, digest: review.teachBackDigest ?? null, buttons: review.buttons ?? false,
+    });
+    this.persistMap(review.map);
   }
 
+  /** A new Work Map version, or a confirmation, is written to the session log once. */
+  private persistMap(map: DraftMap): void {
+    if (map.version === undefined || (map.steps.length === 0 && (map.guardrails ?? []).length === 0)) return;
+    const key = `${map.version}:${map.confirmed === true ? 'confirmed' : 'draft'}:${map.steps.length}:${(map.guardrails ?? []).length}`;
+    if (key === this.lastPersistedMap) return;
+    this.lastPersistedMap = key;
+    const guardrails = (map.guardrails ?? []).map((g) => ({ id: g.id, text: g.text, evidenceIds: g.evidenceIds }));
+    const steps = map.steps.map((st) => ({ id: st.id, title: st.title, kind: st.kind, decision: st.decision, reason: st.reason, evidenceIds: st.evidenceIds }));
+    const full = { version: map.version, confirmed: map.confirmed === true, guardrails, steps };
+    const text = JSON.stringify(full);
+    // The server keeps up to 4000 characters of a line: a map that is larger is stored without the step details.
+    this.persist('MAP_VERSION', text.length <= 3800 ? full : { version: map.version, confirmed: map.confirmed === true, guardrails, stepCount: steps.length });
+  }
+
+  /** Confirm: counts for exactly the teach-back on screen (its digest). The brain refuses it as `stale` if the map moved on. */
   confirmTeachBack(): void {
     const tb = this.state.review.teachBack;
     if (tb.text === null) return;
-    this.store.dispatch({ type: 'TEACHBACK_CONFIRM' });
-    this.sys('Teach-back confirmed.');
-    this.safe('onAnswer', () => this.brain.onAnswer({ questionId: null, topic: 'teach_back', text: tb.text ?? '', atMs: this.deps.now() - this.epochMs, kind: 'confirm' }), undefined);
+    this.sys('Teach-back confirmed by button.');
+    const atMs = this.deps.now() - this.epochMs;
+    this.persist('ANSWER', { kind: 'confirm', mode: this.state.session?.mode ?? null, topic: 'teach_back', atMs, digest: tb.digest });
+    const input: AnswerInput = { questionId: null, topic: 'teach_back', text: tb.text, atMs, kind: 'confirm', digest: tb.digest };
+    this.afterAnswer(this.safe('onAnswer', () => this.brain.onAnswer(input), undefined), { type: 'TEACHBACK_CONFIRM' }, tb.text, null);
   }
 
   correctTeachBack(text: string): void {
+    const tb = this.state.review.teachBack;
     const clean = text.trim();
-    if (this.state.review.teachBack.text === null || clean === '') return;
-    this.store.dispatch({ type: 'TEACHBACK_CORRECT', text: clean });
-    this.sys('Teach-back corrected.');
-    this.safe('onAnswer', () => this.brain.onAnswer({ questionId: null, topic: 'teach_back', text: clean, atMs: this.deps.now() - this.epochMs, kind: 'correct' }), undefined);
+    if (tb.text === null || clean === '') return;
+    this.sys('Teach-back corrected by button.');
+    const atMs = this.deps.now() - this.epochMs;
+    this.persist('ANSWER', { kind: 'correct', mode: this.state.session?.mode ?? null, topic: 'teach_back', atMs, text: clean, digest: tb.digest });
+    const input: AnswerInput = { questionId: null, topic: 'teach_back', text: clean, atMs, kind: 'correct', digest: tb.digest };
+    this.afterAnswer(this.safe('onAnswer', () => this.brain.onAnswer(input), undefined), { type: 'TEACHBACK_CORRECT', text: clean }, clean, null);
+  }
+
+  /** Skip: the rule stays provisional and Teach will not apply it. Offered after two unclear replies. */
+  skipTeachBack(): void {
+    const tb = this.state.review.teachBack;
+    if (tb.text === null) return;
+    this.sys('Teach-back skipped by button.');
+    const atMs = this.deps.now() - this.epochMs;
+    this.persist('ANSWER', { kind: 'skip', mode: this.state.session?.mode ?? null, topic: 'teach_back', atMs, digest: tb.digest });
+    const input: AnswerInput = { questionId: null, topic: 'teach_back', text: '', atMs, kind: 'skip', digest: tb.digest };
+    this.afterAnswer(this.safe('onAnswer', () => this.brain.onAnswer(input), undefined), null, '', null);
   }
 
   // ---- Teach: checkpoint and evidence -------------------------------------
@@ -686,28 +1037,67 @@ export class ShellController {
     }
   }
 
-  private async onCheckpoint(cp: ActionCheckpoint): Promise<void> {
+  /** The brain's reply, or `unknown` when it fails or does not answer within CHECKPOINT_TIMEOUT_MS: the workspace never waits forever. */
+  private judge(cp: ActionCheckpoint): Promise<CheckpointReply> {
+    const unknown = (message: string): CheckpointReply => ({
+      schemaVersion: 1, checkpointId: cp.id, status: 'unknown', message, evidenceIds: [],
+      basedOn: { order: cp.revisions.order, email: cp.revisions.email },
+    });
+    return new Promise<CheckpointReply>((resolve) => {
+      let settled = false;
+      const finish = (reply: CheckpointReply): void => {
+        if (settled) return;
+        settled = true;
+        this.deps.timers.clearTimeout(timer);
+        resolve(reply);
+      };
+      const timer = this.deps.timers.setTimeout(() => {
+        this.err(`${this.brain.name} did not answer the checkpoint within ${CHECKPOINT_TIMEOUT_MS / 1000} s: replying unknown.`);
+        finish(unknown('Not judged: the tutor did not answer in time. Ask the expert before you send.'));
+      }, CHECKPOINT_TIMEOUT_MS);
+      Promise.resolve()
+        .then(() => this.brain.checkpoint(cp))
+        .then((reply) => finish(parseCheckpointReply(reply)))
+        .catch((e: unknown) => {
+          this.err(`${this.brain.name} checkpoint failed: ${errMsg(e)}`);
+          finish(unknown('Not judged: the tutor failed. Ask the expert before you send.'));
+        });
+    });
+  }
+
+  /** What the demo workspace's Preview may do now: the tutor checks only in a live Teach session. */
+  checkpointGate(): { ok: true } | { ok: false; message: string } {
+    const s = this.state;
+    if (s.offRecord) return { ok: false, message: 'Off the record: nothing is checked.' };
+    if (s.phase !== 'live' || s.session === null || s.session.mode !== 'teach') {
+      return { ok: false, message: 'Start Teach first: the tutor checks a draft only while a Teach session runs. Nothing was checked.' };
+    }
+    return { ok: true };
+  }
+
+  /**
+   * The tutor's answer to a checkpoint (the brain within CHECKPOINT_TIMEOUT_MS, else `unknown`), shown and recorded. The bridge path
+   * (onCheckpoint) and the demo workspace's own Preview port (screen/checkpoint-binding.ts) both come here.
+   */
+  async answerCheckpoint(cp: ActionCheckpoint): Promise<CheckpointReply | null> {
     const run = this.runId;
     this.sys(`Checkpoint ${cp.id} raised by the workspace.`);
-    let reply: CheckpointReply;
-    try {
-      reply = parseCheckpointReply(await this.brain.checkpoint(cp));
-    } catch (e) {
-      this.err(`${this.brain.name} checkpoint failed: ${errMsg(e)}`);
-      reply = {
-        schemaVersion: 1, checkpointId: cp.id, status: 'unknown',
-        message: 'Not judged: the tutor failed. Ask the expert before you send.', evidenceIds: [],
-        basedOn: { order: cp.revisions.order, email: cp.revisions.email },
-      };
-    }
-    if (!this.isCurrent(run)) return;
+    const reply = await this.judge(cp);
+    if (!this.isCurrent(run)) return null;
     this.store.dispatch({
       type: 'CHECKPOINT_RESULT',
       card: { checkpointId: reply.checkpointId, status: reply.status, message: reply.message, evidenceIds: reply.evidenceIds, atMs: cp.timestampMs, deliveryError: null },
     });
+    this.refreshMastery();
+    this.persist('CHECKPOINT_RESULT', { checkpointId: reply.checkpointId, status: reply.status, evidenceIds: reply.evidenceIds, atMs: cp.timestampMs });
     this.log('sent', 'CHECKPOINT', `${reply.status}: ${reply.message}`);
+    return reply;
+  }
+
+  private async onCheckpoint(cp: ActionCheckpoint): Promise<void> {
+    const reply = await this.answerCheckpoint(cp);
     const source = this.source;
-    if (!source) return;
+    if (!reply || !source) return;
     try {
       await source.replyToCheckpoint(reply);
     } catch (e) {
@@ -724,7 +1114,12 @@ export class ShellController {
   }
 
   resolveEvidence(evidenceId: string): Promise<EvidenceRef> {
-    const source = this.source ?? this.evidenceSource;
-    return source ? source.resolveEvidence(evidenceId) : Promise.reject(new Error('No observation source has run in this page.'));
+    // Newest source first: the current session, then the earlier ones (the expert's Learn moments stay resolvable in Teach).
+    const sources = [...this.evidenceSources].reverse();
+    if (sources.length === 0) return Promise.reject(new Error('No observation source has run in this page.'));
+    return sources.reduce<Promise<EvidenceRef>>(
+      (previous, source) => previous.catch(() => source.resolveEvidence(evidenceId)),
+      Promise.reject(new Error('Evidence is not published in the current session')),
+    );
   }
 }

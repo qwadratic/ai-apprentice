@@ -27,8 +27,8 @@
       "client_events": ["conversation_initiation_metadata", "ping", "audio", "interruption", "user_transcript", "agent_response", "agent_response_correction", "vad_score"]
     },
     "tts": {
-      "model_id": "eleven_flash_v2",
-      "voice_id": "21m00Tcm4TlvDq8ikWAM"
+      "model_id": "eleven_v4_turbo",
+      "voice_id": "EXAVITQu4vr4xnSDxMaL"
     }
   },
   "platform_settings": {

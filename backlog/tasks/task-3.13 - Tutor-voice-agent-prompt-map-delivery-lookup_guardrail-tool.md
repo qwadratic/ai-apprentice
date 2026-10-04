@@ -1,10 +1,11 @@
 ---
 id: TASK-3.13
 title: 'Tutor voice agent: prompt, map delivery, lookup_guardrail tool'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@qwadratic'
 created_date: '2026-10-03 21:11'
-updated_date: '2026-10-03 22:17'
+updated_date: '2026-10-04 03:19'
 labels:
   - stream-b
   - tutor

@@ -1,6 +1,6 @@
 // Everything environment-specific lives here. The footer links in static/index.html repeat three of these URLs.
 
-export const REPO = 'qwadratic/ai-apprentice';
+export const REPO = 'qwadratic/clipa';
 export const REPO_URL = `https://github.com/${REPO}`;
 export const PULLS_URL = `${REPO_URL}/pulls`;
 export const MERGE_QUEUE_URL = `${PULLS_URL}?q=is%3Apr+is%3Aopen+label%3Aready-to-merge`;
@@ -15,7 +15,7 @@ export const commitUrl = (sha: string): string => `${REPO_URL}/commit/${sha}`;
 export const PULLS_PAGE_SIZE = 50;
 export const PULLS_API_URL = `https://api.github.com/repos/${REPO}/pulls?state=open&per_page=${PULLS_PAGE_SIZE}`;
 
-// The VM API. Its CORS allow-list holds this page's origin (https://qwadratic.github.io), the same as for the lab.
+// The VM API. Its CORS allow-list holds this page's origin (https://qwadratic.github.io), the same as for the product app.
 export const API_BASE = 'https://apprentice.exe.xyz';
 export const HEALTH_URL = `${API_BASE}/health`;
 // Runner state and the shas: apps/api reports them here (the infra ops module). The placeholder API that served
