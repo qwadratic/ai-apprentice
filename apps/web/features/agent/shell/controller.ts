@@ -172,6 +172,8 @@ export class ShellController {
   private epochMs = 0;
   private uploader: EventUploader | null = null;
   private voice: VoiceSession | null = null;
+  /** The microphone toggle; it holds across sessions and modes until the person turns it back on. */
+  private micMuted = false;
   private source: ObservationSource | null = null;
   /** Every source of this page, newest last: evidence of an earlier session (the expert's moment) stays resolvable in Teach. */
   private evidenceSources: ObservationSource[] = [];
@@ -696,6 +698,16 @@ export class ShellController {
     await this.teardown('Off the record: session ended, microphone closed. What was already sent is not deleted or recalled.');
   }
 
+  /** Mic off: Clipa stops hearing the person; the screen, the session and Clipa's own voice go on. */
+  setMicMuted(muted: boolean): void {
+    if (this.micMuted === muted) return;
+    this.micMuted = muted;
+    this.voice?.setMicMuted(muted);
+    this.sys(muted ? 'Microphone off: Clipa does not hear you; the screen and the session go on.' : 'Microphone on.');
+  }
+
+  isMicMuted(): boolean { return this.micMuted; }
+
   backOnRecord(): void {
     if (!this.state.offRecord) return;
     this.store.dispatch({ type: 'OFF_RECORD_SET', on: false });
@@ -803,6 +815,7 @@ export class ShellController {
     this.store.dispatch({ type: 'VOICE_PHASE', phase: 'connecting', error: null });
     const voice = new VoiceSession(this.deps.connectVoice);
     this.voice = voice;
+    voice.setMicMuted(this.micMuted);
     try {
       const role = voiceRoleFor(mode);
       this.sys(`Asking the server for a voice connection (${role}).`);
