@@ -197,7 +197,12 @@ export function mountScreenPanel(root: HTMLElement, options: ScreenPanelOptions)
   return () => {
     clearDrag();
     cleanup.forEach((unsubscribe) => unsubscribe());
-    try { void Promise.resolve(controller.stop()).catch(() => {}); } catch { /* Local cleanup continues. */ }
+    // Unmount is a privacy boundary: close local capture synchronously even if
+    // an external transport controller throws, rejects, or never settles.
+    capture.stop();
+    if (options.controller) {
+      try { void Promise.resolve(controller.stop()).catch(() => {}); } catch { /* Local capture is already closed. */ }
+    }
     capture.canvas.remove();
     panel.remove();
   };

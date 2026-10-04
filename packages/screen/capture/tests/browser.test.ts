@@ -28,6 +28,9 @@ declare global {
     processed: MediaStream;
     rawTrack: MediaStreamTrack;
     unmount(): void;
+    testBrokenControllerStop(kind: 'throw' | 'reject' | 'pending'): Promise<{
+      state: string; trackState: MediaStreamTrackState; before: number; after: number;
+    }>;
     resizeSource(): void;
     decodeFrame(frame: BrowserFrame): Promise<{ width: number; height: number; pixels: number[] }>;
   }
@@ -115,6 +118,45 @@ test('Chromium: real canvas/PNG/processed stream pixels, panel masks, lifecycle 
           stop: () => { window.controllerCalls.push('stop'); window.capture.stop(); },
         },
       });
+      window.testBrokenControllerStop = async (kind) => {
+        const fixture = document.createElement('canvas'); fixture.width = 40; fixture.height = 20;
+        fixture.getContext('2d')!.fillRect(0, 0, 40, 20);
+        const fixtureStream = fixture.captureStream(30);
+        const localFrames: BrowserFrame[] = [];
+        const localCapture = new ScreenCapture({
+          runtime: { ...browserCaptureRuntime(), getDisplayMedia: async () => fixtureStream },
+          frameIntervalMs: 10, renderIntervalMs: 5,
+          onFrame: (frame: BrowserFrame) => { localFrames.push(frame); },
+        });
+        const host = document.body.appendChild(document.createElement('div'));
+        const unmount = mountScreenPanel(host, {
+          capture: localCapture,
+          session: () => ({ sessionId: `broken-${kind}`, sessionEpochMs: Date.now() }),
+          controller: {
+            start: (session: { sessionId: string; sessionEpochMs: number }) => localCapture.start(session),
+            pause: () => localCapture.pause(),
+            resume: () => { localCapture.resume(); },
+            stop: () => {
+              if (kind === 'throw') throw new Error('Synthetic stop failure');
+              if (kind === 'reject') return Promise.reject(new Error('Synthetic stop rejection'));
+              return new Promise<void>(() => {});
+            },
+          },
+        });
+        await localCapture.start({ sessionId: `broken-${kind}`, sessionEpochMs: Date.now() });
+        while (!localCapture.getSnapshot().geometry) await new Promise((resolve) => setTimeout(resolve, 10));
+        localCapture.confirmMasks(localCapture.getSnapshot().geometry!.revision);
+        localCapture.resume();
+        while (localFrames.length === 0) await new Promise((resolve) => setTimeout(resolve, 10));
+        const before = localFrames.length;
+        unmount();
+        const state = localCapture.getSnapshot().state;
+        const trackState = fixtureStream.getVideoTracks()[0]!.readyState;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        const after = localFrames.length;
+        host.remove();
+        return { state, trackState, before, after };
+      };
       window.resizeSource = () => {
         source.width = 640; source.height = 360; paint();
         (raw.getVideoTracks()[0]! as MediaStreamTrack & { requestFrame(): void }).requestFrame();
@@ -211,6 +253,13 @@ test('Chromium: real canvas/PNG/processed stream pixels, panel masks, lifecycle 
     assert.equal(await page.evaluate(() => window.capture.getSnapshot().reason), 'source-ended');
     await page.evaluate(() => window.unmount());
     assert.equal(await page.locator('.screen-panel').count(), 0);
+    for (const kind of ['throw', 'reject', 'pending'] as const) {
+      const stopped = await page.evaluate((value: 'throw' | 'reject' | 'pending') =>
+        window.testBrokenControllerStop(value), kind);
+      assert.equal(stopped.state, 'stopped', kind);
+      assert.equal(stopped.trackState, 'ended', kind);
+      assert.equal(stopped.after, stopped.before, kind);
+    }
     assert.deepEqual(errors, []);
   } finally {
     await browser?.close();
