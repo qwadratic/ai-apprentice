@@ -24,6 +24,8 @@ import type {
 } from './types.ts';
 
 const REVIEW_GAP_MS = 1500;
+/** A question that did not reach the person is not asked again for this long. */
+export const NOT_SPOKEN_BACKOFF_MS = 10_000;
 const MAX_OBSERVATIONS = 300;
 
 /** What the topic of a question is called in the shell's decision log. */
@@ -57,8 +59,8 @@ export const SEND_TARGET: ClipaTargetRef = { surface: 'email', hint: 'send' };
 
 type OpenQuestion =
   | { kind: 'learn'; questionId: string; question: Question }
-  | { kind: 'followup'; question: Question }
-  | { kind: 'teachback'; heard: TeachBack }
+  | { kind: 'followup'; questionId: string; question: Question }
+  | { kind: 'teachback'; questionId: string; heard: TeachBack }
   | { kind: 'predict'; questionId: string; prediction: Prediction };
 
 interface TeachProgress {
@@ -103,6 +105,11 @@ export class AgentBrain implements Brain {
   private lastAnsweredAtMs: number | null = null;
   // Review
   private asked = new Set<string>();
+  private reviewSeq = 0;
+  /** No question is asked before this session time: a question that did not reach the person is not re-asked at once. */
+  private holdUntilMs = 0;
+  /** The Work Map was built from the sample source (invented data), not from the person's screen. */
+  private mapSynthetic = false;
   private clarifier = new ReviewClarifier();
   /** The teach-back last said to the expert (the one a spoken reply answers); null before the first. */
   private heard: TeachBack | null = null;
@@ -113,6 +120,7 @@ export class AgentBrain implements Brain {
   // Teach
   private teach: TeachProgress | null = null;
   private outcomes: CaseOutcome[] = [];
+  private notJudged: Array<{ caseId: string; title: string; why: string }> = [];
 
   constructor(options: AgentBrainOptions) {
     this.options = options;
@@ -120,6 +128,11 @@ export class AgentBrain implements Brain {
   }
 
   // ---- session ------------------------------------------------------------
+
+  /** The source of observations changed: Learn builds its map from it, and the map says whether that was the sample. */
+  setSource(synthetic: boolean): void {
+    if (this.mode === 'learn') this.mapSynthetic = synthetic;
+  }
 
   begin(session: BrainSession): void {
     this.mode = session.mode;
@@ -132,6 +145,7 @@ export class AgentBrain implements Brain {
     this.busy = false;
     this.lastAnsweredAtMs = null;
     this.asked = new Set();
+    this.holdUntilMs = 0;
     this.clarifier = new ReviewClarifier();
     this.heard = null;
     this.buttons = false;
@@ -155,6 +169,8 @@ export class AgentBrain implements Brain {
     if (session.mode === 'learn') {
       this.state = createMapState(this.options.customers);
       this.outcomes = [];
+      this.notJudged = [];
+      this.mapSynthetic = false;
       this.policy = new ConversationPolicy({ mode: 'learn', persona: session.persona, now });
       this.learnPolicy = this.policy;
     } else if (session.mode === 'teach') {
@@ -206,6 +222,10 @@ export class AgentBrain implements Brain {
     if (this.mode === 'review') return [...out, ...this.reviewTick(nowMs, signals)];
     const policy = this.policy;
     if (policy === null) return out;
+    // Nothing is asked while the voice is not connected (it would only pile up "not spoken" items), and a question that did not
+    // reach the person waits before it is asked again. Candidates stay in the policy's queue (and age into Review).
+    if (signals !== undefined && !signals.voiceConnected) return out;
+    if (nowMs < this.holdUntilMs) return out;
     for (const d of policy.tick(nowMs)) out.push(this.fromPolicy(d, policy));
     return out;
   }
@@ -240,12 +260,26 @@ export class AgentBrain implements Brain {
     const id = decision.questionId;
     if (id === undefined) return;
     const open = this.open;
-    if (open && 'questionId' in open && open.questionId === id) {
-      this.open = null;
+    if (open === null || open.questionId !== id) return;
+    this.open = null;
+    this.holdUntilMs = this.nowMs + NOT_SPOKEN_BACKOFF_MS;
+    if (open.kind === 'followup') {
+      // The follow-up goes back to the plan: it can be asked again after the back-off.
+      this.asked.delete(keyOf(open.question));
+    } else if (open.kind === 'learn' || open.kind === 'predict') {
       this.policy?.cancelQuestion(id, this.nowMs);
-    } else if (open?.kind === 'followup' || open?.kind === 'teachback') {
-      this.open = null;
     }
+    // A teach-back that was not spoken was never stated (onSpoken states it), so the next review tick simply plays it again.
+  }
+
+  /** A spoken decision reached the voice: a teach-back counts as stated now (the confirmation gate), not when it was only planned. */
+  onSpoken(decision: BrainDecision): void {
+    const open = this.open;
+    if (open === null || open.kind !== 'teachback' || open.questionId !== decision.questionId) return;
+    const stated = stateTeachBack(this.state);
+    this.state = stated.state;
+    this.heard = stated.teachBack;
+    open.heard = stated.teachBack;
   }
 
   // ---- answers ------------------------------------------------------------
@@ -451,15 +485,17 @@ export class AgentBrain implements Brain {
     if (this.busy || this.open !== null || this.reviewHalted) return [];
     if (!signals || !signals.voiceConnected || signals.agentSpeaking || signals.humanSpeaking) return [];
     if (this.lastAnsweredAtMs !== null && nowMs - this.lastAnsweredAtMs < REVIEW_GAP_MS) return [];
+    if (nowMs < this.holdUntilMs) return [];
 
     const map = workingMap(this.state);
     const held = this.learnPolicy?.heldForReview(nowMs) ?? [];
     const next = planFollowUps(map, { persona: this.persona, held, max: MAX_FOLLOW_UPS }).find((q) => !this.asked.has(keyOf(q)));
     if (next !== undefined) {
       this.asked.add(keyOf(next));
-      this.open = { kind: 'followup', question: next };
+      const questionId = `rv-${++this.reviewSeq}`;
+      this.open = { kind: 'followup', questionId, question: next };
       return [{
-        decision: 'ASK_NOW', topic: next.topic, kind: TOPIC_KIND[next.topic] ?? next.topic, evidenceIds: [...next.evidenceIds],
+        decision: 'ASK_NOW', questionId, topic: next.topic, kind: TOPIC_KIND[next.topic] ?? next.topic, evidenceIds: [...next.evidenceIds],
         whyNow: `The Work Map has a gap about ${next.topic.replace(/_/g, ' ')} that the task did not close.`,
         utterance: { text: next.text }, expectsAnswer: true, clipa: { state: 'speaking' },
       }];
@@ -473,14 +509,12 @@ export class AgentBrain implements Brain {
     }
     // After two unclear replies the buttons take over: nothing is asked again until one is pressed.
     if (this.buttons || map.guardrails.length === 0) return [];
-    // The state must record the teach-back at the moment it is spoken: a confirmation counts only for what was last stated.
-    const stated = stateTeachBack(this.state);
-    this.state = stated.state;
-    const tb = stated.teachBack;
-    this.heard = tb;
-    this.open = { kind: 'teachback', heard: tb };
+    // Planned here, stated in onSpoken (when it reaches the voice): a confirmation counts only for what the expert was told.
+    const tb = stateTeachBack(this.state).teachBack;
+    const questionId = `rv-${++this.reviewSeq}`;
+    this.open = { kind: 'teachback', questionId, heard: tb };
     return [{
-      decision: 'ASK_NOW', topic: 'teach_back', kind: 'teach_back', evidenceIds: [...tb.evidenceIds],
+      decision: 'ASK_NOW', questionId, topic: 'teach_back', kind: 'teach_back', evidenceIds: [...tb.evidenceIds],
       whyNow: `No gap is left; playing back version ${map.version} for the expert to confirm or correct.`,
       utterance: { text: tb.text }, expectsAnswer: true, clipa: { state: 'speaking' },
     }];
@@ -512,7 +546,7 @@ export class AgentBrain implements Brain {
 
   private shown(map: WorkMap): DraftMap {
     const confirmed = latestConfirmed(this.state);
-    return toDraftMap(map, confirmed !== null && confirmed.version === map.version && !this.state.draft.dirty);
+    return toDraftMap(map, confirmed !== null && confirmed.version === map.version && !this.state.draft.dirty, this.mapSynthetic);
   }
 
   // ---- Teach --------------------------------------------------------------
@@ -539,23 +573,28 @@ export class AgentBrain implements Brain {
     const t = this.teach;
     if (t !== null && t.firstStatus === null) {
       t.firstStatus = verdict.status;
-      const prediction = t.prediction;
-      // No prediction asked means the map had nothing to decide here (or the person has not answered yet): a miss only when one was asked.
-      const verdictOf = t.verdict ?? (prediction === null ? 'match' : 'miss');
-      this.outcomes = [
-        ...this.outcomes.filter((o) => o.caseId !== t.caseId),
-        { caseId: t.caseId, title: t.title, verdict: verdictOf, firstStatus: verdict.status, sent: false },
-      ];
+      // A case is judged only when the tutor really judged it: a confirmed map, a checkpoint that is not `unknown`, and, where the
+      // tutor asked the new hire to predict, an answer. Anything else is "not judged": never mastered, never practise.
+      const unanswered = t.prediction !== null && t.verdict === null;
+      const why = map === null ? 'there is no confirmed Work Map' : verdict.status === 'unknown' ? 'the tutor could not tell what is right (unknown)' : unanswered ? 'the prediction was not answered' : null;
+      this.outcomes = this.outcomes.filter((o) => o.caseId !== t.caseId);
+      this.notJudged = this.notJudged.filter((n) => n.caseId !== t.caseId);
+      if (why !== null) this.notJudged.push({ caseId: t.caseId, title: t.title, why });
+      else this.outcomes.push({ caseId: t.caseId, title: t.title, verdict: t.verdict ?? 'match', firstStatus: verdict.status, sent: false });
     }
     return reply;
   }
 
   /** What has been mastered over the Teach cases so far. */
   mastery(): MasteryLines | null {
-    if (this.outcomes.length === 0) return null;
+    if (this.outcomes.length === 0 && this.notJudged.length === 0) return null;
     const m = summarizeMastery(this.outcomes);
     const lineOf = (id: string): string => m.lines[this.outcomes.findIndex((o) => o.caseId === id)] ?? id;
-    return { mastered: m.mastered.map(lineOf), practise: m.practise.map(lineOf) };
+    return {
+      mastered: m.mastered.map(lineOf),
+      practise: m.practise.map(lineOf),
+      notJudged: this.notJudged.map((n) => `${n.caseId.toUpperCase()} ${n.title}: not judged (${n.why})`),
+    };
   }
 
   /** The Work Map version Teach would use, for the UI and the log. */
@@ -584,7 +623,7 @@ function guardrailText(g: WorkMap['guardrails'][number]): string {
   return `${rule}${assumed}${why}${quote}`;
 }
 
-export function toDraftMap(map: WorkMap, confirmed: boolean): DraftMap {
+export function toDraftMap(map: WorkMap, confirmed: boolean, synthetic = false): DraftMap {
   const guardrails: GuardrailRef[] = map.guardrails.map((g) => ({ id: g.id, text: guardrailText(g), evidenceIds: [...g.evidenceIds] }));
   const byId = new Map(guardrails.map((g) => [g.id, g]));
   const steps: DraftStep[] = map.steps.map((s) => {
@@ -598,7 +637,8 @@ export function toDraftMap(map: WorkMap, confirmed: boolean): DraftMap {
       guardrails: s.guardrailIds.flatMap((id) => { const g = byId.get(id); return g ? [g] : []; }),
       evidenceIds: evidence,
       atMs: s.atMs,
+      ...(synthetic ? { synthetic: true } : {}),
     };
   });
-  return { steps, version: map.version, confirmed, guardrails };
+  return { steps, version: map.version, confirmed, guardrails, ...(synthetic ? { synthetic: true } : {}) };
 }

@@ -35,6 +35,9 @@ export function StepCards({ map }: { map: DraftMap }) {
   const loose = (map.guardrails ?? []).filter((g) => !listed.has(g.id));
   return (
     <>
+    {map.synthetic === true && (
+      <p className="as-notwired as-notwired--synthetic" role="note" data-testid="map-synthetic"><strong>Synthetic:</strong> this map was built from the invented sample observations, not from your screen.</p>
+    )}
     <ol className="as-steps" aria-label="Draft map">
       {map.steps.map((step, i) => (
         <li key={step.id} className={`as-step as-step--${step.kind}`}>
@@ -42,6 +45,7 @@ export function StepCards({ map }: { map: DraftMap }) {
             <span className="as-step__no">{i + 1}</span>
             <strong className="as-step__title">{step.title}</strong>
             <span className={`as-tag as-tag--${step.kind === 'judgment' ? 'accent' : 'muted'}`}>{step.kind === 'judgment' ? 'judgment call' : 'step'}</span>
+            {step.synthetic === true && <span className="as-tag as-tag--warn">synthetic</span>}
             {step.atMs !== null && <span className="as-step__time">{clockOf(step.atMs)}</span>}
           </div>
           {step.decision !== null && <p className="as-step__line"><span className="as-step__key">Decision</span> {step.decision}</p>}

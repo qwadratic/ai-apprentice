@@ -89,6 +89,12 @@ export function TeachView() {
               <h4 className="as-h4">To practise</h4>
               <ul>{mastery.practise.map((m) => <li key={m}>{m}</li>)}</ul>
             </div>
+            {(mastery.notJudged?.length ?? 0) > 0 && (
+              <div data-testid="not-judged">
+                <h4 className="as-h4">Not judged</h4>
+                <ul>{(mastery.notJudged ?? []).map((m) => <li key={m}>{m}</li>)}</ul>
+              </div>
+            )}
           </div>
         )}
       </section>

@@ -25,6 +25,8 @@ export class LiveMount {
   private workspaceRoot: HTMLElement | null = null;
   private screenRoot: HTMLElement | null = null;
   private mounted: { sessionId: string; mount: RuntimeWorkspaceMount; unregisterCapture: () => void } | null = null;
+  /** The session whose mount failed: it is not tried again (the failure note changes the store, which would call sync again). */
+  private failedFor: string | null = null;
   private readonly off: () => void;
 
   constructor(deps: LiveMountDeps) {
@@ -51,9 +53,12 @@ export class LiveMount {
     if (this.mounted !== null && this.mounted.sessionId !== wanted) {
       this.release();
     }
-    if (wanted === null || this.mounted !== null || this.screenRoot === null) return;
+    if (this.failedFor !== null && this.failedFor !== wanted) this.failedFor = null;
+    if (wanted === null || this.mounted !== null || this.failedFor === wanted || this.screenRoot === null) return;
     if (this.providesWorkspace && this.workspaceRoot === null) return;
     let mount: RuntimeWorkspaceMount;
+    // Marked before the factory runs: the note below changes the store, which calls sync again.
+    this.failedFor = wanted;
     try {
       mount = factory({
         // A screen-only factory ignores the workspace root; it still needs an element.
@@ -68,6 +73,7 @@ export class LiveMount {
       return;
     }
     // The controller follows the capture's state (the status chip) and stops it when the session ends.
+    this.failedFor = null;
     // `mounted` is set first: registering the capture changes the store, which calls sync again.
     const current = { sessionId: wanted, mount, unregisterCapture: (): void => {} };
     this.mounted = current;

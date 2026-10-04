@@ -33,8 +33,9 @@ export function LearnView() {
       )}
       {brain.wired && (
         <p className="as-note" data-testid="learn-hint">
-          Clipa asks only at a natural pause: not while you type, speak or while the screen is still changing. Answer by voice; your words go
-          into the draft map with the screen moment they belong to.
+          Clipa asks only at a natural pause: not while you speak or while the screen is still changing, and not while she hears you type
+          in the demo workspace (typing in other windows is not seen). Answer by voice; your words go into the draft map with the screen
+          moment they belong to.
         </p>
       )}
 

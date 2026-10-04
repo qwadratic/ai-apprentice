@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createLlmClient, describeLlmEvent } from '../brain/llm-transport.ts';
-import { AgentBrain } from '../brain/agent-brain.ts';
+import { AgentBrain, NOT_SPOKEN_BACKOFF_MS } from '../brain/agent-brain.ts';
 import type { BrainSignals } from '../brain/types.ts';
 import { createAgentApi } from '../api.ts';
 import { SAMPLE_CUSTOMERS, buildScenario } from '../screen/sample-scenarios.ts';
@@ -58,7 +58,8 @@ test('a question that was not spoken goes back to the queue and is asked again',
   feed(23_000);
   const first = must(brain.tick(23_000, signals()).find((d) => d.decision === 'ASK_NOW'));
   brain.onNotSpoken(first);
-  const again = brain.tick(24_000, signals()).find((d) => d.decision === 'ASK_NOW');
+  assert.equal(brain.tick(24_000, signals()).some((d) => d.decision === 'ASK_NOW'), false, 'it waits before it is asked again');
+  const again = brain.tick(23_000 + NOT_SPOKEN_BACKOFF_MS + 500, signals()).find((d) => d.decision === 'ASK_NOW');
   assert.equal(again?.topic, first.topic);
 });
 

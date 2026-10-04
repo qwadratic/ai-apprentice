@@ -70,6 +70,8 @@ export interface FeedItem {
   evidenceIds: string[];
   atMs: number;
   answer: { text: string; atMs: number } | null;
+  /** The session the item was asked in: a later session never takes its answer. */
+  sessionId?: string;
 }
 
 export interface DecisionEntry {
@@ -126,6 +128,8 @@ export interface CheckpointCard {
 export interface MasteryState {
   mastered: string[];
   practise: string[];
+  /** Cases the tutor could not judge: neither mastered nor to practise. */
+  notJudged?: string[];
 }
 
 export interface CaptureInfo {
@@ -174,4 +178,4 @@ export interface ShellState {
   nextLogId: number;
 }
 
-export const LIMITS = { observations: 60, decisions: 200, events: 400 } as const;
+export const LIMITS = { observations: 60, decisions: 200, events: 400, feed: 100 } as const;

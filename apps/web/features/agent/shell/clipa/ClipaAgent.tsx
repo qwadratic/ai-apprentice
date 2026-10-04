@@ -26,7 +26,7 @@ export function ClipaAgent() {
         <p className="as-clipa__state" role="status">
           <span className="as-clipa__label">Clipa</span> {LABELS[state]}
         </p>
-        <p className="as-note">She waits in the bottom-right corner, flies to what she asks about and does not move while you type.</p>
+        <p className="as-note">She waits in the bottom-right corner, flies to what she asks about and does not start moving while you type in this page or in the demo workspace.</p>
         {bubble !== '' && (
           <p className="as-bubble" role="status" aria-live="polite" data-testid="clipa-bubble">{bubble}</p>
         )}

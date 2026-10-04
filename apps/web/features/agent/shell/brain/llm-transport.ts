@@ -23,11 +23,19 @@ export interface LlmTransportOptions {
   timeoutMs?: number;
 }
 
-/** The LLM client of a session, or null when the server has no LLM route for it (the placeholder API): heuristics only. */
-export function createLlmClient(options: LlmTransportOptions): LlmClient | null {
+/** An LLM client that can be cut off: after `abort()` nothing more is sent, queued calls fail at once and the one in flight is aborted. */
+export type AbortableLlmClient = LlmClient & { abort(): void };
+
+/**
+ * The LLM client of a session, or null when the server has no LLM route for it (the placeholder API): heuristics only.
+ * `abort()` is for off the record and for the end of the session: no expert words may be posted after it.
+ */
+export function createLlmClient(options: LlmTransportOptions): AbortableLlmClient | null {
   const { session } = options;
   if (session.llm('answer_extraction') === null) return null;
+  const cut = new AbortController();
   const send: LlmFetch = async (url, init) => {
+    if (cut.signal.aborted) throw new Error('The LLM route was cut off.');
     const task = /\/api\/agent\/llm\/([A-Za-z_]+)$/.exec(url)?.[1];
     const request = task === undefined ? null : session.llm(task);
     if (request === null) return { ok: false, status: 404, json: () => Promise.resolve({}) };
@@ -36,15 +44,16 @@ export function createLlmClient(options: LlmTransportOptions): LlmClient | null 
       method: 'POST',
       headers: { 'content-type': 'application/json', accept: 'application/json', ...request.headers },
       body: init.body,
-      signal: init.signal,
+      signal: AbortSignal.any([init.signal, cut.signal]),
     });
     return { ok: res.ok, status: res.status, json: () => res.json() as Promise<unknown> };
   };
-  return new LlmClient({
+  const client = new LlmClient({
     apiBase: '',
     token: '',
     fetch: send,
     timeoutMs: options.timeoutMs ?? LLM_TIMEOUT_MS,
     onEvent: (e) => options.log(describeLlmEvent(e)),
   });
+  return Object.assign(client, { abort: (): void => cut.abort() });
 }

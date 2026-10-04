@@ -15,8 +15,18 @@ export function askMessage(text: string): string {
 
 const show = (value: string | null, fallback: string): string => (value === null || value === '' ? fallback : value);
 
-/** One neutral sentence per observation, for sendContextualUpdate. Heartbeats are not sent (they would flood the agent). */
-export function observationToContext(o: ScreenObservation): string | null {
+export const SYNTHETIC_TAG = '(synthetic sample)';
+
+/**
+ * One neutral sentence per observation, for sendContextualUpdate. Heartbeats are not sent (they would flood the agent). A line from
+ * the sample source says so: the voice agent must never take invented data for the person's screen.
+ */
+export function observationToContext(o: ScreenObservation, synthetic = false): string | null {
+  const line = plainContext(o);
+  return line !== null && synthetic ? line.replace(/^\[screen\] /, `[screen] ${SYNTHETIC_TAG} `) : line;
+}
+
+function plainContext(o: ScreenObservation): string | null {
   switch (o.kind) {
     case 'order_view': {
       const f = o.facts;

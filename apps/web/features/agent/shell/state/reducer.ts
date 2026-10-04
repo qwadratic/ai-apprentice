@@ -37,6 +37,8 @@ export type Action =
   | { type: 'PERSONA_SET'; persona: Persona }
   | { type: 'SAMPLE_SET'; on: boolean }
   | { type: 'SAMPLE_CASE_SET'; caseId: TeachCaseId }
+  /** The person's real screen replaced the sample: what the sample produced is removed. */
+  | { type: 'SOURCE_TAKEOVER'; mode: Mode }
   | { type: 'OFF_RECORD_SET'; on: boolean }
   | { type: 'BRAIN_SET'; name: string; wired: boolean }
   | { type: 'SESSION_STARTING'; mode: Mode }
@@ -103,6 +105,11 @@ export function reduce(state: ShellState, action: Action): ShellState {
       return { ...state, persona: action.persona };
     case 'SAMPLE_SET':
       return { ...state, screen: { ...state.screen, sampleOn: action.on } };
+    case 'SOURCE_TAKEOVER':
+      // Learn starts over (a new map). Teach keeps the Work Map it reads and the mastery of earlier cases; only this case's data goes.
+      return action.mode === 'learn'
+        ? { ...state, ...learnReset(state), teach: { ...state.teach, checkpoint: null, mastery: null } }
+        : { ...state, observations: [], feed: [], decisions: [], replay: { evidenceId: null }, clipaHint: null, teach: { ...state.teach, checkpoint: null } };
     case 'SAMPLE_CASE_SET':
       return state.teach.sampleCase === action.caseId ? state : { ...state, teach: { ...state.teach, sampleCase: action.caseId } };
     case 'OFF_RECORD_SET':
@@ -173,7 +180,7 @@ export function reduce(state: ShellState, action: Action): ShellState {
         decisions: state.decisions.map((d) => (d.id === action.id ? { ...d, latencyMs: action.latencyMs } : d)),
       };
     case 'FEED_ADD':
-      return state.feed.some((f) => f.id === action.item.id) ? state : { ...state, feed: [...state.feed, action.item] };
+      return state.feed.some((f) => f.id === action.item.id) ? state : { ...state, feed: capped(state.feed, action.item, LIMITS.feed) };
     case 'FEED_ANSWER':
       return {
         ...state,

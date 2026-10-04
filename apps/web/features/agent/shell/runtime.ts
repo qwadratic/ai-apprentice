@@ -94,8 +94,8 @@ export function createRuntime(): ShellRuntime {
   note = (type, text) => controller.note(type, text);
   // providesWorkspace: false while the factory is the screen-only bridge mount; true with A's createRuntimeWorkspace.
   const live = new LiveMount({ factory: liveFactory, controller, apiBase: API_BASE, providesWorkspace: false });
-  // The sample source is the labelled fallback for when no screen is shared: it runs until the person shares a window in the panel.
-  void controller.setSampleObservations(true);
+  // The real screen is the default. The sample (invented data, labelled synthetic) is an opt-in switch: it never runs unasked, so
+  // a Work Map is not mixed from invented and real observations.
   return {
     controller,
     clipa: store,

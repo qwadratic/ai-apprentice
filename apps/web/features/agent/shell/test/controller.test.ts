@@ -108,9 +108,9 @@ test('sample observations: buffered while the voice connects, then sent as conte
   assert.equal(rig.voice.contexts.length, 0, 'nothing is sent before the voice is connected');
   must(rig.voice.events).onConnect('conv_test_1');
   assert.ok(rig.voice.contexts.length >= 2);
-  assert.match(must(rig.voice.contexts[0]), /^\[screen\] Order SYN-101/);
+  assert.match(must(rig.voice.contexts[0]), /^\[screen\] \(synthetic sample\) Order SYN-101/);
   rig.timers.advance(3000);
-  assert.ok(rig.voice.contexts.some((c) => c.startsWith('[screen] Email draft')));
+  assert.ok(rig.voice.contexts.some((c) => c.startsWith('[screen] (synthetic sample) Email draft')));
   assert.ok(rig.voice.contexts.every((c) => !c.includes('Synthetic delivery')), 'no typed text is sent');
   const s = rig.controller.store.getState();
   assert.equal(s.screen.source?.synthetic, true);
@@ -131,12 +131,12 @@ test('context buffered while the voice connects survives the SDK firing connecte
   await starting;
   assert.equal(rig.controller.store.getState().voice.phase, 'listening');
   assert.equal(rig.voice.contexts.length, 2, 'the first buffered observation is not dropped');
-  assert.match(must(rig.voice.contexts[0]), /^\[screen\] Order SYN-101/);
-  assert.match(must(rig.voice.contexts[1]), /^\[screen\] Email draft/);
+  assert.match(must(rig.voice.contexts[0]), /^\[screen\] \(synthetic sample\) Order SYN-101/);
+  assert.match(must(rig.voice.contexts[1]), /^\[screen\] \(synthetic sample\) Email draft/);
   assert.ok(!rig.controller.store.getState().events.some((e) => /Screen context is not sent/.test(e.text)), 'no false "not sent" note');
   // Later observations go straight through.
   rig.timers.advance(2000);
-  assert.ok(rig.voice.contexts.some((c) => c.startsWith('[screen] Ticket')));
+  assert.ok(rig.voice.contexts.some((c) => c.startsWith('[screen] (synthetic sample) Ticket')));
 });
 
 test('a context that really cannot be sent is noted again after the voice was usable', async () => {

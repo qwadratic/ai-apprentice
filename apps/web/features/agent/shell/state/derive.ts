@@ -16,7 +16,7 @@ export function deriveClipaState(s: ShellState): ClipaState {
   if (checkpoint?.status === 'warn') return 'warning';
   if (s.voice.phase === 'speaking') return s.clipaHint ?? 'speaking';
   if (s.voice.thinking) return 'thinking';
-  if (checkpoint?.status === 'clear' || (s.teach.mastery !== null && s.teach.mastery.practise.length === 0 && s.teach.mastery.mastered.length > 0)) {
+  if (checkpoint?.status === 'clear' || (s.teach.mastery !== null && s.teach.mastery.practise.length === 0 && (s.teach.mastery.notJudged?.length ?? 0) === 0 && s.teach.mastery.mastered.length > 0)) {
     return 'happy';
   }
   if (s.voice.phase === 'listening') return s.clipaHint ?? 'listening';

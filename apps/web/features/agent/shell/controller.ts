@@ -5,6 +5,7 @@ import type { ActionCheckpoint, CheckpointReply, EvidenceRef, ScreenObservation,
 import { parseCheckpointReply } from '@apprentice/contracts';
 import type { AgentApi, AgentSession, FetchLike, VoiceRole } from './api.ts';
 import { createLlmClient } from './brain/llm-transport.ts';
+import type { AbortableLlmClient } from './brain/llm-transport.ts';
 import type { AnswerInput, AnswerResult, Brain, BrainDecision, BrainSignals, ClipaTargetRef, DraftMap, TranscriptTurn } from './brain/types.ts';
 import { isSpoken } from './brain/types.ts';
 import type { ClipaPresenter, ClipaState, TargetRect } from './clipa/presenter.ts';
@@ -120,6 +121,8 @@ export class ShellController {
   private standby: ObservationSource | null = null;
   private standbyOff: Array<() => void> = [];
   private readonly speech = new SpeechGate();
+  /** The LLM client of the live session; cut off on off the record and on teardown. */
+  private llm: AbortableLlmClient | null = null;
   private held: { decision: BrainDecision; atPerfMs: number } | null = null;
   private sourceOff: Array<() => void> = [];
   private readonly limits: SessionLimits;
@@ -319,14 +322,16 @@ export class ShellController {
 
   private beginBrain(session: AgentSession, mode: Mode): void {
     const caseId = mode === 'teach' ? this.state.teach.sampleCase : null;
+    this.llm?.abort();
     const llm = createLlmClient({ session, fetch: this.deps.fetch, log: (line) => this.log('sys', 'LLM', line) });
+    this.llm = llm;
     this.safe('begin', () => this.brain.begin?.({
       sessionId: session.sessionId,
       mode,
       persona: this.state.persona,
       llm,
       caseId,
-      caseTitle: caseId === null ? null : `${caseId.toUpperCase()} ${teachCase(caseId).title}`,
+      caseTitle: caseId === null ? null : teachCase(caseId).title,
     }), undefined);
     if (llm === null) this.sys('No LLM route (placeholder API): the brain reads answers with its heuristics.');
   }
@@ -340,6 +345,8 @@ export class ShellController {
   /** Off the record stops both channels. It does not delete or recall what was already sent. */
   async goOffRecord(): Promise<void> {
     if (this.state.offRecord) return;
+    // Before anything else: pending and queued model calls are cut off, so no expert words are posted after the switch.
+    this.llm?.abort();
     if (this.uploader?.isRecording()) {
       // This is the last line that is queued: nothing after the switch reaches the server.
       this.sys('Off the record: capture and upload stopped.');
@@ -375,6 +382,8 @@ export class ShellController {
     if (this.state.phase === 'live') this.store.dispatch({ type: 'SESSION_ENDING' });
     this.limits.stop();
     this.stopTick();
+    // No model call is sent or left waiting once the session is over.
+    this.llm?.abort();
     const voice = this.voice;
     this.voice = null;
     // The microphone closes first: nothing below may keep it open.
@@ -385,6 +394,7 @@ export class ShellController {
     this.deps.presenter.say('');
     this.deps.presenter.setTarget(null);
     this.clearPendingAsk();
+    this.expireOpenQuestions();
     this.bufferedContext = [];
     this.sys(reason);
     const uploader = this.uploader;
@@ -397,6 +407,13 @@ export class ShellController {
     }
     this.session = null;
     if (active) this.store.dispatch({ type: 'SESSION_ENDED', reason });
+  }
+
+  /** A question that is still waiting for an answer when its session ends will never get one: it stops looking open. */
+  private expireOpenQuestions(): void {
+    for (const f of this.state.feed) {
+      if (f.status === 'asked') this.store.dispatch({ type: 'FEED_STATUS', id: f.id, status: 'unspoken', note: 'the session ended before it was answered' });
+    }
   }
 
   private stopTick(): void {
@@ -564,7 +581,9 @@ export class ShellController {
 
   /** The first thing the person says after a spoken question counts as its answer. */
   private captureAnswer(turn: TranscriptTurn): void {
-    const open = [...this.state.feed].reverse().find((f) => f.status === 'asked');
+    // Only a question of this session takes the answer: an item left over from an earlier session never does.
+    const sessionId = this.state.session?.id;
+    const open = [...this.state.feed].reverse().find((f) => f.status === 'asked' && f.sessionId === sessionId);
     if (!open) return;
     this.store.dispatch({ type: 'FEED_ANSWER', id: open.id, text: turn.text, atMs: turn.atMs });
     this.store.dispatch({ type: 'VOICE_THINKING', thinking: false });
@@ -664,8 +683,27 @@ export class ShellController {
     await this.stopSource();
     if (!this.isCurrent(run) || !this.session) return;
     this.sys('A screen is shared: the sample observations stopped. From now on the brain reads your screen.');
+    this.restartForRealScreen();
     await this.attach(source, run, false);
     this.onScreenStatus(status);
+  }
+
+  /**
+   * The real screen replaced the sample: nothing the sample produced may stay in a Work Map, a feed or a tutor's record. The brain
+   * begins again for this session (Learn: a new map; Teach: the same confirmed map, no case progress from invented data) and the
+   * voice agent is told that the earlier lines were invented.
+   */
+  private restartForRealScreen(): void {
+    const session = this.session;
+    const info = this.state.session;
+    if (!session || !info) return;
+    this.askedCount = 0;
+    this.held = null;
+    this.clearPendingAsk();
+    this.lastPersistedMap = '';
+    this.store.dispatch({ type: 'SOURCE_TAKEOVER', mode: info.mode });
+    this.beginBrain(session, info.mode);
+    this.sendContext('[screen] The earlier screen lines were invented sample data (synthetic) and no longer apply. From now on the lines describe the person\'s real screen.', this.voice);
   }
 
   private dropStandby(): void {
@@ -688,6 +726,7 @@ export class ShellController {
   private async attach(source: ObservationSource, run: number, autoStart: boolean): Promise<void> {
     if (!this.session) return;
     this.source = source;
+    this.safe('setSource', () => this.brain.setSource?.(source.synthetic), undefined);
     this.evidenceSources = [...this.evidenceSources.filter((s) => s !== source), source].slice(-6);
     this.sourceOff = [
       source.onObservation((o) => { if (this.source === source) this.onObservation(o); }),
@@ -740,7 +779,7 @@ export class ShellController {
     if (o.kind === 'input_activity') this.deps.presenter.noteInput?.(o.facts.typing);
     this.safe('onObservation', () => this.brain.onObservation(o), undefined);
     this.mapDirty = true;
-    const context = observationToContext(o);
+    const context = observationToContext(o, this.source?.synthetic ?? false);
     if (context !== null) this.sendContext(context, this.voice);
   }
 
@@ -794,6 +833,7 @@ export class ShellController {
     return {
       id: entry.id, decision: entry.decision, topic: entry.topic, text: entry.text ?? '', status, note,
       whyNow: entry.whyNow, evidenceIds: entry.evidenceIds, atMs: entry.atMs, answer: null,
+      ...(this.state.session ? { sessionId: this.state.session.id } : {}),
     };
   }
 
@@ -845,6 +885,7 @@ export class ShellController {
     }
     this.askedCount += 1;
     this.log('sent', 'USER_MSG', sent);
+    this.safe('onSpoken', () => this.brain.onSpoken?.(d), undefined);
     this.record({ ...entry, spoken: true });
     // A question waits for the answer; a warning, a piece of feedback or a closing line is only said.
     const expectsAnswer = d.expectsAnswer ?? d.decision !== 'WARN';

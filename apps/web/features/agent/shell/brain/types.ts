@@ -96,10 +96,14 @@ export interface DraftStep {
   /** Screen moments of this step (ScreenEvidence ids). */
   evidenceIds: string[];
   atMs: number | null;
+  /** The step comes from the sample source (invented data). */
+  synthetic?: boolean;
 }
 
 export interface DraftMap {
   steps: DraftStep[];
+  /** Built from the sample source (invented data), not from the person's screen. */
+  synthetic?: boolean;
   /** Version of the Work Map this draft shows. A correction in Review makes the next number. */
   version?: number;
   /** The expert confirmed this version. */
@@ -131,6 +135,8 @@ export interface AnswerResult {
 export interface MasteryLines {
   mastered: string[];
   practise: string[];
+  /** Cases the tutor could not judge (no confirmed map, `unknown`, an unanswered prediction): neither mastered nor to practise. */
+  notJudged?: string[];
 }
 
 export interface ReviewOutput {
@@ -150,6 +156,10 @@ export interface Brain {
   readonly wired: boolean;
   /** A session starts (Learn, Review or Teach). Optional: test brains need not implement it. */
   begin?(session: BrainSession): void;
+  /** A spoken decision reached the voice: a teach-back counts as stated from here. */
+  onSpoken?(decision: BrainDecision): void;
+  /** The source of observations changed (the sample or the person's real screen). */
+  setSource?(synthetic: boolean): void;
   /** A spoken decision never reached the person (the voice is gone, the agent was speaking): the question goes back to the queue. */
   onNotSpoken?(decision: BrainDecision): void;
   /** Teach: what has been mastered so far, or null. */
