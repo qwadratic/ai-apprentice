@@ -63,11 +63,11 @@ export function ScreenSlot({ collapsed, onToggle }: { collapsed: boolean; onTogg
       <p className="as-note">
         {liveMount !== null
           ? live
-            ? 'Share your entire screen (or a window) in the panel below. Frames are masked on this page first, then read by vision on our server; Clipa outlines what she asks about on this preview.'
-            : 'Start a mode first, then share your entire screen (or a window) in the panel below.'
+            ? 'Frames are masked here first, then read by vision on our server.'
+            : 'Press Start first, then share your screen below.'
           : live
-            ? 'Choose the window to share below. The preview stays on this page: frames are not analysed or sent yet (vision is not wired).'
-            : 'Start a mode first (right), then choose the window to share. The preview stays on this page: frames are not analysed or sent yet.'}
+            ? 'Choose the window below. The preview stays on this page: vision is not wired.'
+            : 'Press Start first, then choose the window to share.'}
       </p>
       <div
         id="as-screen-mount"
