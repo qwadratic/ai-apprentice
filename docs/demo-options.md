@@ -31,7 +31,7 @@ This is stream A's DEMO-REAL-3 proposal, cases 1 and 2. It presents best.
 | --- | --- | --- |
 | 0:00 | Ivan | Starts **Show**. "I'm sending Lumen Bakery their invoice." Changes `Net 14` to `Net 30`. Hands off the keyboard for about 2 s. |
 | ~0:15 | Clipa | "You changed the terms to Net 30. What makes Lumen different?" |
-| | Ivan | "Lumen pays in one monthly run. On Net 14 they're always late, and we chase them for nothing. Net 30 is only for Lumen. Anything longer needs the finance lead." |
+| | Ivan | "Lumen has a signed agreement for Net 30. Standard is Net 14, and Net 30 is only for Lumen. Anything longer needs the finance lead." |
 | ~0:35 | Ivan | **Language switch.** Switches to the Sheet and speaks Russian: "Теперь бюджет. Лицензию на год оплатили сразу, двенадцать тысяч." Types `3,000` into Q1 to Q4. Pauses. |
 | ~0:55 | Clipa | Answers in Russian: "Почему вы разбили сумму по кварталам?" |
 | | Ivan | "Она предоплачена на двенадцать месяцев. Если поставить всё в первый квартал, он выглядит как перерасход. Так только для предоплат больше тысячи евро; мелочь идёт сразу в месяц оплаты." |
@@ -46,7 +46,7 @@ This is stream A's DEMO-REAL-3 proposal, cases 1 and 2. It presents best.
 | ~1:50 | New hire | Starts **Pass it on**. |
 | | Clipa | "I know this one: Invoice email. I'll only ask about what's different." |
 | | New hire | Writes the invoice to Lumen and keeps `Net 14`. Moves to **Send** and pauses. |
-| | Clipa | Warns in English: "Before you send: Ivan gives Lumen Net 30, because they pay in one monthly run. Want to see his moment?" |
+| | Clipa | Warns in English: "Before you send: Lumen has a signed agreement for Net 30. Want to see Ivan's moment?" |
 | | New hire | Changes it to `Net 30`. No warning now. |
 | (optional) | New hire | Invoice to another customer on `Net 14`. Clipa stays quiet: this is the allow test. |
 | ~2:40 | Clipa | Summary: what is mastered, what to practise. |
