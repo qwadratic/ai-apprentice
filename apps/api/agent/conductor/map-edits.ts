@@ -59,7 +59,9 @@ export function applyEdits(map: ConductorMap, ops: readonly EditOperation[], utt
       case 'add_rule': {
         if (!op.value || !op.value2) break;
         const id = nextId('g', next.guardrails.map((g) => g.id));
-        next.guardrails.push({ id, processId: next.processes?.length === 1 ? next.processes[0]!.id : null, condition: op.value, requiredAction: op.value2, reason: null, quote: words(op.quote), quoteAtMs: atMs, escalateTo: null, exceptions: [], evidenceIds: [] });
+        // A rule added by voice belongs to the only process when there is one; with several, the library keeps it with the first.
+        const only = next.processes?.length === 1 ? next.processes[0] : undefined;
+        next.guardrails.push({ id, processId: only?.id ?? null, condition: op.value, requiredAction: op.value2, reason: null, quote: words(op.quote), quoteAtMs: atMs, escalateTo: null, exceptions: [], evidenceIds: [] });
         applied++;
         break;
       }
