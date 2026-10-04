@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@qwadratic'
 created_date: '2026-10-03 21:11'
-updated_date: '2026-10-04 03:21'
+updated_date: '2026-10-04 04:15'
 labels:
   - stream-b
   - workmap
@@ -46,4 +46,13 @@ Estimate: about 1.5 h of agent time. Card key: B-workmap-ui.
 
 <!-- SECTION:NOTES:BEGIN -->
 4 Oct 03:35 UTC: Ivan wants the screen understanding visible: a storyboard (раскадровка) of the session — keyframes per step with what changed, the reasoning and the schema facts — as the Review briefing board (doc-10 step 4). Built as an isolated component in apps/web/features/agent/workmap, wired into Review after #36.
+
+4 Oct 04:15 UTC, handoff. PR #42 merged WorkMapBoard (apps/web/features/agent/workmap). It is not mounted in Review yet. A builder read the code for mounting it and the interactive Clipa, and stopped at the wind-down with nothing pushed. Its findings:
+1. Shell state is too thin for the board. The store has draftMap (lossy, guardrails as text), review.gaps without regionIds, and observation rows without facts. The full WorkMap sits behind the private AgentBrain.state, and full observations only pass through the private controller.onObservation. reviewStatus().openFollowUps and .blockers are not exposed. Right fix: a controller hook such as workMap() plus an observation tap. Quick fallback: a lossy fromDraftMap(draftMap, gaps, rows) in workmap/.
+2. buildKeyframes in workmap/model.ts treats every observation that is not input_activity as email_draft, and would throw on screen_activity (it reads facts.attachments). It needs a screen_activity branch (app/surface/change, Keyframe.regions, Surface widened to string).
+3. evidenceIds in map_synthesis output are observation ids. fromGenericMap must map them to each observation's evidenceIds. Region boxes come from facts.regions[].box on the screen side.
+4. Clipa pointing: targets resolve via [data-clipa-surface][data-clipa-hint] (shell/clipa/targets.ts). The director's point() is not reachable from views; the presenter's point is fixed to REPLAY_TARGET. Expose pointAt(target) on ShellRuntime (runtime.ts, director-presenter.ts).
+5. Voice: 'Answer this' and 'Ask Clipa about this' need a public controller method for [ASK] and for the contextual send; today sendContext is private.
+6. Layout: no CSS needed, because ReviewView already gets the wide 3fr column in Review.
+Next steps: workmap/generic-map.ts (fromGenericMap with a test), then the screen_activity keyframes with region boxes and a synthetic fixture, then mount in ReviewView, then the controller hooks.
 <!-- SECTION:NOTES:END -->
