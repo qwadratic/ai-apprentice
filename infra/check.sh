@@ -29,8 +29,9 @@ h="$(curl -fsS -m 10 "$BASE/health")" &&
   echo "$h" | jq -e '.ok == true and ((.modules // []) | index("agent")) != null and ((.modules // []) | index("ops")) != null' >/dev/null &&
   ok "health $h" || ko "health ${h:-unreachable} (want ok:true and the agent and ops modules)"
 
-c="$(curl -si -X OPTIONS "$BASE/health" -H 'Origin: https://evil.example' -H 'Access-Control-Request-Method: POST' | grep -ci access-control-allow-origin)"
-[ "$c" = 0 ] && ok "foreign origin preflight has no ACAO" || ko "foreign origin preflight ACAO count $c"
+fo="$(curl -si -m 10 -X OPTIONS "$BASE/health" -H 'Origin: https://evil.example' -H 'Access-Control-Request-Method: POST')"
+fst="$(echo "$fo" | head -1 | tr -d '\r')"; c="$(echo "$fo" | grep -ci access-control-allow-origin || true)"
+if echo "$fst" | grep -q ' 403' && [ "$c" = 0 ]; then ok "foreign origin preflight: $fst, no ACAO"; else ko "foreign origin preflight: ${fst:-unreachable}, ACAO count $c (want 403 and none)"; fi
 pre="$(curl -si -X OPTIONS "$BASE/health" -H "Origin: $ORIGIN" -H 'Access-Control-Request-Method: POST')"
 st="$(echo "$pre" | head -1 | tr -d '\r')"; acao="$(echo "$pre" | grep -i '^access-control-allow-origin' | tr -d '\r')"
 if echo "$st" | grep -q ' 204' && echo "$acao" | grep -qF "$ORIGIN"; then ok "allowed preflight: $st; $acao"; else ko "allowed preflight: $st; ${acao:-no ACAO}"; fi

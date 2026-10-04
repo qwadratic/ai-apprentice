@@ -210,6 +210,7 @@ test('the global CORS rule still applies: a foreign Origin never reaches the web
   assert.equal(ops.seen.length, 1);
 });
 
-test('the module is registered next to agent in src/modules.ts', () => {
-  assert.deepEqual(modules.map((m) => m.name), ['agent', 'ops']);
+test('the ops module is registered first in src/modules.ts, before agent', () => {
+  // First, so no later module can put a body parser in front of the signed raw body.
+  assert.deepEqual(modules.map((m) => m.name).slice(0, 2), ['ops', 'agent']);
 });
