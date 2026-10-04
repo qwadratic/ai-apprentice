@@ -139,6 +139,7 @@ Other sources, for manual use: `sudo systemctl start apprentice-deploy.service` 
 | `RUNNER_MODEL` | runner | default `claude-sonnet-5-5` |
 | `RUNNER_MODELS` | runner | optional allowlist for a request's `model` (default sonnet-5-5, opus-5-5, haiku-4-5); others get 400 `model_not_allowed` |
 | `RUNNER_CONCURRENCY` | runner | default 2 (about 1 GiB RAM per SDK subprocess) |
+| `RUNNER_ENGINE`, `RUNNER_CODEX_MODEL`, `RUNNER_CODEX_REASONING`, `RUNNER_CODEX_EPHEMERAL`, `RUNNER_CODEX_BIN` | runner | `RUNNER_ENGINE=codex` runs requests through the Codex CLI; see "Codex engine" |
 | `DEPLOY_WEBHOOK_SECRET` | ops | HMAC key for `POST /ops/deploy`; the same value is the Actions secret `DEPLOY_WEBHOOK_SECRET` |
 | `DEPLOY_SOURCE` | deploy | `pages` (default): the sha in `deploy.json`; `ref`: `origin/$DEPLOY_REF` |
 | `DEPLOY_REF` | deploy | default `main`; used with `DEPLOY_SOURCE=ref` |
@@ -161,7 +162,7 @@ A module that needs the raw request bytes (a signature over the body, like the o
 
 ## Runner API (`RUNNER_URL`, bearer `RUNNER_TOKEN`)
 
-`GET /health` (no auth) → `{ok, mode: "oauth"|"apikey", model, git_sha, active, queued}`
+`GET /health` (no auth) → `{ok, mode: "oauth"|"apikey"|"codex", model, git_sha, active, queued}`
 
 `POST /v1/complete`
 ```json
@@ -191,6 +192,46 @@ Structured output takes one object schema at the root: a schema whose root is a 
 Every call: `tools: []`, `permissionMode: "dontAsk"`, `settingSources: []`, `persistSession: false`, `cwd: /var/lib/apprentice/runner-cwd`, `maxTurns: 3`, `maxBudgetUsd: 0.5`, a short custom system prompt (the request's `system` is appended), `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`. The subprocess environment excludes `RUNNER_TOKEN`, `API_TOKEN` and `ELEVENLABS_API_KEY`. The runner refuses to start unless exactly one Claude credential is set and logs its mode at start. At boot it spawns and discards one warm subprocess (`startup()`), because per-request options differ. A queued request whose client disconnected is dropped before it runs (logged as 499). `x-request-id` is used for logs only if it matches `[A-Za-z0-9._-]{1,64}`. The unit runs with `ProtectSystem=strict` (writable: the runner cwd and `/home/apprentice`) and `MemoryMax=2560M`.
 
 The placeholder used to expose the runner publicly as `POST /runner/v1/*` for testing; apps/api does not. On the VM: `curl -s localhost:8787/health`, and `curl -s -X POST localhost:8787/v1/complete -H "Authorization: Bearer $RUNNER_TOKEN" -H "Content-Type: application/json" -d '{"prompt":"ping"}'` (take the token from `/etc/apprentice/env` without printing it).
+
+## Codex engine (`RUNNER_ENGINE=codex`)
+
+A second engine for when the Claude credentials have no quota: every `/v1/complete` and `/v1/vision` request runs the OpenAI Codex CLI (`codex exec`, logged in with a ChatGPT account) as a subprocess instead of the Agent SDK (`src/codex.ts`). The HTTP contract, the concurrency limit, the queue and `RUNNER_TIMEOUT_MS` are the same. With `codex` the Claude credential check is skipped, no warm SDK subprocess is started, and `/health` reports `mode: "codex"` and `model` = `RUNNER_CODEX_MODEL` or `codex-default`.
+
+The command (prompt on **stdin**, never in argv; schema, images and the answer file in a per-request temp dir under the runner cwd, removed after every call; the CLI runs inside that dir):
+
+```
+codex exec --skip-git-repo-check --sandbox read-only [--ephemeral] [-m $RUNNER_CODEX_MODEL] -c model_reasoning_effort="low" \
+  [--output-schema <tmp>/schema.json] -o <tmp>/answer.txt [-i <tmp>/image-1.png ...]   < prompt
+```
+
+The prompt is `<system>` + the runner's system text + the request's `system`, then the request's `prompt`. The request's `model` (a Claude name) is still checked against `RUNNER_MODELS` but not used. Schemas go through the root-union wrapper and then `toCodexSchema`, which makes them OpenAI strict-mode schemas: every property listed in `required` (an optional one becomes `anyOf [<schema>, null]`, and such a `null` is removed from the answer again), `additionalProperties: false` on every object, `oneOf` → `anyOf`, `const` → one-value `enum`, and these keywords dropped: `minLength`, `maxLength`, `pattern`, `format`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `minItems`, `maxItems`, `uniqueItems`, `minProperties`, `maxProperties`, `default`, `examples`, `$schema`. That is safe because the API validates every answer with its own parsers.
+
+Outcomes: CLI past the timeout → its process group is killed, `504 timeout`; non-zero exit → `502 sdk_error / codex_exit`; binary missing → `502 sdk_exception / codex_spawn`; answer not JSON (with a schema) → `502 no_structured_output`; empty answer (no schema) → `502 no_result`. The CLI's stdout and stderr are discarded, never logged.
+
+| Variable | Default | |
+|---|---|---|
+| `RUNNER_ENGINE` | `claude` | `codex` switches the engine |
+| `RUNNER_CODEX_MODEL` | unset | passed as `-m` only when set; else the CLI's configured model |
+| `RUNNER_CODEX_REASONING` | `low` | `model_reasoning_effort` override; empty leaves the CLI's setting |
+| `RUNNER_CODEX_EPHEMERAL` | unset | `1` adds `--ephemeral` (no session files with prompts under `~/.codex/sessions`); only for a CLI version that has the flag |
+| `RUNNER_CODEX_BIN` | `codex` | absolute path when the binary is not on the unit's `PATH` (`/usr/local/bin:/usr/bin:…`) |
+| `CODEX_HOME` | `~/.codex` of the service user | where the CLI keeps `auth.json` |
+
+**Switch on the VM** (the runner runs as `apprentice`, so the CLI needs that user's login):
+```
+sudo install -d -o apprentice -g apprentice -m 700 /home/apprentice/.codex
+sudo install -o apprentice -g apprentice -m 600 /home/exedev/.codex/auth.json /home/apprentice/.codex/auth.json
+sudoedit /etc/apprentice/env          # add: RUNNER_ENGINE=codex
+sudo systemctl restart apprentice-runner
+curl -s localhost:8787/health          # → "mode":"codex"
+```
+`/home/apprentice` is writable for the unit (`ReadWritePaths`), so the CLI can refresh its tokens there. `codex` must be on the unit's `PATH` and readable by `apprentice` (check: `sudo -u apprentice -H bash -c 'command -v codex && codex --version'`); if it lives under another user's home, set `RUNNER_CODEX_BIN` to a path `apprentice` can run. Then one real call: `curl -s -X POST localhost:8787/v1/complete -H "Authorization: Bearer $RUNNER_TOKEN" -H "Content-Type: application/json" -d '{"prompt":"ping"}'` (token from the env file without printing it) and `sudo journalctl -u apprentice-runner -n 5`.
+
+**Switch back:** remove the `RUNNER_ENGINE` line (or set `claude`), `sudo systemctl restart apprentice-runner`, check that `mode` is `oauth` or `apikey`.
+
+**Limits.** Latency: one trivial structured call took about 9 s on the VM (codex-cli 0.159.0, ~14k tokens of reasoning before the effort override), several times the Agent SDK's ~2.8 s, so the vision loop gets far fewer frames per minute, and `RUNNER_TIMEOUT_MS` (60 s) may need raising for big map synthesis prompts. Images use `-i`; a CLI version without it fails every vision call with `sdk_error / codex_exit`. Spend counts against the ChatGPT account's Codex limits.
+
+**Flags and their sources.** From the `codex exec` reference (https://learn.chatgpt.com/docs/developer-commands?surface=cli#cli-codex-exec, formerly developers.openai.com/codex/cli/reference) and the non-interactive guide (https://learn.chatgpt.com/docs/non-interactive-mode): `exec`, `--skip-git-repo-check`, `--sandbox read-only`, `--ephemeral`, `-m/--model`, `-c/--config key=value`, `--output-schema`, `-o/--output-last-message`, `-i/--image` (repeatable), and the prompt read from stdin when no prompt argument is given. Checked on the VM with codex-cli 0.159.0: `exec --skip-git-repo-check --sandbox read-only --output-schema … -o …` with the prompt as an argument. **Not verified:** the config key `model_reasoning_effort` and its value `low` on 0.159.0, `-i` on 0.159.0, `--ephemeral` on 0.159.0 (off by default for that reason), the stdin prompt on 0.159.0, and which strict-mode keywords the ChatGPT backend accepts (the converter drops all doubtful ones).
 
 ## Agent module storage (stream B, `apps/api/agent`)
 
