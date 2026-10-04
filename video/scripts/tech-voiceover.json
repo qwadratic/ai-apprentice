@@ -39,7 +39,7 @@
     {
       "id": "t06",
       "voice": "clipa",
-      "text": "What determines whether you put customer_07’s delivery address and time window in the email text or leave them in the attachment?",
+      "text": "What determines whether you put customer 07’s delivery address and time window in the email text or leave them in the attachment?",
       "atSec": 23.42,
       "maxSec": 7.38
     },
