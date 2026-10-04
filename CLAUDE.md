@@ -234,7 +234,7 @@ The chat's tool and data claims were not verified, except where this file says c
 - After any change under `mac/`, push and watch CI: `gh run watch -R qwadratic/ai-apprentice`. Green CI is the only proof that it compiles; a run on Ivan's Mac is the only proof that it works.
 - Keep the public repo professional: no secrets, no personal data, no internal chatter in commits.
 - Ask before anything irreversible or public: publishing posts, messaging people, submitting the entry.
-- Subagents that do the work (research, drafting, coding) run on Sonnet (`model: sonnet`). Critics, verifiers and judges run on Opus (`model: opus`). A single workflow run must fit in 30 minutes; estimate its length from the token rate of earlier runs.
+- Subagents that do the work (research, drafting, coding) run on Sonnet (`model: sonnet`), except builders on the critical path (the product shell and A↔B integration), which run on Opus (Ivan, 4 Oct 03:20 UTC: fewer review rounds). Critics, verifiers and judges run on Opus (`model: opus`). A builder of UI or integration code must verify the real flow in a browser, not only with fakes. A single workflow run must fit in 30 minutes; estimate its length from the token rate of earlier runs.
 - Tasks live in Backlog.md (`backlog/`, install with `npm i -g backlog.md`). Before creating, claiming or finishing a task, follow `backlog/docs/doc-1 - Parallel-work-rules.md`: children only under your own stream's parent, new top-level tasks only on `main` and pushed at once, claim on `main` before branching, one task per branch, Done only when merged.
 
 <!-- BACKLOG.MD GUIDELINES START -->
