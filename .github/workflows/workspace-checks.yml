@@ -1,0 +1,76 @@
+name: workspace-checks
+
+# Root npm workspace checks (stream A's foundation, TASK-2.1): one root lockfile,
+# `npm run check` = typecheck + test + build across apps/web, apps/api and packages/*.
+# Skips cleanly while a ref has no root package-lock.json.
+
+on:
+  pull_request:
+    paths:
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig.base.json"
+      - ".nvmrc"
+      - ".npmrc"
+      - "fixtures/**"
+      - "apps/**"
+      - "packages/**"
+      - "scripts/**"
+      - ".github/workflows/workspace-checks.yml"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag or sha to check (for a PR branch before its next push)"
+        type: string
+        required: true
+  workflow_call:
+    inputs:
+      ref:
+        description: "Commit to check (default is the triggering commit)"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-workspace-checks-${{ github.event.pull_request.number || inputs.ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: npm run check (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22.22.0", "24"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Look for the root workspace
+        id: root
+        run: |
+          if [ -f package-lock.json ] && [ -f package.json ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No root package-lock.json on this ref; nothing to check."
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.root.outputs.present == 'true'
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: npm ci
+        if: steps.root.outputs.present == 'true'
+        run: npm ci
+
+      - name: npm run check
+        if: steps.root.outputs.present == 'true'
+        run: npm run check
