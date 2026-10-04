@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Conductor, MapRegistry, RULES } from '../agent/conductor/engine.ts';
 import { NUDGES, STAGE_CONFIRM, detectLanguage, stageAsked } from '../agent/conductor/lines.ts';
+import { demoMap } from '../agent/conductor/demo-map.ts';
 import { applyEdits } from '../agent/conductor/map-edits.ts';
 import type { ConductorMap } from '../agent/conductor/map-edits.ts';
 import { parseBatch } from '../agent/conductor/protocol.ts';
@@ -750,4 +751,102 @@ test('stage by voice in Review: the request is not taken as a map edit', async (
   await r.send({ type: 'transcript', role: 'expert', text: 'Научи меня' });
   assert.equal(r.calls.length, calls, 'no reply classification and no map edit');
   assert.ok(of(r.cues, 'stage').some((s) => s.cue.type === 'stage' && s.cue.mode === 'teach'));
+});
+
+// ---- Reflect always has a session to explore ------------------------------------------------------------------------
+const mapsOf = (cues: CueEnvelope[]) => cueOf(cues, 'map');
+const evidenceIn = (map: ConductorMap): string[] =>
+  [...map.steps.flatMap((s) => s.evidenceIds), ...map.guardrails.flatMap((g) => g.evidenceIds), ...map.gaps.flatMap((g) => g.evidenceIds)];
+
+test('Reflect falls back: its own map first, then the last map of an earlier session, then the demo map', async () => {
+  const maps = new MapRegistry();
+  // No session anywhere yet: the synthetic demo map of the demo script, with no screen moments and no model call.
+  const first = rig({}, maps, 'sess-a');
+  await first.send(hello('web'), { type: 'session', mode: 'review', live: true, reason: null });
+  const demo = mapsOf(first.cues).at(-1);
+  assert.equal(demo?.origin, 'demo');
+  const seeded = demo?.map as ConductorMap;
+  assert.deepEqual(seeded.processes.map((p) => p.title), ['Invoice email: payment terms', 'Prepaid cost: spread by quarter']);
+  assert.deepEqual(evidenceIn(seeded), [], 'never seen on a screen');
+  assert.ok(seeded.steps.some((s) => s.action.includes('Net 30') && s.decision?.reason?.includes('signed agreement') && s.decision.quote?.includes('signed agreement')));
+  assert.ok(seeded.guardrails.some((g) => g.requiredAction.startsWith('Net 30 only for Lumen') && g.escalateTo === 'the finance lead'));
+  assert.ok(seeded.guardrails.some((g) => g.condition.includes('prepaid cost over EUR 1,000') && g.exceptions.length === 1));
+  assert.ok(seeded.gaps.length >= 1 && seeded.gaps.length <= 2 && seeded.teachBack.length > 0);
+  assert.equal(cueOf(first.cues, 'guide').at(-1)?.step, 'demo_map');
+  assert.ok(cueOf(first.cues, 'context').some((c) => c.text.includes('synthetic demo map')));
+  assert.equal(first.calls.length, 0);
+  assert.equal(maps.lastBuilt(), null, 'the demo map is never stored as a built map');
+
+  // Session B builds its own map from its screen, as before: it becomes the last built map.
+  const own = rig({ map_synthesis: () => ok(MAP) }, maps, 'sess-b');
+  await own.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', null), obs('o2', 'Changed.'));
+  await own.send({ type: 'session', mode: 'learn', live: false, reason: 'user' }, { type: 'session', mode: 'review', live: true, reason: null });
+  assert.equal(mapsOf(own.cues).at(-1)?.origin, 'session');
+  assert.deepEqual([maps.lastBuilt()?.sessionId, maps.lastBuilt()?.title], ['sess-b', 'Budget update']);
+  assert.equal(maps.lastBuilt()?.map.baselineProvenance, undefined, 'the stored map keeps the workflow, not the bookkeeping');
+
+  // A page reload is a new session with no screen: Reflect shows B's map, labelled as an earlier session.
+  const reload = rig({}, maps, 'sess-c');
+  await reload.send(hello('web'), { type: 'session', mode: 'review', live: true, reason: null });
+  const earlier = mapsOf(reload.cues).at(-1);
+  assert.equal(earlier?.origin, 'earlier');
+  assert.deepEqual((earlier?.map as ConductorMap).steps.map((s) => s.action), MAP.steps.map((s) => s.action));
+  assert.equal(cueOf(reload.cues, 'guide').at(-1)?.step, 'earlier_map');
+  assert.ok(cueOf(reload.cues, 'context').some((c) => c.text.includes('earlier session')));
+  assert.equal(reload.calls.length, 0);
+  // The person can still dig in: Clipa raises the open point at a pause, as for a map of the session's own.
+  await reload.advance(RULES.pauseMs + 10);
+  assert.equal(cueOf(reload.cues, 'ask').at(-1)?.text, 'Who is the lead?');
+});
+
+test('Reflect: edits change this session\'s copy only, and the copy gives way once the session has a screen of its own', async () => {
+  const maps = new MapRegistry();
+  maps.recordBuilt('sess-old', MAP as never, 1);
+  const edit = { intent: 'edit', operations: [{ op: 'set', targetId: 'g1', field: 'condition', value: 'budget above 500', value2: null, quote: null }], reply: 'Changed the limit to 500.', teachBack: null };
+  const r = rig({ map_edit: () => ok(edit), map_synthesis: () => ok(TWO) }, maps, 'sess-new');
+  await r.send(hello('web'), { type: 'session', mode: 'review', live: true, reason: null });
+  await r.send({ type: 'transcript', role: 'expert', text: 'The lead signs above 500.' });
+  const edited = mapsOf(r.cues).at(-1);
+  assert.equal(edited?.origin, 'earlier');
+  assert.equal((edited?.map as ConductorMap).guardrails[0]?.condition, 'budget above 500');
+  assert.deepEqual([maps.lastBuilt()?.sessionId, maps.lastBuilt()?.map.guardrails[0]?.condition], ['sess-old', 'budget above 300'], 'the earlier map is unchanged');
+
+  // A demo copy is edited the same way; the seeded map itself never changes.
+  const d = rig({ map_edit: () => ok({ ...edit, operations: [{ ...edit.operations[0]!, value: 'longer terms' }] }) }, new MapRegistry(), 'sess-demo');
+  await d.send(hello('web'), { type: 'session', mode: 'review', live: true, reason: null });
+  await d.send({ type: 'transcript', role: 'expert', text: 'Any longer terms need the finance lead.' });
+  assert.equal((mapsOf(d.cues).at(-1)?.map as ConductorMap).guardrails[0]?.condition, 'longer terms');
+  assert.equal(demoMap().guardrails[0]?.condition, 'Payment terms other than the standard Net 14 on an invoice email');
+
+  // The session runs Show: Reflect builds its own map instead of showing the copy again.
+  await r.send({ type: 'session', mode: 'review', live: false, reason: 'user' }, { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', 'Changed.'));
+  await r.send({ type: 'session', mode: 'learn', live: false, reason: 'user' }, { type: 'session', mode: 'review', live: true, reason: null });
+  const own = mapsOf(r.cues).at(-1);
+  assert.equal(own?.origin, 'session');
+  assert.deepEqual((own?.map as ConductorMap).processes.map((p) => p.title), ['Budget update', 'Supplier check']);
+  assert.equal(maps.lastBuilt()?.sessionId, 'sess-new');
+});
+
+test('Reflect: confirming a fallback map registers it like any confirmed map, so Pass it on works after a reload', async () => {
+  const maps = new MapRegistry();
+  const r = rig({}, maps, 'sess-1');
+  await r.send(hello('web'), { type: 'session', mode: 'review', live: true, reason: null });
+  assert.equal(mapsOf(r.cues).at(-1)?.origin, 'demo');
+  await r.send({ type: 'ui', action: 'confirm', targetId: null, text: null });
+  const confirmed = mapsOf(r.cues).at(-1);
+  assert.ok(confirmed?.confirmed === true && confirmed.origin === 'demo', 'still labelled as the demo map');
+  assert.equal(maps.find(null)?.sessionId, 'sess-1');
+  assert.ok(cueOf(r.cues, 'guide').some((g) => g.step === 'handoff'));
+  assert.equal(maps.lastBuilt(), null);
+  const hire = rig({}, maps, 'hire-1');
+  await hire.send(hello('web', 'new_hire'), { type: 'session', mode: 'teach', live: true, reason: null });
+  assert.ok(!cueOf(hire.cues, 'guide').some((g) => g.step === 'no_map'), 'Pass it on has a confirmed map');
+  assert.deepEqual(maps.library().map((p) => [p.title, p.rules.length]), [['Invoice email: payment terms', 2], ['Prepaid cost: spread by quarter', 1]]);
+
+  // A map of the session's own is still confirmed only after its teach-back, as before.
+  const own = rig({ map_synthesis: () => ok(MAP) }, new MapRegistry(), 'sess-2');
+  await own.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', 'Changed.'));
+  await own.send({ type: 'session', mode: 'learn', live: false, reason: 'user' }, { type: 'session', mode: 'review', live: true, reason: null });
+  await own.send({ type: 'ui', action: 'confirm', targetId: null, text: null });
+  assert.ok(!mapsOf(own.cues).some((m) => m.confirmed));
 });

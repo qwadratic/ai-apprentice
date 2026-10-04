@@ -20,6 +20,8 @@ const WEB_EXPERT: Lines = {
   review: { step: 'review', phase: 'review', text: 'Thanks. Let us look at what I learned: open Reflect.', target: ui('mode_tab', 'review'), speak: true },
   building: { step: 'building', phase: 'review', text: 'I am putting your steps and rules on the map.', target: null, speak: false },
   no_session_yet: { step: 'no_session_yet', phase: 'review', text: 'There is nothing on the map yet. Run Show first.', target: ui('mode_tab', 'learn'), speak: true },
+  earlier_map: { step: 'earlier_map', phase: 'review', text: 'Nothing from this session yet, so here is the map of your last session. Tell me what to change.', target: null, speak: true },
+  demo_map: { step: 'demo_map', phase: 'review', text: 'No session yet, so here is a demo map with synthetic data. Talk it through with me, or run Show first.', target: null, speak: true },
   gaps: { step: 'gaps', phase: 'review', text: 'A few points are still open. I will ask about them one at a time.', target: ui('board_gap'), speak: false },
   teachback: { step: 'teachback', phase: 'review', text: 'Here is what I understood. Tell me if it is right or what to change.', target: ui('teachback'), speak: false },
   talk_to_edit: { step: 'talk_to_edit', phase: 'review', text: 'Just tell me what to change, add or remove; I will edit the map.', target: null, speak: false },

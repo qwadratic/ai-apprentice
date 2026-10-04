@@ -24,6 +24,8 @@ export interface AgentOptions {
   fastModel?: string;
   /** The web app the macOS client sends people to (Review, Summary). Default: env PUBLIC_WEB_URL. */
   publicWebUrl?: string;
+  /** Work Maps on disk (confirmed maps and the last built one), so a restart keeps them. Default: env AGENT_MAPS_FILE, else /var/lib/apprentice/maps.json; '' keeps them in memory only. */
+  mapsFile?: string;
   fetch?: FetchFn;
   now?: () => number;
   log?: Logger;
@@ -85,6 +87,8 @@ export interface AgentConfig {
   agentIds: ReadonlySet<string>;
   fastModel: string;
   publicWebUrl: string;
+  /** The Work Map file; '' when maps stay in memory only. */
+  mapsFile: string;
   limits: Limits;
   timing: Timing;
   fetch: FetchFn;
@@ -151,6 +155,7 @@ export function resolveConfig(options: AgentOptions = {}, env: NodeJS.ProcessEnv
     agentIds: new Set([interviewer, tutor].filter(Boolean)),
     fastModel: options.fastModel ?? env.AGENT_FAST_MODEL ?? 'claude-haiku-4-5-20251001',
     publicWebUrl: options.publicWebUrl ?? (env.PUBLIC_WEB_URL || 'https://qwadratic.github.io/clipa/'),
+    mapsFile: (options.mapsFile ?? env.AGENT_MAPS_FILE ?? '/var/lib/apprentice/maps.json').trim(),
     limits, timing,
     fetch: options.fetch ?? ((input, init) => fetch(input, init)),
     now: options.now ?? Date.now,
