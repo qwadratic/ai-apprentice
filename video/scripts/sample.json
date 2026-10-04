@@ -1,0 +1,45 @@
+{
+  "transitionSec": 0.5,
+  "scenes": [
+    {
+      "type": "title",
+      "durationSec": 2.5,
+      "kicker": "Video toolkit sample",
+      "title": "AI Apprentice",
+      "subtitle": "Clipa learns your judgment, then teaches it",
+      "footer": "Hack-Nation 7 · Challenge 01 · All data in this video is synthetic",
+      "showClipa": true
+    },
+    {
+      "type": "clip",
+      "durationSec": 13,
+      "src": "recordings/sample.mp4",
+      "startFromSec": 0,
+      "layout": "framed",
+      "heading": "Learn, Review, Teach",
+      "badge": "Recording of the public demo · synthetic data",
+      "captions": [
+        { "fromSec": 0.3, "toSec": 2.4, "text": "One page, three modes: Learn, Review, Teach." },
+        { "fromSec": 2.9, "toSec": 4.6, "text": "Review: open questions, then a teach-back." },
+        { "fromSec": 5.1, "toSec": 6.9, "text": "Teach: the tutor watches a new case." },
+        { "fromSec": 7.4, "toSec": 10.8, "text": "Sample observations are invented, synthetic screen events." },
+        { "fromSec": 11.2, "toSec": 12.9, "text": "Start Learn: a session goes live and Clipa listens." }
+      ],
+      "highlights": [
+        { "fromSec": 0.4, "toSec": 2.3, "x": 0.645, "y": 0.0, "w": 0.14, "h": 0.06, "label": "Modes" },
+        { "fromSec": 7.9, "toSec": 10.6, "x": 0.609, "y": 0.347, "w": 0.373, "h": 0.055, "label": "Synthetic" }
+      ]
+    },
+    {
+      "type": "clipa-outro",
+      "durationSec": 3.5,
+      "headline": "Try it, or read the code",
+      "lines": ["Learn. Review. Teach."],
+      "links": [
+        { "label": "Demo", "url": "https://qwadratic.github.io/ai-apprentice/" },
+        { "label": "Code", "url": "https://github.com/qwadratic/ai-apprentice" }
+      ],
+      "note": "All data in this video is synthetic."
+    }
+  ]
+}
