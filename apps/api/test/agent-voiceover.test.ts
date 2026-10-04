@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
-import { readdir, writeFile } from 'node:fs/promises';
+import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AgentOptions, FetchFn } from '../agent/index.ts';
 import { resolveConfig } from '../agent/config.ts';
-import { CLIPA_FALLBACK_VOICE, DEFAULT_VOICES, VOICEOVER_MODEL, loadLines } from '../agent/voiceover.ts';
+import { CLIPA_FALLBACK_VOICE, DEFAULT_VOICES, LOOKUP_RETRY_MS, VOICEOVER_MODEL, loadLines } from '../agent/voiceover.ts';
 import { EL_AGENT, EL_KEY, start, tempDir } from './agent-helpers.ts';
 
 const LINES = {
@@ -56,9 +56,47 @@ test('voiceover loader keeps only valid whitelisted entries', async (t) => {
   assert.equal((await loadLines(file)).size, 0);
 });
 
-test('the shipped voiceover lines file is valid', async () => {
+test('the shipped voiceover lines file is valid: no entry is silently dropped, ids run v01, v02, ...', async () => {
   const { voiceoverLinesFile } = resolveConfig({ log: () => {} }, {});
-  assert.ok((await loadLines(voiceoverLinesFile)).size > 0);
+  const raw = JSON.parse(await readFile(voiceoverLinesFile, 'utf8')) as { lines: unknown[] };
+  const loaded = [...(await loadLines(voiceoverLinesFile)).keys()];
+  assert.ok(loaded.length > 0);
+  assert.equal(loaded.length, raw.lines.length, 'every shipped line passes validation');
+  assert.deepEqual(loaded, loaded.map((_, i) => `v${String(i + 1).padStart(2, '0')}`));
+});
+
+test('voiceover: a failed agent lookup is not retried on every public request', async (t) => {
+  let clock = 1_000_000;
+  const s = stub({ agent: () => new Response('nope', { status: 401 }) });
+  const { base } = await setup(t, { fetch: s.fetch, now: () => clock });
+  const lookups = (): number => s.calls.filter((c) => c.url.includes('/convai/agents/')).length;
+  for (let i = 0; i < 3; i++) {
+    const r = await fetch(`${base}/api/agent/voiceover/v02`);
+    assert.equal(r.status, 200);
+    await r.arrayBuffer();
+  }
+  assert.equal(lookups(), 1, 'one lookup, then the fallback voice until the retry window passes');
+  assert.equal(tts(s.calls).length, 1, 'the fallback line is cached');
+  clock += LOOKUP_RETRY_MS;
+  const later = await fetch(`${base}/api/agent/voiceover/v02`);
+  assert.equal(later.status, 200);
+  await later.arrayBuffer();
+  assert.equal(lookups(), 2, 'retried after the window');
+});
+
+test('voiceover: when the cache dir cannot be written, the line is kept in memory and not generated again', async (t) => {
+  const dir = await tempDir(t);
+  const blocker = join(dir, 'blocker');
+  await writeFile(blocker, 'a file, so the cache dir below it cannot be created');
+  const s = stub();
+  const { base, logs } = await setup(t, { fetch: s.fetch, voiceoverDir: join(blocker, 'voiceover') });
+  for (let i = 0; i < 3; i++) {
+    const r = await fetch(`${base}/api/agent/voiceover/v01`);
+    assert.equal(r.status, 200);
+    assert.deepEqual([...new Uint8Array(await r.arrayBuffer())], [0xff, 0xfb, 1, 2, 3]);
+  }
+  assert.equal(tts(s.calls).length, 1);
+  assert.equal(logs.filter((l) => String(l.msg).startsWith('voiceover: cache write failed')).length, 1);
 });
 
 test('voiceover: unknown and invalid line ids are 404 without any upstream call', async (t) => {

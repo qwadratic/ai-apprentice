@@ -25,6 +25,8 @@ const LINE_ID = /^v\d{2}$/;
 const MAX_TEXT = 400;
 const MAX_AUDIO = 10 * 1024 * 1024;
 const VOICE_ID = /^[A-Za-z0-9]{8,64}$/;
+/** After a failed agent lookup, Clipa uses the fallback voice for this long before the lookup is tried again. */
+export const LOOKUP_RETRY_MS = 5 * 60_000;
 
 /** Reads the whitelist; a missing or malformed file is an empty list and invalid entries are skipped (first id wins). */
 export async function loadLines(file: string): Promise<Map<string, VoiceoverLine>> {
@@ -55,11 +57,17 @@ export function registerVoiceoverRoutes(app: Express, config: AgentConfig): void
     return next;
   };
   const inflight = new Map<string, Promise<Generated>>();
+  // Audio whose disk write failed, so a broken cache dir cannot turn every public request into a paid upstream call.
+  // Keyed by cache file, so it is bounded by the whitelist like the disk cache.
+  const kept = new Map<string, Buffer>();
   let clipaVoice: Promise<string> | undefined;
+  let clipaFailedAt = Number.NEGATIVE_INFINITY;
 
-  /** The interviewer agent's voice, read once; a failed read falls back for this call and is retried next time. */
+  /** The interviewer agent's voice, read once; after a failed read the fallback is used, and the read is retried only
+   *  after LOOKUP_RETRY_MS, so public requests cannot turn a persistent failure into one upstream call each. */
   const lookupClipaVoice = (): Promise<string> => {
     if (!config.interviewerAgentId) return Promise.resolve(CLIPA_FALLBACK_VOICE);
+    if (!clipaVoice && config.now() - clipaFailedAt < LOOKUP_RETRY_MS) return Promise.resolve(CLIPA_FALLBACK_VOICE);
     clipaVoice ??= serial(async () => {
       const url = `https://api.elevenlabs.io/v1/convai/agents/${encodeURIComponent(config.interviewerAgentId)}`;
       const r = await config.fetch(url, { headers, signal: AbortSignal.timeout(10_000) });
@@ -73,6 +81,7 @@ export function registerVoiceoverRoutes(app: Express, config: AgentConfig): void
     }).catch(() => {
       config.log({ level: 'warn', msg: 'voiceover: interviewer voice unavailable; using the fallback voice' });
       clipaVoice = undefined;
+      clipaFailedAt = config.now();
       return CLIPA_FALLBACK_VOICE;
     });
     return clipaVoice;
@@ -85,6 +94,8 @@ export function registerVoiceoverRoutes(app: Express, config: AgentConfig): void
   };
 
   const readCache = async (file: string): Promise<Buffer | null> => {
+    const memory = kept.get(file);
+    if (memory) return memory;
     try { const b = await readFile(file); return b.length > 0 ? b : null; } catch { return null; }
   };
 
@@ -114,7 +125,8 @@ export function registerVoiceoverRoutes(app: Express, config: AgentConfig): void
       await rename(tmp, file);
     } catch {
       await rm(tmp, { force: true }).catch(() => {});
-      config.log({ level: 'warn', msg: 'voiceover: cache write failed', id: line.id });
+      kept.set(file, audio);
+      config.log({ level: 'warn', msg: 'voiceover: cache write failed; keeping the line in memory', id: line.id });
     }
     config.log({ level: 'info', msg: 'voiceover generated', id: line.id, bytes: audio.length, ms: Date.now() - started });
     return { ok: true, audio };
