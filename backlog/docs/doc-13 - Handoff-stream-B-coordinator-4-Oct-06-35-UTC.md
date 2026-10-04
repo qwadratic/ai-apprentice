@@ -3,7 +3,7 @@ id: doc-13
 title: 'Handoff - stream B coordinator, 4 Oct 06:35 UTC'
 type: other
 created_date: '2026-10-04 06:08'
-updated_date: '2026-10-04 06:33'
+updated_date: '2026-10-04 06:35'
 ---
 # Handoff: stream B coordinator, 4 Oct 06:35 UTC
 
@@ -51,7 +51,7 @@ Written for the next agent. Talk to Ivan in Russian, short. Keep the repo, code 
   - Never push to stream A's branches. Stream A (Kirill, Codex) has been silent since about 03:44 UTC. The `screen_activity` and conductor contracts are posted in the Hive integration thread.
   - `app://apprentice-macos` is allowed in `ALLOWED_ORIGINS`.
 - **Ops:**
-  - VM operations go through the devops remote-control session on the VM; ask Ivan for it.
+  - VM operations: the devops agent on the VM is stopping. From now on Ivan runs every VM command by hand; the cloud coordinator writes the exact commands for him (see "VM: Ivan runs the commands" in the prompt below).
   - Tailscale access for a trusted engineer: the VM side is done. Ivan's part is in the Tailscale admin console: a tag, an SSH rule and the machine share.
 
 ## Prompt for the next coordinator (06:45 UTC)
@@ -110,6 +110,24 @@ Ivan's latest direction, in short:
 
 The tasks are TASK-3.53 to TASK-3.58.
 
+### VM: Ivan runs the commands
+The devops agent on the VM stops working. You run in the cloud and cannot reach the VM: no SSH (port 22 is closed from the container), no remote-control session. So **Ivan runs every VM command himself, and you tell him exactly what to run.**
+- **Deploys need no one.** A merge to `main` makes `release.yml` publish Pages and call the VM's deploy webhook; the VM deploys, health-checks for 30 s and rolls back on failure. Backlog-only pushes deploy nothing.
+- **Check the VM yourself first, without Ivan:** `curl -s https://apprentice.exe.xyz/health`, `curl -s https://apprentice.exe.xyz/ops/vm-health` (runner up or down, `git_sha`, `deployed_sha`) and `curl -s https://apprentice.exe.xyz/ops/deploy/status` (the last deploy and its state). Also the Actions run of `release.yml`.
+- **When something must run on the VM**, send Ivan one copy-paste block at a time, in Russian, with: what it does, the exact commands, what output to expect, and which lines to send back. Keep blocks short. Ask for only the lines you need (`grep`, `tail -n`), never a whole file or env dump.
+- **Commands to start from** (from `infra/README.md`; units are `apprentice-api`, `apprentice-runner`, `apprentice-ops`, `apprentice-deploy`):
+  - status: `systemctl status apprentice-api apprentice-runner apprentice-ops --no-pager`
+  - logs: `sudo journalctl -u apprentice-api -u apprentice-runner -n 100 --no-pager`
+  - last deploy: `sudo journalctl -u apprentice-deploy -n 50 --no-pager`
+  - manual deploy of the sha in Pages' `deploy.json`: `sudo systemctl start apprentice-deploy.service`
+  - restart: `sudo systemctl restart apprentice-runner apprentice-api` (this wipes the in-memory confirmed maps: never between Reflect and Pass it on in a demo)
+  - which env keys are set, names only: `sudo grep -oE '^[A-Z_]+=' /etc/apprentice/env`
+  - edit env: `sudoedit /etc/apprentice/env`, then the restart above
+  - disk: `df -h / && sudo du -sh /var/lib/apprentice/sessions`
+  - full API smoke check: the "Running the checks from a Mac" block in `infra/README.md`
+- **Secrets stay with Ivan.** Never ask him to paste a key, token, signed URL or env value into the chat. A command whose output could contain one must filter it out first (names only, `grep -c`, `cut -d= -f1`). If he needs to put a new value into the env file, tell him the variable name and where to get the value; he types it into `sudoedit` himself.
+- **Ask before production changes.** Restarts, env edits and manual deploys change the live demo; say what and why, and wait for his yes. Mind the pitch at 08:00 UTC: no restarts during the demo.
+
 ### Hive (the team's agent relay; public and permanent)
 - **Channels:**
   - lobby `833a14bc-4449-401d-b835-2b6689295390`;
@@ -117,7 +135,7 @@ The tasks are TASK-3.53 to TASK-3.58.
   - design `f52c0f42-room`.
 - **Who is there:**
   - stream A, Kirill's Codex agent, key prefix `9e7447fd`;
-  - the **devops agent on the VM**, key prefix `eddff6e1`. It has the full deploy and VM context and posts every deploy result. Ask it for VM facts.
+  - the devops agent on the VM, key prefix `eddff6e1`. It is stopping and will not answer; its earlier posts in the engineering channel still hold the VM history.
 - **Pending: DEMO-REAL-3 from stream A.** Kirill proposes three real-browser demo cases:
   1. Gmail: Net 14 to Net 30 for one customer;
   2. Google Sheets: spreading a prepaid annual software cost across quarters;
