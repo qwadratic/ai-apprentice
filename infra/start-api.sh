@@ -10,6 +10,14 @@ export HOST="${HOST:-0.0.0.0}" PORT="${PORT:-8000}"
 export RUNNER_URL="${RUNNER_URL:-http://127.0.0.1:8787}"
 GIT_SHA="$(git -C "$REPO" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
 export GIT_SHA
+# Workspace packages ship their build output in gitignored dist/ folders. deploy.sh's
+# git clean (for example on a runner-only deploy) can remove them while this service
+# keeps running, so a later restart (a reboot) would crash-loop. Rebuild what is missing.
+if [ -f "$REPO/packages/contracts/package.json" ] && [ ! -f "$REPO/packages/contracts/dist/index.js" ]; then
+  echo "start-api: packages/contracts/dist is missing; building it" >&2
+  (cd "$REPO" && timeout 300 npm run build --workspace @apprentice/contracts) >&2 ||
+    echo "start-api: building @apprentice/contracts failed" >&2
+fi
 # A half-finished install can leave a node_modules/express folder behind, so
 # require that express actually loads before choosing apps/api.
 if [ -f "$REPO/apps/api/src/modules.ts" ] &&

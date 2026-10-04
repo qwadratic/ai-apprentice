@@ -1,0 +1,396 @@
+/*
+ * Product shell styles. Everything is scoped under .apprentice-shell and uses classes (as-*), never bare element
+ * selectors: nothing here may change how stream A's workspace and screen panel look (vision reads those pixels).
+ * Light and dark follow prefers-color-scheme. Layout: workspace left (~60%), Clipa and the mode view right;
+ * below 900px one column.
+ */
+.apprentice-shell {
+  --as-bg: #f3f6f5;
+  --as-surface: #ffffff;
+  --as-surface-2: #eaf0ef;
+  --as-text: #14211f;
+  --as-muted: #4f605c;
+  --as-border: #cbd7d4;
+  --as-accent: #0a766f;
+  --as-accent-text: #ffffff;
+  --as-accent-soft: #d8efec;
+  --as-ok: #0b6b4c;
+  --as-ok-soft: #d9f0e6;
+  --as-warn: #8a5300;
+  --as-warn-soft: #fbecd0;
+  --as-bad: #b3261e;
+  --as-bad-soft: #fbdedb;
+  --as-focus: #0a766f;
+  --as-shadow: 0 1px 2px rgba(9, 30, 27, 0.08);
+
+  position: fixed;
+  inset: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--as-bg);
+  color: var(--as-text);
+  color-scheme: light dark;
+  font: 15px/1.45 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+@media (prefers-color-scheme: dark) {
+  .apprentice-shell {
+    --as-bg: #0d1413;
+    --as-surface: #162120;
+    --as-surface-2: #1d2b29;
+    --as-text: #e5eeec;
+    --as-muted: #a3b6b2;
+    --as-border: #2f4240;
+    --as-accent: #2cc4b8;
+    --as-accent-text: #04201d;
+    --as-accent-soft: #15403c;
+    --as-ok: #6fdcb0;
+    --as-ok-soft: #123a2c;
+    --as-warn: #f0b95a;
+    --as-warn-soft: #3b2c0c;
+    --as-bad: #ff9a90;
+    --as-bad-soft: #471d19;
+    --as-focus: #2cc4b8;
+    --as-shadow: none;
+  }
+}
+
+.apprentice-shell .as-btn:focus-visible,
+.apprentice-shell .as-tab:focus-visible,
+.apprentice-shell .as-link:focus-visible,
+.apprentice-shell .as-select:focus-visible,
+.apprentice-shell .as-textarea:focus-visible,
+.apprentice-shell .as-switch input:focus-visible {
+  outline: 3px solid var(--as-focus);
+  outline-offset: 2px;
+}
+
+/* ---- Header, tabs, status ------------------------------------------------ */
+.apprentice-shell .as-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  padding: 10px 16px;
+  background: var(--as-surface);
+  border-bottom: 1px solid var(--as-border);
+}
+.apprentice-shell .as-brand { display: flex; flex-direction: column; min-width: 0; margin-right: auto; }
+.apprentice-shell .as-brand__name { font-weight: 700; font-size: 1.1rem; letter-spacing: 0.01em; }
+.apprentice-shell .as-brand__sub { color: var(--as-muted); font-size: 0.82rem; }
+
+.apprentice-shell .as-tabs {
+  display: inline-flex;
+  padding: 3px;
+  gap: 2px;
+  background: var(--as-surface-2);
+  border: 1px solid var(--as-border);
+  border-radius: 10px;
+}
+.apprentice-shell .as-tab {
+  font: inherit;
+  color: var(--as-text);
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  padding: 7px 16px;
+  min-height: 36px;
+  cursor: pointer;
+}
+.apprentice-shell .as-tab[aria-selected='true'] { background: var(--as-accent); color: var(--as-accent-text); font-weight: 600; }
+.apprentice-shell .as-tab--small { padding: 4px 10px; min-height: 30px; font-size: 0.9rem; }
+.apprentice-shell .as-tab__live { font-size: 0.7em; vertical-align: middle; }
+
+.apprentice-shell .as-header__tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+.apprentice-shell .as-field { display: flex; flex-direction: column; gap: 4px; }
+.apprentice-shell .as-field--inline { flex-direction: row; align-items: center; gap: 6px; }
+.apprentice-shell .as-field__label { color: var(--as-muted); font-size: 0.85rem; }
+.apprentice-shell .as-select,
+.apprentice-shell .as-textarea {
+  font: inherit;
+  color: var(--as-text);
+  background: var(--as-surface);
+  border: 1px solid var(--as-border);
+  border-radius: 8px;
+  padding: 7px 8px;
+  min-height: 36px;
+}
+.apprentice-shell .as-textarea { width: 100%; resize: vertical; }
+
+.apprentice-shell .as-btn {
+  font: inherit;
+  color: var(--as-text);
+  background: var(--as-surface);
+  border: 1px solid var(--as-border);
+  border-radius: 8px;
+  padding: 7px 14px;
+  min-height: 36px;
+  cursor: pointer;
+}
+.apprentice-shell .as-btn:hover:not(:disabled) { background: var(--as-surface-2); }
+.apprentice-shell .as-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.apprentice-shell .as-btn--small { padding: 3px 10px; min-height: 28px; font-size: 0.88rem; }
+.apprentice-shell .as-btn--primary { background: var(--as-accent); color: var(--as-accent-text); border-color: var(--as-accent); font-weight: 600; }
+.apprentice-shell .as-btn--primary:hover:not(:disabled) { background: var(--as-accent); filter: brightness(1.08); }
+.apprentice-shell .as-btn--off { color: var(--as-bad); border-color: var(--as-bad); font-weight: 600; }
+.apprentice-shell .as-btn--off.is-on { background: var(--as-bad-soft); }
+
+.apprentice-shell .as-status {
+  list-style: none;
+  margin: 0;
+  padding: 8px 16px 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.apprentice-shell .as-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--as-border);
+  border-radius: 999px;
+  background: var(--as-surface);
+  font-size: 0.85rem;
+  min-width: 0;
+}
+.apprentice-shell .as-chip__dot { width: 9px; height: 9px; border-radius: 50%; background: var(--as-muted); flex: none; }
+.apprentice-shell .as-chip__label { color: var(--as-muted); }
+.apprentice-shell .as-chip__value { font-weight: 600; overflow-wrap: anywhere; }
+.apprentice-shell .as-chip--ok .as-chip__dot { background: var(--as-ok); }
+.apprentice-shell .as-chip--warn .as-chip__dot { background: var(--as-warn); }
+.apprentice-shell .as-chip--bad .as-chip__dot { background: var(--as-bad); }
+.apprentice-shell .as-chip--bad { border-color: var(--as-bad); }
+
+.apprentice-shell .as-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 16px 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--as-border);
+  background: var(--as-surface-2);
+}
+.apprentice-shell .as-banner__text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.apprentice-shell .as-banner--error { background: var(--as-bad-soft); border-color: var(--as-bad); }
+.apprentice-shell .as-banner--warn { background: var(--as-warn-soft); border-color: var(--as-warn); }
+
+/* ---- Layout --------------------------------------------------------------- */
+.apprentice-shell .as-main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 16px;
+  align-items: start;
+  padding: 12px 16px 16px;
+}
+.apprentice-shell .as-left,
+.apprentice-shell .as-right { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.apprentice-shell .as-right { position: sticky; top: 76px; max-height: calc(100vh - 92px); overflow: auto; padding-right: 2px; }
+
+.apprentice-shell .as-card {
+  background: var(--as-surface);
+  border: 1px solid var(--as-border);
+  border-radius: 12px;
+  padding: 14px;
+  box-shadow: var(--as-shadow);
+  min-width: 0;
+}
+.apprentice-shell .as-card__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.apprentice-shell .as-card__title { margin: 0 0 6px; font-size: 1rem; }
+.apprentice-shell .as-card__head .as-card__title { margin: 0; }
+.apprentice-shell .as-h3 { margin: 0 0 8px; font-size: 0.98rem; display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; }
+.apprentice-shell .as-h4 { margin: 0 0 4px; font-size: 0.9rem; }
+.apprentice-shell .as-count { color: var(--as-muted); font-weight: 400; font-size: 0.85rem; }
+
+.apprentice-shell .as-screen__mount[hidden] { display: none; }
+/* A's panel sets canvas.hidden while nothing is shared, but its own `display: block` rule wins over [hidden]. */
+.apprentice-shell .screen-panel canvas[hidden] { display: none; }
+.apprentice-shell .as-screen__mount[inert] { opacity: 0.55; }
+.apprentice-shell .as-workspace { border-style: dashed; min-height: 180px; }
+
+.apprentice-shell .as-clipa-card { padding: 10px 14px; }
+.apprentice-shell .as-clipa { display: flex; flex-direction: row; align-items: center; gap: 14px; }
+.apprentice-shell .as-clipa__side { flex: 1; min-width: 0; }
+.apprentice-shell .as-clipa__state { margin: 0; color: var(--as-muted); font-size: 0.9rem; }
+.apprentice-shell .as-clipa__label { font-weight: 700; color: var(--as-text); }
+.apprentice-shell .as-bubble {
+  position: relative;
+  margin: 6px 0 0;
+  max-width: 100%;
+  padding: 10px 14px;
+  background: var(--as-accent-soft);
+  border: 1px solid var(--as-accent);
+  border-radius: 14px;
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
+.apprentice-shell .as-bubble::before {
+  content: '';
+  position: absolute;
+  top: 16px;
+  left: -8px;
+  width: 14px;
+  height: 14px;
+  background: var(--as-accent-soft);
+  border-left: 1px solid var(--as-accent);
+  border-bottom: 1px solid var(--as-accent);
+  transform: rotate(45deg);
+}
+
+.apprentice-shell .as-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; }
+
+/* ---- Text bits ------------------------------------------------------------ */
+.apprentice-shell .as-note { margin: 4px 0; color: var(--as-muted); font-size: 0.88rem; }
+.apprentice-shell .as-empty { margin: 4px 0 10px; color: var(--as-muted); font-size: 0.92rem; }
+.apprentice-shell .as-disclosure { margin: 10px 0 0; padding-top: 10px; border-top: 1px solid var(--as-border); color: var(--as-muted); font-size: 0.82rem; }
+.apprentice-shell .as-details { margin-top: 4px; font-size: 0.82rem; }
+.apprentice-shell .as-details__summary { cursor: pointer; color: var(--as-accent); }
+.apprentice-shell .as-error { margin: 6px 0 0; color: var(--as-bad); font-weight: 600; }
+.apprentice-shell .as-notwired {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--as-warn-soft);
+  border: 1px solid var(--as-warn);
+  font-size: 0.88rem;
+}
+.apprentice-shell .as-notwired--off { background: var(--as-surface-2); border-color: var(--as-border); }
+.apprentice-shell .as-notwired--synthetic { margin: 0 0 8px; }
+
+.apprentice-shell .as-tag {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--as-border);
+  background: var(--as-surface-2);
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.apprentice-shell .as-tag--accent { background: var(--as-accent-soft); border-color: var(--as-accent); }
+.apprentice-shell .as-tag--ok { background: var(--as-ok-soft); border-color: var(--as-ok); color: var(--as-ok); }
+.apprentice-shell .as-tag--warn { background: var(--as-warn-soft); border-color: var(--as-warn); color: var(--as-warn); }
+.apprentice-shell .as-tag--muted { color: var(--as-muted); }
+
+.apprentice-shell .as-link {
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--as-accent);
+  background: none;
+  border: 0;
+  padding: 2px 4px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.apprentice-shell .as-evidence { display: inline-flex; flex-wrap: wrap; gap: 2px 6px; }
+
+.apprentice-shell .as-switch { display: flex; align-items: flex-start; gap: 10px; margin: 10px 0 0; padding: 8px 10px; border: 1px solid var(--as-border); border-radius: 10px; background: var(--as-surface-2); cursor: pointer; }
+.apprentice-shell .as-switch input { margin-top: 3px; width: 18px; height: 18px; flex: none; }
+.apprentice-shell .as-switch.is-disabled { opacity: 0.7; }
+.apprentice-shell .as-switch__hint { display: block; color: var(--as-muted); font-size: 0.82rem; }
+
+.apprentice-shell .as-props { margin: 6px 0 0; display: grid; gap: 4px; }
+.apprentice-shell .as-props > div { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.apprentice-shell .as-props dt { color: var(--as-muted); min-width: 8.5em; font-size: 0.85rem; }
+.apprentice-shell .as-props dd { margin: 0; overflow-wrap: anywhere; font-size: 0.88rem; }
+.apprentice-shell .as-props--wide dt { min-width: 16em; }
+
+/* ---- Mode views ----------------------------------------------------------- */
+.apprentice-shell .as-mode__panel[hidden] { display: none; }
+.apprentice-shell .as-view { display: flex; flex-direction: column; gap: 16px; }
+
+.apprentice-shell .as-feed,
+.apprentice-shell .as-obs,
+.apprentice-shell .as-steps,
+.apprentice-shell .as-gaps,
+.apprentice-shell .as-decisions,
+.apprentice-shell .as-events { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.apprentice-shell .as-feed__item,
+.apprentice-shell .as-step,
+.apprentice-shell .as-gap { border: 1px solid var(--as-border); border-radius: 10px; padding: 8px 10px; background: var(--as-surface); }
+.apprentice-shell .as-feed__item--answered { border-color: var(--as-ok); }
+.apprentice-shell .as-feed__item--asked { border-color: var(--as-accent); }
+.apprentice-shell .as-feed__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.apprentice-shell .as-feed__time,
+.apprentice-shell .as-obs__time,
+.apprentice-shell .as-step__time { color: var(--as-muted); font-variant-numeric: tabular-nums; font-size: 0.82rem; }
+.apprentice-shell .as-feed__text,
+.apprentice-shell .as-gap__text { margin: 6px 0 2px; font-weight: 600; }
+.apprentice-shell .as-feed__answer { margin: 4px 0; }
+.apprentice-shell .as-step__head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.apprentice-shell .as-step__no { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--as-accent); color: var(--as-accent-text); font-size: 0.8rem; font-weight: 700; }
+.apprentice-shell .as-step__line { margin: 4px 0; }
+.apprentice-shell .as-step__key { color: var(--as-muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; margin-right: 4px; }
+.apprentice-shell .as-step--judgment { border-color: var(--as-accent); }
+
+.apprentice-shell .as-obs__row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 4px 0; border-bottom: 1px solid var(--as-border); }
+.apprentice-shell .as-obs__row.is-heartbeat { opacity: 0.7; }
+.apprentice-shell .as-obs__summary { min-width: 0; overflow-wrap: anywhere; }
+
+.apprentice-shell .as-teachback { margin: 0 0 8px; padding: 10px 12px; border-left: 4px solid var(--as-accent); background: var(--as-surface-2); border-radius: 0 8px 8px 0; }
+.apprentice-shell .as-correct { margin-top: 8px; }
+
+.apprentice-shell .as-checkpoint { padding: 10px 12px; border-radius: 10px; border: 2px solid var(--as-border); background: var(--as-surface-2); margin-bottom: 8px; }
+.apprentice-shell .as-checkpoint--clear { border-color: var(--as-ok); background: var(--as-ok-soft); }
+.apprentice-shell .as-checkpoint--warn { border-color: var(--as-warn); background: var(--as-warn-soft); }
+.apprentice-shell .as-checkpoint--unknown { border-color: var(--as-muted); }
+.apprentice-shell .as-checkpoint__status { margin: 0 0 4px; font-weight: 700; }
+.apprentice-shell .as-checkpoint__message { margin: 0 0 4px; }
+.apprentice-shell .as-mastery { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+/* ---- Debug drawer --------------------------------------------------------- */
+.apprentice-shell .as-drawer {
+  position: sticky;
+  bottom: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  height: min(42vh, 380px);
+  background: var(--as-surface);
+  border-top: 2px solid var(--as-accent);
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.12);
+}
+.apprentice-shell .as-drawer__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--as-border); }
+.apprentice-shell .as-drawer__tabs { display: flex; flex-wrap: wrap; gap: 4px; }
+.apprentice-shell .as-drawer__body { flex: 1; overflow: auto; padding: 8px 12px 12px; }
+.apprentice-shell .as-decision,
+.apprentice-shell .as-event { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 3px 0; border-bottom: 1px solid var(--as-border); font-size: 0.86rem; }
+.apprentice-shell .as-decision__topic { font-weight: 600; }
+.apprentice-shell .as-decision__why,
+.apprentice-shell .as-event__text { min-width: 0; overflow-wrap: anywhere; }
+.apprentice-shell .as-decision__latency { color: var(--as-muted); }
+.apprentice-shell .as-event--err .as-event__text { color: var(--as-bad); }
+.apprentice-shell .as-event--sent .as-event__text { color: var(--as-accent); }
+.apprentice-shell .as-event__end { height: 1px; border: 0; padding: 0; }
+
+/* ---- Narrow screens --------------------------------------------------------- */
+@media (max-width: 900px) {
+  .apprentice-shell .as-main { grid-template-columns: minmax(0, 1fr); }
+  .apprentice-shell .as-right { order: -1; position: static; max-height: none; overflow: visible; }
+  .apprentice-shell .as-brand { flex: 1 1 100%; }
+}
+@media (max-width: 520px) {
+  .apprentice-shell .as-header { padding: 8px 12px; gap: 8px; }
+  .apprentice-shell .as-tabs { width: 100%; }
+  .apprentice-shell .as-tab { flex: 1; padding: 8px 6px; min-height: 40px; }
+  .apprentice-shell .as-header__tools { width: 100%; justify-content: space-between; }
+  .apprentice-shell .as-status { padding: 8px 12px 0; }
+  .apprentice-shell .as-main { padding: 10px 12px 14px; gap: 12px; }
+  .apprentice-shell .as-banner { margin: 8px 12px 0; }
+  .apprentice-shell .as-mastery { grid-template-columns: 1fr; }
+  .apprentice-shell .as-props dt { min-width: 100%; }
+  .apprentice-shell .as-btn { min-height: 40px; }
+  .apprentice-shell .as-drawer { height: 55vh; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .apprentice-shell * { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+}
