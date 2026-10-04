@@ -22,10 +22,15 @@ export const defaultVisionPrompt = 'Describe the currently visible order, email 
 const genericRules = `Describe the visible screen using only visible pixels.
 Return order_view, email_draft or ticket only for the demo workspace, whose cards are headed "source order", "compose email" and "record outcome".
 Any other readable app or website is screen_activity. pendingAction is the control under the pointer or in focus (for example a hovered Send button), else null; pendingRegionId is the id of its region in regions, else null.
-A magenta ring with a dot at its centre, when present, marks the mouse pointer and is not part of the app. A Pointer line, when given, places the pointer in the latest frame, normalised 0..1 like the boxes.
-Say in summary what the pointer rests on. When the person seems about to use the control under the pointer (it rests on a button, link or field), that control is pendingAction and its region is pendingRegionId.
 Give up to 6 regions with short unique ids (r1, r2, ...): the fields and controls the person is working with.
 Each box is [x, y, width, height] normalised 0..1 to the processed frame, with x + width <= 1 and y + height <= 1.`;
+/**
+ * Added only to a frame that carries a pointer hint (the macOS app draws the ring on exactly those frames), so web frames
+ * and VISION_FRAMES=1 keep the request from before byte for byte.
+ */
+export const pointerRules = `A magenta ring with a dot at its centre marks the mouse pointer and is not part of the app. The Pointer line places it in the latest frame, normalised 0..1 like the boxes.
+Say in summary what the pointer rests on. Only when it rests on a button the person seems about to click is that button pendingAction (and its region pendingRegionId).
+The pointer or the ring moving is never a change by itself: change describes the app's content only.`;
 /** One generic frame per call: the request before storyboards, byte for byte (VISION_FRAMES=1, or no earlier frame). */
 export const genericVisionPrompt = `${genericRules}
 You see one frame: change is null unless the pixels show direct evidence of a change.
@@ -95,7 +100,7 @@ export function createScreenService(options: ScreenServiceOptions): ScreenServic
       const basePrompt = generic ? frames.length > 1 ? storyboardPrompt(frames.length) : genericPrompt :
         surface === null ? prompt :
         `${prompt}\nAnalyze the ${surfaceLabels[surface]} surface. Return its matching kind, or incomplete if it is not readable.`;
-      const targetedPrompt = pointer ? `${basePrompt}\n${pointerLine(pointer)}` : basePrompt;
+      const targetedPrompt = pointer ? `${basePrompt}\n${pointerRules}\n${pointerLine(pointer)}` : basePrompt;
       const result = await options.runner.vision({images: frames.map(item => ({media_type: item.mediaType,
         data: Buffer.from(item.bytes).toString('base64')})), prompt: targetedPrompt,
         system: generic ? genericVisionSystem : visibleOnlySystem,

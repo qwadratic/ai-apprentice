@@ -7,7 +7,7 @@ import {createMemoryEvidenceStore} from './evidence-store.ts';
 import {createScreenHandlers} from './handlers.ts';
 import {MAX_POINTER_TRAIL, parsePointerHint, pointerLine} from './pointer.ts';
 import type {VisionRunner, VisionRunnerRequest} from './runner-client.ts';
-import {createScreenService, defaultVisionPrompt, genericVisionPrompt} from './service.ts';
+import {createScreenService, defaultVisionPrompt, genericVisionPrompt, pointerRules} from './service.ts';
 import {ScreenSessionHub} from './session-transport.ts';
 
 const origin = 'https://demo.example';
@@ -45,10 +45,12 @@ test('the pointer line says resting, moving or at', () => {
   assert.equal(pointerLine({x: 0.62, y: 0.81, dwellMs: 0, trail: [[0.621, 0.81, 400]]}), 'Pointer: at (0.62, 0.81).');
 });
 
-test('the generic prompt explains the ring and holds no scenario facts', () => {
-  assert.match(genericVisionPrompt, /magenta ring/);
-  assert.match(genericVisionPrompt, /Pointer line/);
-  assert.doesNotMatch(genericVisionPrompt, /customer_07|delivery address/i);
+test('the pointer rules explain the ring, only frames with a pointer get them, and they hold no scenario facts', () => {
+  assert.match(pointerRules, /magenta ring/);
+  assert.match(pointerRules, /Pointer line/);
+  assert.match(pointerRules, /never a change by itself/);
+  assert.doesNotMatch(genericVisionPrompt, /magenta ring/, 'web frames keep the request from before');
+  assert.doesNotMatch(pointerRules, /customer_07|delivery address/i);
 });
 
 function request(url: string, method: 'GET' | 'POST', body?: unknown, token?: string): Request {
@@ -76,7 +78,7 @@ test('a frame with a pointer hint adds one Pointer line to the generic vision re
   const {status, sent} = await upload({pointer: {x: 0.62, y: 0.81, dwellMs: 1400, trail: [[0.4, 0.5, 2000], [0.6, 0.8, 700]]}});
   assert.equal(status, 202);
   assert.equal(sent.length, 1);
-  assert.equal(sent[0]?.prompt, `${genericVisionPrompt}\nPointer: resting 1.4 s at (0.62, 0.81).`);
+  assert.equal(sent[0]?.prompt, `${genericVisionPrompt}\n${pointerRules}\nPointer: resting 1.4 s at (0.62, 0.81).`);
 });
 
 test('a frame without a pointer hint sends the generic prompt unchanged (the web path)', async () => {

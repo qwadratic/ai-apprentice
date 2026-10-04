@@ -59,6 +59,7 @@ final class PointerTracker: @unchecked Sendable {
         let ticker = Timer(timeInterval: Self.interval, repeats: true) { [weak self] _ in self?.sample() }
         RunLoop.main.add(ticker, forMode: .common)
         self.timer = ticker
+        sample() // the first frame after a start already has a position
     }
 
     /// Main thread. Forgets every sample.
@@ -79,7 +80,7 @@ final class PointerTracker: @unchecked Sendable {
         if frame.width > 0, frame.height > 0 {
             let x = Double((location.x - frame.minX) / frame.width)
             let y = 1 - Double((location.y - frame.minY) / frame.height)
-            if x >= 0, x <= 1, y >= 0, y <= 1 { point = Sample(x: x, y: y, onDisplay: true, t: now) }
+            if x >= 0, x < 1, y >= 0, y < 1 { point = Sample(x: x, y: y, onDisplay: true, t: now) } // half-open: x == 1 is the next display
         }
         samples.append(point)
         samples.removeAll { now - $0.t > Self.keep }
