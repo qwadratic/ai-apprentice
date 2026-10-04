@@ -11,6 +11,8 @@ on:
       - "package-lock.json"
       - "tsconfig.base.json"
       - ".nvmrc"
+      - ".npmrc"
+      - "fixtures/**"
       - "apps/**"
       - "packages/**"
       - "scripts/**"
@@ -32,7 +34,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: workspace-checks-${{ github.event.pull_request.number || inputs.ref || github.ref }}
+  group: ${{ github.workflow }}-workspace-checks-${{ github.event.pull_request.number || inputs.ref || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -47,6 +49,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref }}
+          persist-credentials: false
 
       - name: Look for the root workspace
         id: root
