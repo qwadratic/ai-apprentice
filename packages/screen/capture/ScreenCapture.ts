@@ -60,6 +60,23 @@ export interface FrameEncoding {
  */
 export const DEFAULT_FRAME_ENCODING: FrameEncoding = Object.freeze({ maxWidth: 960, jpegQuality: 0.5, applyTo: 'generic' });
 
+/**
+ * A generic frame goes to vision only when the screen visibly changed, judged deterministically on a small grayscale
+ * thumbnail (as the macOS app does): at least minCells thumbnail pixels moved by more than minDelta gray levels. A
+ * blinking caret or a ticking clock is not a change, so it never costs a vision call.
+ */
+export const CHANGE_THUMBNAIL = Object.freeze({ width: 128, height: 80, minCells: 2, minDelta: 10 });
+
+/** True when the screen visibly changed between two grayscale thumbnails (always true without a previous one). */
+export function visiblyChanged(previous: Uint8Array | null, next: Uint8Array): boolean {
+  if (!previous || previous.length !== next.length) return true;
+  let cells = 0;
+  for (let i = 0; i < next.length; i++) {
+    if (Math.abs((previous[i] ?? 0) - (next[i] ?? 0)) > CHANGE_THUMBNAIL.minDelta && ++cells >= CHANGE_THUMBNAIL.minCells) return true;
+  }
+  return false;
+}
+
 type ManualCanvasTrack = MediaStreamTrack & { requestFrame(): void };
 type CaptureCanvas = HTMLCanvasElement & { captureStream?: (frameRate?: number) => MediaStream };
 
@@ -131,6 +148,10 @@ export class ScreenCapture {
   private pendingFrame: object | null = null;
   /** Holds a scaled copy of the processed canvas only while a frame is encoded; cleared with the processed canvas. */
   private encoder: { readonly canvas: HTMLCanvasElement; readonly context: CanvasRenderingContext2D } | null = null;
+  /** The change thumbnail's canvas, and the thumbnail of the last generic frame sent (with its geometry revision). */
+  private thumb: { readonly canvas: HTMLCanvasElement; readonly context: CanvasRenderingContext2D } | null = null;
+  private lastThumb: Uint8Array | null = null;
+  private lastThumbRevision: number | null = null;
   private abort = new AbortController();
   private processedStreams = new Set<MediaStream>();
   private listeners = new Set<(snapshot: CaptureSnapshot) => void>();
@@ -382,6 +403,31 @@ export class ScreenCapture {
     this.context.fillRect(0, 0, this.canvas.width, this.canvas.height);
     // Resizing clears the scaled copy, so no processed pixels outlive a stop there either.
     if (this.encoder) { this.encoder.canvas.width = 1; this.encoder.canvas.height = 1; }
+    if (this.thumb) { this.thumb.canvas.width = 1; this.thumb.canvas.height = 1; this.thumb = null; }
+    this.lastThumb = null;
+    this.lastThumbRevision = null;
+  }
+
+  /** Grayscale thumbnail of the processed canvas (masks included), or null where pixels cannot be read back. */
+  private thumbnail(): Uint8Array | null {
+    if (typeof this.context.getImageData !== 'function') return null;
+    const { width, height } = CHANGE_THUMBNAIL;
+    if (!this.thumb) {
+      const canvas = this.runtime.createCanvas();
+      const context = canvas.getContext('2d', { alpha: false, willReadFrequently: true }) as CanvasRenderingContext2D | null;
+      if (!context || typeof context.getImageData !== 'function') return null;
+      canvas.width = width;
+      canvas.height = height;
+      this.thumb = { canvas, context };
+    }
+    const { context } = this.thumb;
+    context.drawImage(this.canvas, 0, 0, width, height);
+    const { data } = context.getImageData(0, 0, width, height);
+    const gray = new Uint8Array(width * height);
+    for (let i = 0; i < gray.length; i++) {
+      gray[i] = ((data[i * 4] ?? 0) * 77 + (data[i * 4 + 1] ?? 0) * 150 + (data[i * 4 + 2] ?? 0) * 29) >> 8;
+    }
+    return gray;
   }
 
   /** The processed canvas, or a copy scaled down to maxWidth. Only processed pixels, masks included, are ever scaled. */
@@ -438,12 +484,21 @@ export class ScreenCapture {
     const signal = this.abort.signal;
     const geometry = this.geometry!;
     const sessionId = this.session!.sessionId;
-    const sequence = ++this.sequence;
-    const timestampMs = this.timestamp();
     // Keep capture context attached to the exact processed canvas snapshot. The
     // provider object is never retained across the asynchronous encoder callback.
     const provenance = this.snapshotProvenance();
     const encoding = this.frameEncoding.applyTo === 'all' || provenance.surface === null ? this.frameEncoding : null;
+    if (provenance.surface === null) {
+      // A generic screen that did not visibly change is not sent: no vision call, no reworded observation.
+      const thumb = this.thumbnail();
+      if (thumb) {
+        if (this.lastThumbRevision === geometry.revision && !visiblyChanged(this.lastThumb, thumb)) return;
+        this.lastThumb = thumb;
+        this.lastThumbRevision = geometry.revision;
+      }
+    }
+    const sequence = ++this.sequence;
+    const timestampMs = this.timestamp();
     // Scaling copies the processed canvas painted just above, so masks are applied before scaling and encoding.
     const target = encoding ? this.encodingCanvas(geometry, encoding.maxWidth) : this.canvas;
     const quality = encoding?.jpegQuality ?? null;

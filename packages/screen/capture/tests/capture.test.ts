@@ -306,3 +306,23 @@ test('a narrow share keeps its size; jpegQuality null encodes PNG; invalid encod
     assert.throws(() => harness(ScreenCapture, { frameEncoding }), RangeError, JSON.stringify(frameEncoding));
   }
 });
+
+test('a generic frame is sent only after a visible change: a caret or a clock is not one', async () => {
+  const modules = await loadModules();
+  const { visiblyChanged, CHANGE_THUMBNAIL } = modules as unknown as {
+    visiblyChanged: typeof import('../ScreenCapture.ts').visiblyChanged;
+    CHANGE_THUMBNAIL: typeof import('../ScreenCapture.ts').CHANGE_THUMBNAIL;
+  };
+  after(() => modules.cleanup());
+  const size = CHANGE_THUMBNAIL.width * CHANGE_THUMBNAIL.height;
+  const base = new Uint8Array(size).fill(120);
+  assert.equal(visiblyChanged(null, base), true, 'the first frame is always sent');
+  assert.equal(visiblyChanged(base, base.slice()), false, 'the same pixels are not a change');
+  const caret = base.slice(); caret[10] = 250;
+  assert.equal(visiblyChanged(base, caret), false, 'one moved pixel (a blinking caret) is not a change');
+  const faint = base.slice(); faint[10] = 130; faint[11] = 130;
+  assert.equal(visiblyChanged(base, faint), false, 'a shift of 10 gray levels or less is not a change');
+  const typed = base.slice(); typed[10] = 131; typed[200] = 20;
+  assert.equal(visiblyChanged(base, typed), true, 'two pixels moved by more than 10 levels is a change');
+  assert.equal(visiblyChanged(base, new Uint8Array(size + 1)), true, 'another geometry is a change');
+});
