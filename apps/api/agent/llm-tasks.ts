@@ -379,11 +379,15 @@ const STEP_KEYS = ['id', 'processId', 'kind', 'goal', 'action', 'decision', 'evi
 const DECISION_KEYS = ['summary', 'reason', 'quote'] as const;
 const RULE_KEYS = ['id', 'processId', 'condition', 'requiredAction', 'reason', 'quote', 'escalateTo', 'exceptions', 'evidenceIds'] as const;
 const GAP_KEYS = ['question', 'targetId', 'evidenceIds', 'regionIds'] as const;
+const MAP_KEYS = ['processes', 'steps', 'guardrails', 'gaps', 'teachBack'] as const;
+/** Exactly `keys`, or exactly `keys` without `optional`: a model that leaves out the newer field is not a broken one. */
+const keysWithOptional = (o: Json, keys: readonly string[], optional: string): boolean =>
+  exactKeys(o, keys) || (!hasOwn(o, optional) && exactKeys(o, keys.filter((k) => k !== optional)));
 
 function mapSchema(obsIds: readonly string[]): Json {
   const ev = idEnum(obsIds);
   return {
-    type: 'object', additionalProperties: false, required: ['processes', 'steps', 'guardrails', 'gaps', 'teachBack'],
+    type: 'object', additionalProperties: false, required: [...MAP_KEYS],
     properties: {
       processes: { type: 'array', items: { type: 'object', additionalProperties: false, required: [...PROCESS_KEYS], properties: { id: STRING, title: STRING, summary: STRING } } },
       steps: { type: 'array', items: { type: 'object', additionalProperties: false, required: [...STEP_KEYS], properties: {
@@ -408,21 +412,24 @@ function mapSchema(obsIds: readonly string[]): Json {
  * renumbered s1.. and g1.., and gaps point at the renumbered ids.
  */
 export function checkMap(raw: unknown, obs: readonly GenericObservation[], transcript: readonly GenericTurn[]): MapSynthesisOutput | null {
-  if (!isRecord(raw) || !exactKeys(raw, ['processes', 'steps', 'guardrails', 'gaps', 'teachBack'])) return null;
-  const { processes, steps, guardrails, gaps, teachBack } = raw;
+  // A map without processes (or a step without processId) is still a map: it then holds one process.
+  if (!isRecord(raw) || !keysWithOptional(raw, MAP_KEYS, 'processes')) return null;
+  const { steps, guardrails, gaps, teachBack } = raw;
+  const processes = hasOwn(raw, 'processes') ? raw.processes : [];
   if (!Array.isArray(processes) || !Array.isArray(steps) || !Array.isArray(guardrails) || !Array.isArray(gaps)) return null;
   if (!isStr(teachBack, CAPS.teachBack, 1)) return null;
   const allowed = new Set(obs.map((o) => o.id));
   const regionIds = new Set(regionIdsOf(obs));
   const renamed = new Map<string, string>();
   // Processes are renumbered p1..; a step or rule that names none belongs to the only process, when there is one.
+  // A malformed process is left out rather than failing the whole map: the steps and rules matter more than the grouping.
   const outProcesses: GenericProcess[] = [];
   const processIds = new Map<string, string>();
   for (const p of processes.slice(0, 3)) {
-    if (!isRecord(p) || !exactKeys(p, PROCESS_KEYS) || !isStr(p.title, 80, 1) || !isStr(p.summary, CAPS.condition)) return null;
+    if (!isRecord(p) || !exactKeys(p, PROCESS_KEYS) || typeof p.title !== 'string' || !p.title.trim() || typeof p.summary !== 'string') continue;
     const newId = `p${outProcesses.length + 1}`;
     if (typeof p.id === 'string') processIds.set(p.id, newId);
-    outProcesses.push({ id: newId, title: p.title, summary: p.summary });
+    outProcesses.push({ id: newId, title: p.title.trim().slice(0, 80), summary: p.summary.slice(0, CAPS.condition) });
   }
   const processOf = (v: unknown): string | null => {
     const named = typeof v === 'string' ? processIds.get(v) : undefined;
@@ -430,7 +437,7 @@ export function checkMap(raw: unknown, obs: readonly GenericObservation[], trans
   };
   const outSteps: GenericStep[] = [];
   for (const s of steps.slice(0, 10)) {
-    if (!isRecord(s) || !exactKeys(s, STEP_KEYS)) return null;
+    if (!isRecord(s) || !keysWithOptional(s, STEP_KEYS, 'processId')) return null;
     if (s.kind !== 'action' && s.kind !== 'judgment') return null;
     if (!isStr(s.goal, CAPS.goal, 1) || !isStr(s.action, CAPS.requiredAction, 1)) return null;
     const evidenceIds = pick(s.evidenceIds, allowed, 8); if (evidenceIds === null) return null;
@@ -448,7 +455,7 @@ export function checkMap(raw: unknown, obs: readonly GenericObservation[], trans
   }
   const outRules: GenericGuardrail[] = [];
   for (const g of guardrails.slice(0, 8)) {
-    if (!isRecord(g) || !exactKeys(g, RULE_KEYS)) return null;
+    if (!isRecord(g) || !keysWithOptional(g, RULE_KEYS, 'processId')) return null;
     if (!isStr(g.condition, CAPS.condition, 1) || !isStr(g.requiredAction, CAPS.requiredAction, 1)) return null;
     if (g.reason !== null && !isStr(g.reason, CAPS.rationale)) return null;
     if (g.escalateTo !== null && !isStr(g.escalateTo, CAPS.escalateTo)) return null;

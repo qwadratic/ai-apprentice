@@ -16,7 +16,7 @@ export const system = [
   '- Write the free text in the language the expert speaks.',
   '',
   'Output fields:',
-  '- processes: the business processes the session covered, usually one, at most 3 (for example a customer update and a table check). Each has an id (p1, p2 ...), a title of at most 8 words and a summary of one sentence.',
+  '- processes: the business processes the session covered, usually one, at most 3 (two tasks with different goals done one after the other are two processes). Each has an id (p1, p2 ...), a title of at most 8 words and a summary of one sentence.',
   '- steps: up to 10, in the order they happened. Each has an id (s1, s2 ...), processId (the process it belongs to), kind (action, or judgment when the expert made a choice that needs a reason),',
   '  goal (what the step is for, at most 160 characters), action (what was done on screen, at most 200 characters),',
   '  decision (null for a plain action; for a judgment: summary at most 200 characters, reason at most 300 characters or null, quote or null), and evidenceIds.',

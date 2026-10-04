@@ -451,29 +451,84 @@ test('generic inputs are typed: observations need ids, a surface and a summary; 
   assert.notEqual(r.status, 413);
 });
 
+const MAP_REPLY = {
+  processes: [{ id: 'plan', title: 'Budget plan', summary: 'Keeps the plan in budget.' }, { id: 'title', title: 'Naming', summary: 'Picks the title.' }],
+  steps: [
+    { id: 'a', processId: 'plan', kind: 'action', goal: 'Open the plan', action: 'Opened the note', decision: null, evidenceIds: ['obs-1'] },
+    { id: 'b', processId: 'plan', kind: 'judgment', goal: 'Keep the budget in bounds', action: 'Lowered the budget to 300', evidenceIds: ['obs-2', 'obs-404'],
+      decision: { summary: 'Keep it at 300', reason: 'Above 300 the lead signs off', quote: 'anything above three hundred needs the lead to sign off' } },
+    { id: 'c', processId: 'title', kind: 'judgment', goal: 'Pick a title', action: 'Kept the title', evidenceIds: [],
+      decision: { summary: 'Kept the title', reason: 'The team likes it', quote: 'the team likes it' } },
+  ],
+  guardrails: [{ id: 'rule-x', processId: 'plan', condition: 'budget above 300', requiredAction: 'ask the lead', reason: 'sign-off', quote: 'needs the lead to sign off', escalateTo: 'the lead', exceptions: [], evidenceIds: ['obs-2'] }],
+  gaps: [{ question: 'Who is the lead?', targetId: 'rule-x', evidenceIds: ['obs-2'], regionIds: ['r3', 'nope'] }, { question: 'Why this title?', targetId: 'c', evidenceIds: [], regionIds: [] }],
+  teachBack: 'You open the plan and keep the budget at 300. Is this right?',
+};
+
 test('map_synthesis: a reason stands only with the expert\'s own words; ids are renumbered and evidence filtered', async (t) => {
-  const s = await setup(t, () => ok({
-    steps: [
-      { id: 'a', kind: 'action', goal: 'Open the plan', action: 'Opened the note', decision: null, evidenceIds: ['obs-1'] },
-      { id: 'b', kind: 'judgment', goal: 'Keep the budget in bounds', action: 'Lowered the budget to 300', evidenceIds: ['obs-2', 'obs-404'],
-        decision: { summary: 'Keep it at 300', reason: 'Above 300 the lead signs off', quote: 'anything above three hundred needs the lead to sign off' } },
-      { id: 'c', kind: 'judgment', goal: 'Pick a title', action: 'Kept the title', evidenceIds: [],
-        decision: { summary: 'Kept the title', reason: 'The team likes it', quote: 'the team likes it' } },
-    ],
-    guardrails: [{ id: 'rule-x', condition: 'budget above 300', requiredAction: 'ask the lead', reason: 'sign-off', quote: 'needs the lead to sign off', escalateTo: 'the lead', exceptions: [], evidenceIds: ['obs-2'] }],
-    gaps: [{ question: 'Who is the lead?', targetId: 'rule-x', evidenceIds: ['obs-2'], regionIds: ['r3', 'nope'] }, { question: 'Why this title?', targetId: 'c', evidenceIds: [], regionIds: [] }],
-    teachBack: 'You open the plan and keep the budget at 300. Is this right?',
-  }), HIGH);
+  const s = await setup(t, () => ok(MAP_REPLY), HIGH);
   const r = await post(s.base, 'map_synthesis', s.token, MAP_INPUT);
   assert.equal(r.status, 200);
   const map = (await bodyOf(r)).output as MapSynthesisOutput;
-  assert.deepEqual(map.steps.map((x) => x.id), ['s1', 's2', 's3']);
+  assert.deepEqual(map.processes, [{ id: 'p1', title: 'Budget plan', summary: 'Keeps the plan in budget.' }, { id: 'p2', title: 'Naming', summary: 'Picks the title.' }]);
+  assert.deepEqual(map.steps.map((x) => [x.id, x.processId]), [['s1', 'p1'], ['s2', 'p1'], ['s3', 'p2']]);
+  assert.equal(map.guardrails[0]?.processId, 'p1');
   assert.deepEqual(map.steps[1]?.evidenceIds, ['obs-2']);
   assert.deepEqual(map.steps[1]?.decision, { summary: 'Keep it at 300', reason: 'Above 300 the lead signs off', quote: 'Anything above three hundred needs the lead to sign off', quoteAtMs: 7000 });
   assert.deepEqual(map.steps[2]?.decision, { summary: 'Kept the title', reason: null, quote: null, quoteAtMs: null }, 'words the expert never said are dropped with their reason');
   assert.equal(map.guardrails[0]?.id, 'g1');
   assert.equal(map.guardrails[0]?.quote, 'needs the lead to sign off');
   assert.deepEqual(map.gaps.map((g) => [g.targetId, g.regionIds]), [['g1', ['r3']], ['s3', []]]);
+  const schema = s.calls[0]?.body.schema as { required: string[] };
+  assert.deepEqual(schema.required, ['processes', 'steps', 'guardrails', 'gaps', 'teachBack']);
+});
+
+test('map_synthesis: a model that leaves out the processes still gives a map; a malformed process is left out, not fatal', async (t) => {
+  const strip = <T extends Record<string, unknown>>(o: T): Omit<T, 'processId'> => { const { processId: _drop, ...rest } = o; return rest; };
+  let reply: unknown = { steps: MAP_REPLY.steps.map(strip), guardrails: MAP_REPLY.guardrails.map(strip), gaps: [], teachBack: MAP_REPLY.teachBack };
+  const s = await setup(t, () => ok(reply), HIGH);
+  let r = await post(s.base, 'map_synthesis', s.token, MAP_INPUT);
+  assert.equal(r.status, 200);
+  let map = (await bodyOf(r)).output as MapSynthesisOutput;
+  assert.deepEqual(map.processes, []);
+  assert.deepEqual(map.steps.map((x) => x.processId), [null, null, null]);
+  reply = { ...MAP_REPLY, processes: [{ id: 'plan', title: 'x'.repeat(200), summary: 'Long title.' }, { id: 'bad', title: '', summary: 'No title.' }] };
+  r = await post(s.base, 'map_synthesis', s.token, MAP_INPUT);
+  assert.equal(r.status, 200);
+  map = (await bodyOf(r)).output as MapSynthesisOutput;
+  assert.deepEqual(map.processes.map((p) => [p.id, p.title.length]), [['p1', 80]]);
+  assert.deepEqual(map.steps.map((x) => x.processId), ['p1', 'p1', 'p1'], 'with one process, every step belongs to it');
+  reply = { ...MAP_REPLY, extra: 1 };
+  assert.equal((await post(s.base, 'map_synthesis', s.token, MAP_INPUT)).status, 502, 'other keys stay strict');
+});
+
+const MATCH_INPUT = {
+  processes: [
+    { id: 'm1-p1', title: 'Budget plan', summary: 'Keeps the plan in budget.', steps: ['Lowered the budget to 300'], rules: ['when budget above 300, ask the lead'] },
+    { id: 'm1-p2', title: 'Naming', summary: '', steps: [], rules: [] },
+  ],
+  observations: OBS,
+};
+
+test('process_match: the process comes only from the input, with a confidence from 0 to 1', async (t) => {
+  let reply: unknown = { processId: 'm1-p2', confidence: 0.8 };
+  const s = await setup(t, () => ok(reply), HIGH);
+  let r = await post(s.base, 'process_match', s.token, MATCH_INPUT);
+  assert.equal(r.status, 200);
+  assert.deepEqual((await bodyOf(r)).output, { processId: 'm1-p2', confidence: 0.8 });
+  const schema = s.calls[0]?.body.schema as { properties: { processId: { anyOf?: Array<{ enum?: string[] }>; enum?: string[] } } };
+  assert.match(JSON.stringify(schema.properties.processId), /"enum":\["m1-p1","m1-p2"\]/);
+  assert.match(s.calls[0]?.body.prompt ?? '', /"title":"Budget plan"/);
+  reply = { processId: null, confidence: 0.2 };
+  r = await post(s.base, 'process_match', s.token, MATCH_INPUT);
+  assert.deepEqual((await bodyOf(r)).output, { processId: null, confidence: 0.2 });
+  reply = { processId: 'm9-p9', confidence: 0.9 };
+  assert.equal((await post(s.base, 'process_match', s.token, MATCH_INPUT)).status, 502, 'an invented process is invalid output');
+  reply = { processId: 'm1-p1', confidence: 1.5 };
+  assert.equal((await post(s.base, 'process_match', s.token, MATCH_INPUT)).status, 502);
+  assert.equal((await post(s.base, 'process_match', s.token, { ...MATCH_INPUT, processes: [] })).status, 400);
+  assert.equal((await post(s.base, 'process_match', s.token, { ...MATCH_INPUT, processes: [{ ...MATCH_INPUT.processes[0], id: 'has space' }] })).status, 400);
+  assert.equal((await post(s.base, 'process_match', s.token, { ...MATCH_INPUT, extra: 1 })).status, 400);
 });
 
 test('guardrail_check: a warning names a rule and says something, else it is unknown; rules come only from the input', async (t) => {
@@ -531,8 +586,9 @@ const PINNED_PROMPT_SHA256: Record<string, string> = {
   'entity-resolution.ts': '711256123da833fb9e95f440d16da7829ce88fc17b08d1ea10d3c560cf2687be',
   'generic-question.ts': 'ab03cbf95efa711481bf96f2917891b145bb7cbbd90f05326c66c5832044a548',
   'guardrail-check.ts': '215ae8386c99ee8cdcb6c2adfeab02db8b3c7e284040040869ba22dec22a09d8',
-  'map-synthesis.ts': 'a99c1ec479416449defc0ed3279b60626088935354ae415701e61954503eb5f8',
+  'map-synthesis.ts': 'a3fbf74152054f5249f458a0cbd3e507e97ea1d0e2baba216fccbb9bc1e37a9c',
   'map-edit.ts': 'a787ccbd01dc117a5fdd73933c7353cb97fff3a990303bb3c4c142bf551803be',
+  'process-match.ts': '8b55b19924632678bb5b59e1c652b29dd398ed1dbe012ea92eb0be2b6af71189',
 };
 const sha256 = (v: string): string => createHash('sha256').update(v).digest('hex');
 // Scenario content of any kind, including paraphrases: the prompts and schemas must not know the demo case.
@@ -543,7 +599,8 @@ test('what the runner receives is generic: system prompts and schemas carry no s
     if (call.body.prompt.includes('"teachBack"')) return ok({ verdict: 'confirm', correction: null });
     if (call.body.prompt.includes('"knownRefs"')) return ok({ ref: null });
     if (call.body.prompt.includes('"asked"')) return ok({ question: null, topic: 'reason', observationIds: [], regionIds: [] });
-    if (call.body.prompt.includes('"previousTeachBack"')) return ok({ steps: [], guardrails: [], gaps: [], teachBack: 'Is this right?' });
+    if (call.body.prompt.includes('"previousTeachBack"')) return ok({ processes: [], steps: [], guardrails: [], gaps: [], teachBack: 'Is this right?' });
+    if (call.body.prompt.includes('"processes"')) return ok({ processId: null, confidence: 0 });
     if (call.body.prompt.includes('"utterance"')) return ok({ intent: 'other', operations: [], reply: '', teachBack: null });
     if (call.body.prompt.includes('"guardrails"')) return ok({ status: 'clear', guardrailId: null, message: null, regionIds: [] });
     return ok(EXTRACTION_OUTPUT);
@@ -555,7 +612,8 @@ test('what the runner receives is generic: system prompts and schemas carry no s
   await post(s.base, 'map_synthesis', s.token, MAP_INPUT);
   await post(s.base, 'guardrail_check', s.token, CHECK_INPUT);
   await post(s.base, 'map_edit', s.token, { map: { steps: [], guardrails: [], gaps: [], teachBack: '' }, utterance: 'one', recent: [], language: null });
-  assert.equal(s.calls.length, 7);
+  await post(s.base, 'process_match', s.token, MATCH_INPUT);
+  assert.equal(s.calls.length, 8);
   for (const call of s.calls) {
     for (const [what, value] of [['system prompt', call.body.system], ['schema', JSON.stringify(call.body.schema)]] as const) {
       const hit = SCENARIO_TERMS.exec(value);
@@ -578,6 +636,7 @@ test('prompt sources are self-contained and pinned: any change to a system promp
     'guardrail-check.ts': await import('../agent/prompts/guardrail-check.ts') as { system: string },
     'map-synthesis.ts': await import('../agent/prompts/map-synthesis.ts') as { system: string },
     'map-edit.ts': await import('../agent/prompts/map-edit.ts') as { system: string },
+    'process-match.ts': await import('../agent/prompts/process-match.ts') as { system: string },
   };
   for (const name of names) {
     const source = await readFile(new URL(name, dir), 'utf8');
