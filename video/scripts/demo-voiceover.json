@@ -1,0 +1,31 @@
+{
+  "video": "apps/web/public/videos/clipa-demo.mp4",
+  "lines": [
+    {"id":"v01","voice":"narrator","text":"Years of judgment, written down nowhere. A recording shows what the expert did, never why.","atSec":0.3,"maxSec":5.85},
+    {"id":"v02","voice":"clipa","text":"Hi, I'm Clipa. I watch an expert work, ask why at the pauses, and coach the next person.","atSec":6.15,"maxSec":6.55},
+    {"id":"v03","voice":"narrator","text":"Three stages on one rail: show, reflect, pass it on.","atSec":12.7,"maxSec":3.95},
+    {"id":"v04","voice":"narrator","text":"Clipa, the teal paperclip, guides each one.","atSec":16.65,"maxSec":2.8},
+    {"id":"v05","voice":"narrator","text":"Step one, show: the expert works through the task in the demo workspace.","atSec":19.45,"maxSec":5.1},
+    {"id":"v06","voice":"narrator","text":"Clipa stays quiet while the expert types.","atSec":24.55,"maxSec":4.9},
+    {"id":"v07","voice":"narrator","text":"The typing stops. Clipa waits for a natural pause.","atSec":29.45,"maxSec":5.15},
+    {"id":"v08","voice":"clipa","text":"What determines whether you put customer 07's delivery address and time window in the email text or leave them in the attachment?","atSec":34.6,"maxSec":7.95},
+    {"id":"v09","voice":"expert","text":"The image can stay as an extra; what matters is that the address and the delivery time are written in the email text.","atSec":42.55,"maxSec":8.9},
+    {"id":"v10","voice":"narrator","text":"Step two, reflect: a Work Map of steps, judgment calls and guardrails.","atSec":51.45,"maxSec":4.65},
+    {"id":"v11","voice":"clipa","text":"Why must the address and delivery time appear in the email text when the attached image contains them?","atSec":56.1,"maxSec":6.5},
+    {"id":"v12","voice":"expert","text":"Because customer 07 asked us to send the delivery address and time as text in the email. Only for them; an extra image is fine.","atSec":62.6,"maxSec":9.7},
+    {"id":"v13","voice":"narrator","text":"Teach-back: Clipa reads back her understanding.","atSec":72.3,"maxSec":2.4},
+    {"id":"v14","voice":"expert","text":"One correction: it is the delivery time window, not only the date.","atSec":74.7,"maxSec":4.7},
+    {"id":"v15","voice":"clipa","text":"Clarified that the email must include the delivery time window, not only the date. Everything else remains as recorded.","atSec":79.4,"maxSec":6.9},
+    {"id":"v16","voice":"narrator","text":"Confirmed by the expert, not written afterwards.","atSec":86.3,"maxSec":2.8},
+    {"id":"v17","voice":"narrator","text":"Step three, pass it on: a new hire, a new case for customer 07.","atSec":89.1,"maxSec":5.45},
+    {"id":"v18","voice":"narrator","text":"The draft only says: see the attached delivery summary.","atSec":94.55,"maxSec":3.55},
+    {"id":"v19","voice":"narrator","text":"The new hire moves to Send. Clipa checks the expert's confirmed rules.","atSec":98.1,"maxSec":4.7},
+    {"id":"v20","voice":"clipa","text":"The expert would stop here before sending and ask: why do you think this draft is ready to send?","atSec":102.8,"maxSec":6.9},
+    {"id":"v21","voice":"narrator","text":"She only warns, never clicks for you.","atSec":109.7,"maxSec":2.8},
+    {"id":"v22","voice":"narrator","text":"The new hire adds the address and time as text.","atSec":112.5,"maxSec":3.95},
+    {"id":"v23","voice":"narrator","text":"For customer 03, the same draft gets no warning. The rule is only for customer 07.","atSec":116.45,"maxSec":6.35},
+    {"id":"v24","voice":"narrator","text":"Off the record stops screen and voice at once.","atSec":122.8,"maxSec":3.6},
+    {"id":"v25","voice":"narrator","text":"It does not recall what was sent.","atSec":126.4,"maxSec":2.8},
+    {"id":"v26","voice":"narrator","text":"Clipa learns how your best people decide, teaches the next person, then your agents.","atSec":129.2,"maxSec":5.86}
+  ]
+}
