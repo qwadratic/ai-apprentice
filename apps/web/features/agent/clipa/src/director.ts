@@ -892,12 +892,16 @@ export function createClipaDirector(options: ClipaDirectorOptions): ClipaDirecto
   // ---- watchers: typing while out, linger, layout changes, blinking ---------------------------------------------
 
   /** At home and the anchor moved (the stage changed, the header reflowed): glide after it. */
+  let following = false;
   function followAnchor(): void {
-    if (!settled() || settleQueued) return;
+    if (following || !settled() || settleQueued) return;
     const dest = dockPose();
-    if (Math.hypot(dest.cx - pose.cx, dest.cy - pose.cy) < 3 && Math.abs(dest.scale - pose.scale) < 0.02 && Math.abs(dest.opacity - pose.opacity) < 0.02) return;
     const dist = Math.hypot(dest.cx - pose.cx, dest.cy - pose.cy);
-    void moveTo(dest, 'settle', [], Math.max(FOLLOW_MIN_MS, flightDuration(dist)));
+    if (dist < 3 && Math.abs(dest.scale - pose.scale) < 0.02 && Math.abs(dest.opacity - pose.opacity) < 0.02) return;
+    following = true;
+    void moveTo(dest, 'settle', [], Math.max(FOLLOW_MIN_MS, flightDuration(dist))).finally(() => {
+      following = false;
+    });
   }
 
   function tick(): void {

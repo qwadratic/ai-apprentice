@@ -28,6 +28,8 @@ export const UI_FALLBACKS: Readonly<Record<string, readonly string[]>> = {
   summary: ['.as-mastery'],
   board_gap: ['.as-gap'],
   share: ['.as-screen'],
+  // The map item the person clicked in Reflect (journey/reflect-pointing.ts).
+  selected: ['[data-clipa-selected]'],
 };
 
 interface QueryRoot {

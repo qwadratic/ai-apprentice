@@ -141,9 +141,12 @@
   background: transparent;
   border: 0;
   border-radius: 12px;
+  overflow: visible;
   cursor: pointer;
 }
 .apprentice-shell .as-stage:focus-visible { outline: 3px solid var(--as-focus); outline-offset: 2px; }
+/* Off the record: the wire goes grey with Clipa. */
+.apprentice-shell .as-header[data-off-record="true"] .as-rail__track { filter: grayscale(1); opacity: 0.8; }
 /* The wire from this stage's node to the next one's. */
 .apprentice-shell .as-stage[data-wire]::after {
   content: '';
@@ -250,6 +253,9 @@
   -webkit-box-orient: vertical;
   overflow-wrap: anywhere;
 }
+
+/* Reflect: the map item the person clicked; Clipa points at it (journey/reflect-pointing.ts). */
+.apprentice-shell [data-clipa-selected] { outline: 2px solid var(--as-accent); outline-offset: 2px; }
 
 /* ---- Small menu (Clipa's tone) -------------------------------------------- */
 .apprentice-shell .as-menu { position: relative; }

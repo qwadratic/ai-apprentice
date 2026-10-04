@@ -8,6 +8,8 @@ import { StatusBar } from './components/StatusBar.tsx';
 import { setClipaFavicon } from './components/ClipaLogo.tsx';
 import { ShellContext, useShellState } from './hooks.ts';
 import { STAGES } from './journey/rail.ts';
+import { watchReflectSelection } from './journey/reflect-pointing.ts';
+import { requestClipaPoint } from './clipa/director-presenter.ts';
 import { createRuntime } from './runtime.ts';
 import { ReplaySlot } from './slots/ReplaySlot.tsx';
 import { ScreenSlot } from './slots/ScreenSlot.tsx';
@@ -72,6 +74,13 @@ export function AppShell() {
   const shellRef = useRef<HTMLDivElement>(null);
   const headerRef = useRef<HTMLElement>(null);
   useHeaderHeight(shellRef, headerRef);
+
+  // Reflect: a click on a map item brings Clipa beside it (the presenter answers the clipa:point request).
+  useEffect(() => {
+    const root = shellRef.current;
+    if (!root) return undefined;
+    return watchReflectSelection(root, (target) => { requestClipaPoint(target); });
+  }, []);
 
   useEffect(() => {
     const { controller } = runtime;

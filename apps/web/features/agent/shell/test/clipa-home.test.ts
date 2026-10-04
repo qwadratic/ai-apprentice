@@ -2,7 +2,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ANCHOR_MAX_SCALE, ANCHOR_MIN_SCALE, anchorRest, anchorVisible } from '../../clipa/src/geometry.ts';
+import type { ClipaResult, ClipaState as DirectorState, ClipaTarget } from '../../clipa/src/index.ts';
+import { CLIPA_POINT_EVENT, createDirectorPresenter, requestClipaPoint } from '../clipa/director-presenter.ts';
+import { InputGuard } from '../clipa/input-guard.ts';
+import { createClipaStore } from '../clipa/presenter.ts';
 import { HINT_ATTR, SURFACE_ATTR, TARGET_ATTR, nameVariants, resolveClipaTarget, selectorsFor, uiTargetName } from '../clipa/targets.ts';
+import { FIELD_SELECTOR, ITEM_SELECTOR, REFLECT_SCOPE, SELECTED_TARGET, selectedItem } from '../journey/reflect-pointing.ts';
 
 type Rect = { left: number; top: number; width: number; height: number };
 
@@ -70,4 +75,67 @@ test('an anchor counts only while at least half of it is on screen', () => {
   assert.equal(anchorVisible({ x: 600, y: -40, w: 56, h: 56 }, VP), false, 'scrolled mostly out of view');
   assert.equal(anchorVisible({ x: 600, y: -20, w: 56, h: 56 }, VP), true);
   assert.equal(anchorVisible({ x: 600, y: 10, w: 0, h: 0 }, VP), false, 'hidden');
+});
+
+// ---- pointing at what the person selects ---------------------------------------------------------------------------------
+
+class PointingDirector {
+  state: DirectorState = 'dock';
+  calls: string[] = [];
+  async apply(): Promise<ClipaResult> { this.calls.push('apply'); this.state = 'speaking'; return { ok: true }; }
+  async setOff(): Promise<ClipaResult> { return { ok: true }; }
+  async listen(): Promise<ClipaResult> { return { ok: true }; }
+  async ack(): Promise<ClipaResult> { return { ok: true }; }
+  async retreat(): Promise<ClipaResult> { this.calls.push('retreat'); this.state = 'dock'; return { ok: true }; }
+  async warn(): Promise<ClipaResult> { return { ok: true }; }
+  async point(target?: ClipaTarget): Promise<ClipaResult> { this.calls.push(`point:${target?.surface}/${target?.hint ?? ''}`); this.state = 'pointing'; return { ok: true }; }
+  destroy(): void { this.calls.push('destroy'); }
+}
+
+const pause = (ms: number): Promise<void> => new Promise((resolve) => { setTimeout(resolve, ms); });
+
+test('pointAt sends her beside the target and home after the hold; a later move cancels the way home', async () => {
+  const director = new PointingDirector();
+  const presenter = createDirectorPresenter({ store: createClipaStore(), director, guard: new InputGuard(() => 0), events: null });
+  presenter.pointAt({ surface: 'ui', hint: 'selected' }, 5);
+  await pause(30);
+  assert.deepEqual(director.calls, ['point:ui/selected', 'retreat']);
+
+  director.calls = [];
+  presenter.pointAt({ surface: 'ui', hint: 'selected' }, 10);
+  await pause(0);
+  presenter.play?.({ decision: 'ASK_NOW', topic: 't', kind: 'reason', whyNow: 'x', evidenceIds: [], utterance: { text: 'Why?' }, expectsAnswer: true });
+  await pause(30);
+  assert.deepEqual(director.calls, ['point:ui/selected', 'apply'], 'the question that came after is not sent home');
+  presenter.dispose();
+});
+
+test('a clipa:point event on the page reaches the presenter; malformed requests are ignored; dispose stops listening', async () => {
+  const events = new EventTarget();
+  const director = new PointingDirector();
+  const presenter = createDirectorPresenter({ store: createClipaStore(), director, guard: new InputGuard(() => 0), events });
+  assert.equal(requestClipaPoint({ surface: 'ui', hint: 'board_gap' }, 0, events), true);
+  events.dispatchEvent(new CustomEvent(CLIPA_POINT_EVENT, { detail: { target: { hint: 'x' } } }));
+  events.dispatchEvent(new CustomEvent(CLIPA_POINT_EVENT, { detail: null }));
+  await pause(5);
+  assert.deepEqual(director.calls, ['point:ui/board_gap']);
+  presenter.dispose();
+  requestClipaPoint({ surface: 'ui', hint: 'board_gap' }, 0, events);
+  await pause(5);
+  assert.deepEqual(director.calls, ['point:ui/board_gap', 'destroy']);
+  assert.equal(requestClipaPoint({ surface: 'ui' }, 0, null), false, 'no page, no request');
+});
+
+test('in Reflect a click on a map item selects it; fields and other stages do not', () => {
+  // A fake element: `closest` answers from the selectors it "matches".
+  type Fake = { closest(sel: string): Fake | null };
+  const el = (matches: string[]): Fake => ({ closest: (sel: string) => (matches.includes(sel) ? el(matches) : null) });
+  assert.notEqual(selectedItem(el([REFLECT_SCOPE, ITEM_SELECTOR])), null);
+  assert.equal(selectedItem(el([REFLECT_SCOPE, ITEM_SELECTOR, FIELD_SELECTOR])), null, 'typing into a field never moves her');
+  assert.equal(selectedItem(el([ITEM_SELECTOR])), null, 'outside Reflect');
+  assert.equal(selectedItem(el([REFLECT_SCOPE])), null, 'not on an item');
+  assert.equal(selectedItem(null), null);
+  assert.deepEqual(SELECTED_TARGET, { surface: 'ui', hint: 'selected' });
+  const marked = { left: 100, top: 300, width: 400, height: 80 };
+  assert.equal(resolveClipaTarget(rootWith({ '[data-clipa-selected]': marked }), SELECTED_TARGET), marked);
 });

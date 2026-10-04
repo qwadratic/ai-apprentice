@@ -4,7 +4,10 @@
 //     gives up after a few seconds, and it follows prefers-reduced-motion by itself.
 //   - The derived shell state (voice listening, error, off the record, ...) is mapped to a few commands only when they mean
 //     something to the director, so the derived state never cancels a sequence that apply() is playing.
-//   - The store keeps the text of the current question for the page's Clipa card (an accessible copy of the bubble).
+//   - The store keeps the text of the current question for the line under the journey rail (an accessible copy of the bubble).
+//   - pointAt(target) sends her beside any element (a UI name such as the board's selected item, or a workspace target) in the
+//     pointing pose, and back home after `holdMs` unless something else moved her meanwhile. The page asks for it with a
+//     `clipa:point` event on the document (requestClipaPoint), so code that has no handle on the presenter can use it too.
 import { estimateSpeechMs } from '../../clipa/src/index.ts';
 import type { ClipaDecision, ClipaResult, ClipaState as DirectorState, ClipaTarget } from '../../clipa/src/index.ts';
 import type { BrainDecision } from '../brain/types.ts';
@@ -90,9 +93,37 @@ export function commandsFor(next: ClipaState, previous: ClipaState | null, direc
   return out;
 }
 
+/** The document event that asks Clipa to point: detail {target, holdMs?}. */
+export const CLIPA_POINT_EVENT = 'clipa:point';
+/** How long she stays beside an element she was asked to point at, by default. */
+export const POINT_HOLD_MS = 4000;
+
+export interface ClipaPointRequest {
+  target: ClipaTarget;
+  holdMs?: number;
+}
+
+/** Asks the page's Clipa to point at a target (handled by the presenter that listens on this document). */
+export function requestClipaPoint(target: ClipaTarget, holdMs: number = POINT_HOLD_MS, events: EventTarget | null = typeof document === 'undefined' ? null : document): boolean {
+  if (events === null || typeof CustomEvent === 'undefined') return false;
+  const detail: ClipaPointRequest = { target, holdMs };
+  return events.dispatchEvent(new CustomEvent(CLIPA_POINT_EVENT, { detail }));
+}
+
+function pointRequest(detail: unknown): ClipaPointRequest | null {
+  if (detail === null || typeof detail !== 'object') return null;
+  const d = detail as { target?: unknown; holdMs?: unknown };
+  const t = d.target as { surface?: unknown; hint?: unknown } | null | undefined;
+  if (t === null || typeof t !== 'object' || typeof t.surface !== 'string' || t.surface === '') return null;
+  const target: ClipaTarget = { surface: t.surface, ...(typeof t.hint === 'string' && t.hint !== '' ? { hint: t.hint } : {}) };
+  return { target, ...(typeof d.holdMs === 'number' && d.holdMs >= 0 ? { holdMs: d.holdMs } : {}) };
+}
+
 export interface DirectorPresenter extends ClipaPresenter {
   /** The sequence that is playing, or null. Resolves when it has run (not when the person has answered). */
   readonly playing: Promise<unknown> | null;
+  /** Beside the target in the pointing pose; home again after holdMs (0: she stays until something else moves her). */
+  pointAt(target: ClipaTarget, holdMs?: number): void;
   dispose(): void;
 }
 
@@ -100,12 +131,38 @@ export interface DirectorPresenterOptions {
   store: ClipaStore;
   director: DirectorLike;
   guard: InputGuard;
+  /** Where `clipa:point` requests arrive. Default: the document, when there is one. null: none. */
+  events?: EventTarget | null;
 }
 
 export function createDirectorPresenter(options: DirectorPresenterOptions): DirectorPresenter {
   const { store, director, guard } = options;
   let playing: Promise<unknown> | null = null;
   let previous: ClipaState | null = null;
+  // Every command that moves her bumps the token, so a pending "go home after pointing" never undoes a later move.
+  let moveToken = 0;
+  let homeTimer: ReturnType<typeof setTimeout> | null = null;
+  const clearHome = (): void => {
+    if (homeTimer !== null) clearTimeout(homeTimer);
+    homeTimer = null;
+  };
+  const pointAt = (target: ClipaTarget, holdMs: number = POINT_HOLD_MS): void => {
+    clearHome();
+    const token = ++moveToken;
+    void director.point(target).then((result) => {
+      if (!result.ok || holdMs <= 0 || token !== moveToken) return;
+      homeTimer = setTimeout(() => {
+        homeTimer = null;
+        if (token === moveToken && director.state === 'pointing') void director.retreat();
+      }, holdMs);
+    });
+  };
+  const events = options.events === undefined ? (typeof document === 'undefined' ? null : document) : options.events;
+  const onPoint = (event: Event): void => {
+    const request = pointRequest((event as CustomEvent<unknown>).detail);
+    if (request !== null) pointAt(request.target, request.holdMs);
+  };
+  events?.addEventListener(CLIPA_POINT_EVENT, onPoint);
 
   const run = (command: DirectorCommand): void => {
     switch (command) {
@@ -123,13 +180,17 @@ export function createDirectorPresenter(options: DirectorPresenterOptions): Dire
     get playing() { return playing; },
     setState(state) {
       store.setState(state);
-      for (const command of commandsFor(state, previous, director.state, playing !== null)) run(command);
+      const commands = commandsFor(state, previous, director.state, playing !== null);
+    if (commands.length > 0) moveToken += 1;
+    for (const command of commands) run(command);
       previous = state;
     },
     say(text) { store.say(text); },
     setTarget(rect: TargetRect | null) { store.setTarget(rect); },
     play(decision) {
       const text = decision.utterance?.text ?? '';
+      moveToken += 1;
+      clearHome();
       const job = director
         .apply(toClipaDecision(decision), { durationMs: estimateSpeechMs(text) + SPEECH_PADDING_MS })
         .finally(() => { if (playing === job) playing = null; });
@@ -137,6 +198,11 @@ export function createDirectorPresenter(options: DirectorPresenterOptions): Dire
     },
     ack() { void director.ack(); },
     noteInput(typing) { guard.setTyping(typing); },
-    dispose() { director.destroy(); },
+    pointAt,
+    dispose() {
+      clearHome();
+      events?.removeEventListener(CLIPA_POINT_EVENT, onPoint);
+      director.destroy();
+    },
   };
 }
