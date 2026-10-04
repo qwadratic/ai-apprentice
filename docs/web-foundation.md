@@ -99,7 +99,8 @@ The workspace symlink and compiled exports resolve in browsers and Node producti
 A manages root dependency updates/lockfile. B's standalone package keeps native
 node:test and is now covered by root workspace checks; replace its private contract
 imports in TASK-3.23. The independently built `features/agent/lab` remains excluded
-from the shell tsconfig and is checked by `stream-b-checks.yml`. Root tests/typechecks
+from the shell tsconfig and Vite dependency scan, and is checked by
+`stream-b-checks.yml`. Root tests/typechecks
 discover workspace scripts with `--workspaces --if-present`.
 
 | Owner | Files and hookup |
@@ -248,8 +249,9 @@ missing module is live. The minimal shared API files are `server.ts`, `src/app.t
 - `packages/contracts/test/doc7-contract.test.ts`
 - `packages/contracts/tsconfig.build.json`
 - `packages/contracts/tsconfig.json`
-- `scripts/dev.mjs`
+- `scripts/dev.ts`
 - `tsconfig.base.json`
+- `tsconfig.json`
 
 Transfer the separate Backlog notes through the CLI against current main to
 preserve the coordinator's newer TASK-2.1 entries. This task remains In Progress.

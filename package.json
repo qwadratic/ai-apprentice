@@ -12,10 +12,10 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "node scripts/dev.mjs",
+    "dev": "node scripts/dev.ts",
     "dev:web": "npm run dev --workspace @apprentice/web",
     "dev:api": "npm run dev --workspace @apprentice/api",
-    "typecheck": "npm run typecheck --workspaces --if-present",
+    "typecheck": "tsc --noEmit -p tsconfig.json && npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "build": "npm run build --workspace @apprentice/contracts && npm run build --workspace @apprentice/api && npm run build --workspace @apprentice/web",
     "check": "npm run typecheck && npm test && npm run build",
