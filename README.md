@@ -181,7 +181,7 @@ flowchart LR
 - Off the record stops screen and voice. It does not recall what was already sent. "Start" records the session's events, transcript and audio on our server, and a session ends after 10 minutes.
 - Masks cover the screen, not speech. Fixed rectangles do not follow scrolling text, there are no masks on macOS frames, and there is no automatic PII redaction.
 - Each step and rule links to its screen moment by evidence id and time. A video replay of that moment is not wired into the Work Map yet.
-- The recorded runs used the Codex CLI engine of the model runner, because our Claude quota ran out. That engine reads the screen about 11 s behind, so a question or warning can come 15–20 s after you stop.
+- The recorded runs used the model runner's Codex CLI engine. It reads the screen about 11 s behind, so a question or warning can come 15–20 s after you stop.
 
 ## Bonus: Clipa for macOS
 
