@@ -18,7 +18,7 @@ export const defaultVisionPrompt = 'Describe the currently visible order, email 
 export const genericVisionPrompt = `Describe the visible screen using only visible pixels.
 Return order_view, email_draft or ticket only for the demo workspace, whose cards are headed "source order", "compose email" and "record outcome".
 Any other readable app or website is screen_activity. pendingAction is the control under the pointer or in focus (for example a hovered Send button), else null; pendingRegionId is its region.
-Give up to 6 regions with short ids (r1, r2, ...) for the controls and fields that matter.
+Give up to 6 regions with short ids (r1, r2, ...): the fields and controls the person is working with.
 Return incomplete only when the frame is unreadable.`;
 export const genericVisionSystem = `${visibleOnlySystem}
 Masked, blurred or blacked-out areas are private: never read, guess or describe what is under them.

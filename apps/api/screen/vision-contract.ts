@@ -44,7 +44,7 @@ const SCREEN_ACTIVITY_BRANCH = Object.freeze({type: 'object', required: ['outcom
       surface: {type: 'string', minLength: 1, description: 'what is open'},
       summary: {type: 'string', minLength: 1, description: '1-2 sentences of what is visible'},
       change: {type: ['string', 'null'], description: 'visible sign of a change, else null'},
-      entities: {type: 'array', maxItems: LIMITS.entities, items: {type: 'string'}, description: 'short visible items'},
+      entities: {type: 'array', maxItems: LIMITS.entities, items: {type: 'string'}, description: 'short visible items: names, amounts, cells, subjects'},
       pendingAction: {type: ['string', 'null'], description: 'control about to be used, else null'},
       pendingRegionId: {type: ['string', 'null'], description: 'region id of that control, else null'},
       regions: {type: 'array', maxItems: LIMITS.regions, items: {type: 'object', required: ['id', 'label', 'box'],
