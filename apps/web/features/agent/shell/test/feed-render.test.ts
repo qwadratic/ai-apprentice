@@ -32,7 +32,7 @@ function rig(): Rig {
 }
 
 function render(r: Rig, element: ReturnType<typeof createElement>): string {
-  const controller = { store: r.store, conductorStore: r.conductor };
+  const controller = { store: r.store, conductorStore: r.conductor, isMicMuted: () => false, setMicMuted: () => {} };
   const runtime = { controller, clipa: createClipaStore(), workspace: null, live: null, dispose: () => {} } as unknown as ShellRuntime;
   return renderToStaticMarkup(createElement(ShellContext.Provider, { value: runtime }, element));
 }

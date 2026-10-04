@@ -22,6 +22,8 @@ function runtime(store: Store, clipa: ClipaStore): ShellRuntime {
     store,
     setMode: (mode: Mode) => store.dispatch({ type: 'MODE_SET', mode }),
     setPersona: () => {},
+    isMicMuted: () => false,
+    setMicMuted: () => {},
     goOffRecord: async () => {},
     backOnRecord: () => {},
   };
