@@ -60,7 +60,42 @@ export interface InputActivityFacts {
   idleMs: number;
 }
 
-export const OBSERVATION_KINDS = ["order_view", "email_draft", "ticket", "input_activity"] as const;
+/** A labelled place on the processed frame; box is [x, y, w, h], normalised 0..1 to that frame. */
+export interface ScreenRegion {
+  id: string;
+  label: string;
+  box: [number, number, number, number];
+}
+
+/** Limits of a screen_activity observation; the conductor keeps every field within them. */
+export const SCREEN_ACTIVITY_LIMITS = {
+  app: 80, surface: 120, summary: 400, change: 300, pendingAction: 80,
+  entity: 120, entities: 8, regionId: 32, regionLabel: 120, regions: 6,
+} as const;
+
+/**
+ * Generic vision of any screen (any app, a whole shared display), from frames that show none of the
+ * workspace surfaces. It never names an entity: entityRef and sourceRevision are always null.
+ */
+export interface ScreenActivityFacts {
+  /** The application or site, e.g. "Gmail", or null when not visible. */
+  app: string | null;
+  /** What is open, e.g. "compose window". */
+  surface: string;
+  /** One or two sentences of what is visible. */
+  summary: string;
+  /** A visible sign of what just changed, or null. */
+  change: string | null;
+  /** Short visible items (names, amounts, cells, subjects); masked areas are never read. */
+  entities: string[];
+  /** The control the person seems about to use, e.g. "Send", or null. */
+  pendingAction: string | null;
+  /** The region of that control, or null. */
+  pendingRegionId: string | null;
+  regions: ScreenRegion[];
+}
+
+export const OBSERVATION_KINDS = ["order_view", "email_draft", "ticket", "input_activity", "screen_activity"] as const;
 export type ObservationKind = (typeof OBSERVATION_KINDS)[number];
 
 // ---------------------------------------------------------------------------
@@ -88,7 +123,8 @@ export type ScreenObservation =
   | (ObservationBase & { kind: "order_view"; facts: OrderFacts })
   | (ObservationBase & { kind: "email_draft"; facts: EmailDraftFacts })
   | (ObservationBase & { kind: "ticket"; facts: TicketFacts })
-  | (ObservationBase & { kind: "input_activity"; facts: InputActivityFacts });
+  | (ObservationBase & { kind: "input_activity"; facts: InputActivityFacts })
+  | (ObservationBase & { kind: "screen_activity"; facts: ScreenActivityFacts });
 
 export const SCREEN_STATES = ["capturing", "paused", "stopped", "error"] as const;
 export type ScreenState = (typeof SCREEN_STATES)[number];

@@ -145,3 +145,40 @@ test('gate enforces unique published IDs within a session and resets them on sta
   gate.start({sessionId: 'other', sessionEpochMs: 2000});
   const next = gate.capture(3000, 'frame-3'); assert.equal(gate.publish(next, fromToken(next))!.id, 'order-1');
 });
+
+// Generic vision of any app (TASK-3.52): synthetic facts only.
+function screenActivity(facts: Record<string, unknown> = {}, patch: Record<string, unknown> = {}): Record<string, unknown> {
+  return {schemaVersion: 1, id: 'screen-1', sessionId: 'session', sequence: 1, timestampMs: 1500, source: 'vision',
+    frameId: 'frame-1', sourceRevision: null, kind: 'screen_activity', entityRef: null, evidenceIds: ['evidence-1'],
+    facts: {app: 'Mail', surface: 'compose window', summary: 'A new message to a synthetic recipient is open.',
+      change: null, entities: ['Subject: Delivery update'], pendingAction: 'Send', pendingRegionId: 'r2',
+      regions: [{id: 'r1', label: 'recipient field', box: [0.1, 0.1, 0.5, 0.05]}, {id: 'r2', label: 'Send button', box: [0.05, 0.9, 0.1, 0.06]}],
+      ...facts}, ...patch};
+}
+test('screen_activity validates as a vision observation with regions', () => {
+  const parsed = parseScreenObservation(screenActivity());
+  assert.equal(parsed.kind, 'screen_activity');
+  if (parsed.kind === 'screen_activity') assert.deepEqual(parsed.facts.regions[1]?.box, [0.05, 0.9, 0.1, 0.06]);
+  const bare = screenActivity({app: null, pendingAction: null, pendingRegionId: null, regions: [], entities: []});
+  assert.equal(parseScreenObservation(bare).kind, 'screen_activity');
+});
+test('screen_activity rejects bad boxes, too many regions, dangling ids, identity and workspace provenance', () => {
+  const region = (id: string, box: unknown): Record<string, unknown> => ({id, label: 'field', box});
+  const sixRegions = Array.from({length: 6}, (_, i) => region(`r${i + 1}`, [0, 0, 0.1, 0.1]));
+  assert.equal(parseScreenObservation(screenActivity({regions: sixRegions, pendingRegionId: 'r6'})).kind, 'screen_activity');
+  for (const facts of [
+    {regions: [region('r1', [0.9, 0, 0.5, 0.1])], pendingRegionId: null},
+    {regions: [region('r1', [0, 0, 0.1])], pendingRegionId: null},
+    {regions: [region('r1', [-0.1, 0, 0.1, 0.1])], pendingRegionId: null},
+    {regions: [region('r1', {x: 0, y: 0, w: 0.1, h: 0.1})], pendingRegionId: null},
+    {regions: [...sixRegions, region('r7', [0, 0, 0.1, 0.1])], pendingRegionId: null},
+    {regions: [region('r1', [0, 0, 0.1, 0.1]), region('r1', [0, 0, 0.2, 0.2])], pendingRegionId: null},
+    {regions: [region('send button', [0, 0, 0.1, 0.1])], pendingRegionId: null},
+    {pendingRegionId: 'r9'},
+    {entities: Array.from({length: 9}, (_, i) => `item ${i}`)},
+    {summary: ''}, {surface: 'x'.repeat(121)}, {change: 'line\u0007bell'}, {rationale: 'invented'},
+  ]) assert.throws(() => parseScreenObservation(screenActivity(facts)), ContractValidationError, JSON.stringify(facts));
+  for (const patch of [{entityRef: 'customer_07'}, {sourceRevision: 'email-r1'}, {source: 'workspace'}, {frameId: null}, {evidenceIds: []}]) {
+    assert.throws(() => parseScreenObservation(screenActivity({}, patch)), ContractValidationError, JSON.stringify(patch));
+  }
+});
