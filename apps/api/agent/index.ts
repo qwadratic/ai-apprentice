@@ -57,6 +57,11 @@ const defaultAgent = (): Agent => (shared ??= createAgent());
 export const mount: ApiModule['mount'] = (app) => defaultAgent().module.mount(app);
 export const agentModule: ApiModule = { name: 'agent', mount };
 
+/** Screen-module dependency (doc-12): every observation the vision path publishes reaches the session's conductor. */
+export function observeScreen(sessionId: string, observation: unknown): void {
+  defaultAgent().observeScreen(sessionId, observation);
+}
+
 /**
  * Screen-module dependency (doc-9 4.2). Reads `Authorization: Bearer <token>`.
  * With a sessionId the token must belong to that live session; with null it may belong to any live session.

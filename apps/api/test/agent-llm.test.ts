@@ -491,6 +491,39 @@ test('guardrail_check: a warning names a rule and says something, else it is unk
   assert.equal((await post(s.base, 'guardrail_check', s.token, CHECK_INPUT)).status, 502, 'an invented rule is invalid output');
 });
 
+test('map_edit: operations are checked against the map; a reason keeps the expert\'s words; nothing applied is not announced', async (t) => {
+  const MAP_VIEW = {
+    steps: [{ id: 's1', kind: 'judgment', goal: 'Keep the budget', action: 'Lowered it to 300', decision: { summary: 'Keep 300', reason: null } }],
+    guardrails: [{ id: 'g1', condition: 'budget above 300', requiredAction: 'ask the lead', reason: null, escalateTo: null, exceptions: [] }],
+    gaps: [{ question: 'Who is the lead?' }],
+    teachBack: 'You keep it at 300.',
+  };
+  const input = { map: MAP_VIEW, utterance: 'The limit is 500, because above that the lead signs.', recent: [], language: null };
+  let reply: unknown = {
+    intent: 'edit',
+    operations: [
+      { op: 'set', targetId: 'g1', field: 'condition', value: 'budget above 500', value2: null, quote: null },
+      { op: 'set', targetId: 'g1', field: 'reason', value: 'the lead signs above 500', value2: null, quote: 'because above that the lead signs' },
+      { op: 'set', targetId: 'g9', field: 'condition', value: 'invented', value2: null, quote: null },
+      { op: 'set', targetId: 's1', field: 'escalateTo', value: 'wrong field for a step', value2: null, quote: null },
+      { op: 'resolve_gap', targetId: 'gap-1', field: null, value: null, value2: null, quote: null },
+    ],
+    reply: 'Changed the limit to 500.',
+    teachBack: 'You ask the lead above 500.',
+  };
+  const s = await setup(t, () => ok(reply), HIGH);
+  let r = await post(s.base, 'map_edit', s.token, input);
+  assert.equal(r.status, 200);
+  const out = (await bodyOf(r)).output as { intent: string; operations: Array<{ targetId: string; field: string | null; quote: string | null }>; reply: string; teachBack: string };
+  assert.equal(out.intent, 'edit');
+  assert.deepEqual(out.operations.map((o) => [o.targetId, o.field]), [['g1', 'condition'], ['g1', 'reason'], ['gap-1', null]]);
+  assert.equal(out.operations[1]?.quote, 'because above that the lead signs');
+  reply = { intent: 'edit', operations: [{ op: 'remove', targetId: 'nope', field: null, value: null, value2: null, quote: null }], reply: 'Removed it.', teachBack: null };
+  r = await post(s.base, 'map_edit', s.token, input);
+  assert.deepEqual((await bodyOf(r)).output, { intent: 'other', operations: [], reply: '', teachBack: null });
+  assert.equal((await post(s.base, 'map_edit', s.token, { ...input, map: { steps: 'x', guardrails: [] } })).status, 400);
+});
+
 // ---- honesty: what the runner actually receives must be generic -----------------------------------------------------
 const PINNED_PROMPT_SHA256: Record<string, string> = {
   'answer-extraction.ts': '28c542eb5bf30514aed951b611649de202107cfa2cde6504e664b76c947e373d',
@@ -499,6 +532,7 @@ const PINNED_PROMPT_SHA256: Record<string, string> = {
   'generic-question.ts': 'ab03cbf95efa711481bf96f2917891b145bb7cbbd90f05326c66c5832044a548',
   'guardrail-check.ts': '215ae8386c99ee8cdcb6c2adfeab02db8b3c7e284040040869ba22dec22a09d8',
   'map-synthesis.ts': 'a99c1ec479416449defc0ed3279b60626088935354ae415701e61954503eb5f8',
+  'map-edit.ts': 'a787ccbd01dc117a5fdd73933c7353cb97fff3a990303bb3c4c142bf551803be',
 };
 const sha256 = (v: string): string => createHash('sha256').update(v).digest('hex');
 // Scenario content of any kind, including paraphrases: the prompts and schemas must not know the demo case.
@@ -510,6 +544,7 @@ test('what the runner receives is generic: system prompts and schemas carry no s
     if (call.body.prompt.includes('"knownRefs"')) return ok({ ref: null });
     if (call.body.prompt.includes('"asked"')) return ok({ question: null, topic: 'reason', observationIds: [], regionIds: [] });
     if (call.body.prompt.includes('"previousTeachBack"')) return ok({ steps: [], guardrails: [], gaps: [], teachBack: 'Is this right?' });
+    if (call.body.prompt.includes('"utterance"')) return ok({ intent: 'other', operations: [], reply: '', teachBack: null });
     if (call.body.prompt.includes('"guardrails"')) return ok({ status: 'clear', guardrailId: null, message: null, regionIds: [] });
     return ok(EXTRACTION_OUTPUT);
   }, { limits: { llmPerSessionPerMinute: 100, llmPerIpPerMinute: 100 } });
@@ -519,7 +554,8 @@ test('what the runner receives is generic: system prompts and schemas carry no s
   await post(s.base, 'generic_question', s.token, QUESTION_INPUT);
   await post(s.base, 'map_synthesis', s.token, MAP_INPUT);
   await post(s.base, 'guardrail_check', s.token, CHECK_INPUT);
-  assert.equal(s.calls.length, 6);
+  await post(s.base, 'map_edit', s.token, { map: { steps: [], guardrails: [], gaps: [], teachBack: '' }, utterance: 'one', recent: [], language: null });
+  assert.equal(s.calls.length, 7);
   for (const call of s.calls) {
     for (const [what, value] of [['system prompt', call.body.system], ['schema', JSON.stringify(call.body.schema)]] as const) {
       const hit = SCENARIO_TERMS.exec(value);
@@ -541,6 +577,7 @@ test('prompt sources are self-contained and pinned: any change to a system promp
     'generic-question.ts': await import('../agent/prompts/generic-question.ts') as { system: string },
     'guardrail-check.ts': await import('../agent/prompts/guardrail-check.ts') as { system: string },
     'map-synthesis.ts': await import('../agent/prompts/map-synthesis.ts') as { system: string },
+    'map-edit.ts': await import('../agent/prompts/map-edit.ts') as { system: string },
   };
   for (const name of names) {
     const source = await readFile(new URL(name, dir), 'utf8');

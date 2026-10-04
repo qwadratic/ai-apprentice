@@ -39,6 +39,7 @@ export interface FrameUpload {
 }
 export class ScreenSessionHub {
   readonly #sessions = new Map<string, ScreenSessionHandle>();
+  readonly #observationListeners = new Set<(sessionId: string, observation: ScreenObservation) => void>();
   readonly #createService: SessionServiceFactory; readonly #parseStatus: ScreenStatusParser;
   readonly #now: () => number; readonly #maxSessions: number; readonly #maxEvents: number;
   readonly #idleTtlMs: number; readonly #pausedIdleTtlMs: number;
@@ -125,9 +126,17 @@ export class ScreenSessionHub {
   }
   evidence(record: ScreenSessionHandle): ScreenService['evidence'] { return record.service.evidence; }
   provenance(record: ScreenSessionHandle): ObservationProvenanceRegistry { return record.registry; }
+  /** Server-side readers of every published observation (the Clipa conductor); returns an unsubscribe function. */
+  onObservation(listener: (sessionId: string, observation: ScreenObservation) => void): () => void {
+    this.#observationListeners.add(listener);
+    return () => { this.#observationListeners.delete(listener); };
+  }
   #publish(record: ScreenSessionHandle, observation: ScreenObservation, context: VisionPublicationContext<ScreenEvidenceRecord>): void {
     if (record.state !== 'capturing' || observation.sessionId !== record.sessionId) return;
     record.registry.record(observation, context); this.#append(record, 'observation', observation);
+    for (const listener of this.#observationListeners) {
+      try { listener(record.sessionId, observation); } catch { /* a reader never breaks capture */ }
+    }
   }
   #onVisionEvent(record: ScreenSessionHandle, event: VisionQueueEvent): void {
     if (event.type !== 'error' || record.state !== 'capturing') return;

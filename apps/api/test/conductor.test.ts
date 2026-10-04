@@ -2,21 +2,27 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Conductor, MapRegistry, RULES } from '../agent/conductor/engine.ts';
 import { detectLanguage } from '../agent/conductor/lines.ts';
+import { applyEdits } from '../agent/conductor/map-edits.ts';
+import type { ConductorMap } from '../agent/conductor/map-edits.ts';
 import { parseBatch } from '../agent/conductor/protocol.ts';
 import type { ClientEvent, CueEnvelope } from '../agent/conductor/protocol.ts';
 import type { TaskResult } from '../agent/llm.ts';
 import { ORIGIN, bearer, issue, start } from './agent-helpers.ts';
 
 // ---- a conductor on a fake clock with scripted tasks --------------------------------------------------------------
-interface Rig { c: Conductor; cues: CueEnvelope[]; calls: Array<{ task: string; body: Record<string, unknown> }>; advance(ms: number): Promise<void>; send(...events: ClientEvent[]): Promise<void>; maps: MapRegistry }
+interface Rig {
+  c: Conductor; cues: CueEnvelope[]; calls: Array<{ task: string; body: Record<string, unknown> }>; maps: MapRegistry;
+  advance(ms: number): Promise<void>; send(...events: ClientEvent[]): Promise<void>; sendFrom(source: string, ...events: ClientEvent[]): Promise<void>;
+}
 function rig(answers: Record<string, (body: Record<string, unknown>) => TaskResult>, maps = new MapRegistry(), id = 'sess-1'): Rig {
   let now = 1_000_000;
-  let seq = 0;
+  const seqs = new Map<string, number>();
   const calls: Rig['calls'] = [];
   const c = new Conductor(id, {
     now: () => now,
     newId: () => 'abcdef0123456789',
     maps,
+    webLink: (page) => `https://web.example/clipa/?join=CODE1234&page=${page}`,
     llm: async (task, body) => {
       calls.push({ task, body: body as Record<string, unknown> });
       const answer = answers[task];
@@ -25,15 +31,21 @@ function rig(answers: Record<string, (body: Record<string, unknown>) => TaskResu
   });
   const cues: CueEnvelope[] = [];
   c.subscribe((cue) => cues.push(cue));
-  const settle = async (): Promise<void> => { for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r)); };
+  const settle = async (): Promise<void> => { for (let i = 0; i < 8; i++) await new Promise((r) => setImmediate(r)); };
+  const sendFrom = async (source: string, ...events: ClientEvent[]): Promise<void> => {
+    c.handle(events.map((event) => { const s = (seqs.get(source) ?? 0) + 1; seqs.set(source, s); return { seq: s, atMs: now - 1_000_000, event }; }), source);
+    await settle();
+  };
   return {
     c, cues, calls, maps,
     async advance(ms) { now += ms; c.tick(); await settle(); },
-    async send(...events) { c.handle(events.map((event) => ({ seq: ++seq, atMs: now - 1_000_000, event }))); await settle(); },
+    send: (...events) => sendFrom(id, ...events),
+    sendFrom,
   };
 }
 const ok = (output: unknown): TaskResult => ({ ok: true, output });
 const of = (cues: CueEnvelope[], type: string) => cues.filter((c) => c.cue.type === type);
+const cueOf = <T extends CueEnvelope['cue']['type']>(cues: CueEnvelope[], type: T) => cues.filter((c) => c.cue.type === type).map((c) => c.cue as Extract<CueEnvelope['cue'], { type: T }>);
 const obs = (id: string, change: string | null, extra: Record<string, unknown> = {}): ClientEvent => {
   const parsed = parseBatch({ events: [{ seq: 0, atMs: 0, event: { type: 'observation', observation: {
     id, kind: 'screen_activity', timestampMs: 1000, evidenceIds: [`ev-${id}`],
@@ -42,42 +54,53 @@ const obs = (id: string, change: string | null, extra: Record<string, unknown> =
   if (!parsed.ok) throw new Error(parsed.field);
   return parsed.value[0]!.event;
 };
+const hello = (client: 'web' | 'macos', persona: 'expert' | 'new_hire' = 'expert', mapFrom: string | null = null): ClientEvent =>
+  ({ type: 'hello', client, version: '1', persona, language: null, mapFrom });
 const QUESTION = { question: 'You changed the recipient field. Who is it for?', topic: 'scope', observationIds: ['o2'], regionIds: ['r-to'] };
 
-test('hello guides the persona to share; capturing points at Start', async () => {
+test('web: hello guides the persona to share; capturing points at Start', async () => {
   const r = rig({});
-  await r.send({ type: 'hello', client: 'macos', version: '1', persona: 'expert', language: null, mapFrom: null });
-  const first = of(r.cues, 'guide')[0]?.cue;
-  assert.ok(first?.type === 'guide' && first.step === 'welcome');
+  await r.send(hello('web'));
+  assert.deepEqual(cueOf(r.cues, 'guide').map((g) => g.step), ['welcome']);
+  assert.equal(of(r.cues, 'presence').length, 0, 'presence is for the macOS face only');
   await r.send({ type: 'share', state: 'capturing', reason: null });
-  const guide = of(r.cues, 'guide').at(-1)?.cue;
-  assert.ok(guide?.type === 'guide' && guide.step === 'start_learn' && guide.target?.kind === 'ui' && guide.target.name === 'start');
+  const guide = cueOf(r.cues, 'guide').at(-1);
+  assert.ok(guide?.step === 'start_learn' && guide.target?.kind === 'ui' && guide.target.name === 'start');
 });
 
-test('Learn asks only at a pause after a change, points at the region, and keeps to the budget', async () => {
+test('Learn: the question is prepared while the person works and said the moment a pause begins', async () => {
   const r = rig({ generic_question: () => ok(QUESTION) });
-  await r.send({ type: 'hello', client: 'web', version: '1', persona: 'expert', language: null, mapFrom: null }, { type: 'session', mode: 'learn', live: true, reason: null });
+  await r.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null });
   await r.send(obs('o1', null), obs('o2', 'The recipient changed.'));
   await r.send({ type: 'activity', state: 'typing' });
-  await r.advance(1000);
-  assert.equal(r.calls.length, 0, 'no question while typing');
+  await r.advance(RULES.settleMs + 10);
+  assert.equal(r.calls.length, 1, 'prepared as soon as the screen settled');
+  assert.equal(of(r.cues, 'ask').length, 0, 'never said while typing');
   await r.send({ type: 'activity', state: 'pause' });
   await r.advance(RULES.pauseMs + 10);
-  assert.equal(r.calls.length, 1);
-  assert.equal(r.calls[0]?.task, 'generic_question');
-  const ask = of(r.cues, 'ask')[0]?.cue;
-  assert.ok(ask?.type === 'ask');
-  assert.equal(ask.text, QUESTION.question);
-  assert.deepEqual(ask.regions.map((x) => [x.regionId, x.box]), [['r-to', [0.1, 0.1, 0.3, 0.05]]]);
-  assert.deepEqual(ask.evidenceIds, ['ev-o2']);
-  const point = of(r.cues, 'point')[0]?.cue;
-  assert.ok(point?.type === 'point' && point.target.kind === 'region' && point.target.regionId === 'r-to');
-  // Another change right away: too soon after the last question.
+  assert.equal(r.calls.length, 1, 'no second call: the prepared question is used');
+  const ask = cueOf(r.cues, 'ask')[0];
+  assert.equal(ask?.text, QUESTION.question);
+  assert.deepEqual(ask?.regions.map((x) => [x.regionId, x.box]), [['r-to', [0.1, 0.1, 0.3, 0.05]]]);
+  assert.deepEqual(ask?.evidenceIds, ['ev-o2']);
+  const point = cueOf(r.cues, 'point')[0];
+  assert.ok(point?.target.kind === 'region' && point.target.regionId === 'r-to');
+  // Another change right away: too soon after the last question, so nothing is prepared or said.
   await r.send({ type: 'cue_done', cueId: of(r.cues, 'ask')[0]!.cueId, outcome: 'spoken' }, obs('o3', 'The subject changed.'));
   await r.advance(RULES.pauseMs + 10);
-  assert.equal(r.calls.length, 1);
+  assert.equal(of(r.cues, 'ask').length, 1);
   await r.advance(RULES.learnMinGapMs);
-  assert.equal(r.calls.length, 2, 'after the gap it asks again');
+  assert.equal(of(r.cues, 'ask').length, 2, 'after the gap it asks again');
+});
+
+test('Learn: a newer screen makes a prepared question out of date', async () => {
+  const r = rig({ generic_question: (body) => ok({ ...QUESTION, question: `About ${String((body.observations as Array<{ id: string }>).at(-1)?.id)}` }) });
+  await r.send({ type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', 'First change.'), { type: 'activity', state: 'typing' });
+  await r.advance(RULES.settleMs + 10);
+  await r.send(obs('o2', 'Second change.'));
+  await r.send({ type: 'activity', state: 'pause' });
+  await r.advance(RULES.pauseMs + 10);
+  assert.equal(cueOf(r.cues, 'ask').at(-1)?.text, 'About o2');
 });
 
 test('typing cancels a question that has not been said yet; off the record hides Clipa and drops input', async () => {
@@ -86,7 +109,7 @@ test('typing cancels a question that has not been said yet; off the record hides
   await r.advance(RULES.pauseMs + 10);
   const ask = of(r.cues, 'ask')[0]!;
   await r.send({ type: 'activity', state: 'typing' });
-  assert.deepEqual(of(r.cues, 'cancel').map((c) => c.cue.type === 'cancel' && c.cue.cueId), [ask.cueId]);
+  assert.deepEqual(cueOf(r.cues, 'cancel').map((c) => c.cueId), [ask.cueId]);
   await r.send({ type: 'off_record', on: true });
   const last = r.cues.at(-1)?.cue;
   assert.ok(last?.type === 'state' && last.clipa === 'hidden');
@@ -101,8 +124,7 @@ test('a failed question route falls back to a plain question about the latest ch
   const r = rig({});
   await r.send({ type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', 'The amount changed to 300.'));
   await r.advance(RULES.pauseMs + 10);
-  const ask = of(r.cues, 'ask')[0]?.cue;
-  assert.ok(ask?.type === 'ask' && ask.text === 'I saw: The amount changed to 300. What made you do that?');
+  assert.equal(cueOf(r.cues, 'ask')[0]?.text, 'I saw: The amount changed to 300. What made you do that?');
 });
 
 const MAP = {
@@ -111,56 +133,84 @@ const MAP = {
   gaps: [{ question: 'Who is the lead?', targetId: 'g1', evidenceIds: ['o2'], regionIds: ['r-to'] }],
   teachBack: 'You keep the budget at 300 and ask the lead above it. Is this right?',
 };
+const NO_EDIT = { intent: 'other', operations: [], reply: '', teachBack: null };
 
-test('Review: map, then the gaps one at a time, then the teach-back; a confirmation confirms the map for Teach', async () => {
+test('Review: map, the gaps one at a time, the teach-back; a confirmation confirms the map for Teach', async () => {
   const maps = new MapRegistry();
-  const r = rig({ map_synthesis: () => ok(MAP), reply_classification: () => ok({ verdict: 'confirm', correction: null }) }, maps);
-  await r.send({ type: 'hello', client: 'web', version: '1', persona: 'expert', language: null, mapFrom: null });
+  const r = rig({ map_synthesis: () => ok(MAP), map_edit: () => ok(NO_EDIT), reply_classification: () => ok({ verdict: 'confirm', correction: null }) }, maps);
+  await r.send(hello('web'));
   await r.send({ type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', null), obs('o2', 'Changed.'), { type: 'transcript', role: 'expert', text: 'above 300 the lead signs' });
   await r.send({ type: 'session', mode: 'learn', live: false, reason: 'user' });
-  assert.ok(of(r.cues, 'guide').some((g) => g.cue.type === 'guide' && g.cue.step === 'review'));
+  assert.ok(cueOf(r.cues, 'guide').some((g) => g.step === 'review'));
   await r.send({ type: 'session', mode: 'review', live: true, reason: null });
   assert.equal(r.calls.at(-1)?.task, 'map_synthesis');
   assert.equal(of(r.cues, 'map').length, 1);
   await r.advance(RULES.pauseMs + 10);
-  const gapAsk = of(r.cues, 'ask').at(-1)?.cue;
-  assert.ok(gapAsk?.type === 'ask' && gapAsk.text === 'Who is the lead?' && gapAsk.regions[0]?.regionId === 'r-to');
+  const gapAsk = cueOf(r.cues, 'ask').at(-1);
+  assert.ok(gapAsk?.text === 'Who is the lead?' && gapAsk.regions[0]?.regionId === 'r-to');
   await r.send({ type: 'transcript', role: 'expert', text: 'The team lead, Dana.' });
+  assert.equal(r.calls.at(-1)?.task, 'map_edit', 'the answer goes into the map by voice editing');
   await r.advance(RULES.pauseMs + RULES.gapAfterAnswerMs);
-  assert.equal(r.calls.filter((c) => c.task === 'map_synthesis').length, 2, 'resynthesised after the last gap');
-  const tb = of(r.cues, 'teachback').at(-1)?.cue;
-  assert.ok(tb?.type === 'teachback' && tb.text === MAP.teachBack);
+  const tb = cueOf(r.cues, 'teachback').at(-1);
+  assert.equal(tb?.text, MAP.teachBack);
   await r.send({ type: 'transcript', role: 'expert', text: 'Yes, exactly.' });
   assert.equal(r.calls.at(-1)?.task, 'reply_classification');
-  const last = of(r.cues, 'map').at(-1)?.cue;
-  assert.ok(last?.type === 'map' && last.confirmed);
+  assert.ok(cueOf(r.cues, 'map').at(-1)?.confirmed);
   assert.equal(maps.find(null)?.sessionId, 'sess-1');
-  assert.ok(of(r.cues, 'guide').some((g) => g.cue.type === 'guide' && g.cue.step === 'handoff'));
+  assert.ok(cueOf(r.cues, 'guide').some((g) => g.step === 'handoff'));
 });
 
-test('Review: a correction resynthesises with the correction and reads the teach-back again', async () => {
-  const r = rig({ map_synthesis: () => ok({ ...MAP, gaps: [] }), reply_classification: () => ok({ verdict: 'correct', correction: 'The limit is 500.' }) });
+test('Review: the expert only talks; Clipa edits the map, says what changed and reads the teach-back again', async () => {
+  const edit = {
+    intent: 'edit',
+    operations: [{ op: 'set', targetId: 'g1', field: 'condition', value: 'budget above 500', value2: null, quote: null },
+      { op: 'set', targetId: 'g1', field: 'reason', value: 'the lead signs above 500', value2: null, quote: 'the lead signs above 500' }],
+    reply: 'Changed the limit to 500.',
+    teachBack: 'You ask the lead above 500. Is this right?',
+  };
+  const r = rig({ map_synthesis: () => ok({ ...MAP, gaps: [] }), reply_classification: () => ok({ verdict: 'correct', correction: 'The limit is 500.' }), map_edit: () => ok(edit) });
   await r.send({ type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', 'Changed.'));
   await r.send({ type: 'session', mode: 'review', live: true, reason: null });
   assert.equal(of(r.cues, 'teachback').length, 1, 'no gaps: straight to the teach-back');
-  await r.send({ type: 'transcript', role: 'expert', text: 'No, the limit is 500.' });
-  const second = r.calls.filter((c) => c.task === 'map_synthesis')[1];
-  assert.equal(second?.body.correction, 'The limit is 500.');
-  assert.equal(second?.body.previousTeachBack, MAP.teachBack);
-  assert.equal(of(r.cues, 'teachback').length, 2);
+  await r.send({ type: 'transcript', role: 'expert', text: 'No, the lead signs above 500.' });
+  assert.deepEqual(r.calls.map((c) => c.task), ['map_synthesis', 'reply_classification', 'map_edit']);
+  const map = cueOf(r.cues, 'map').at(-1)?.map as ConductorMap;
+  assert.equal(map.guardrails[0]?.condition, 'budget above 500');
+  assert.equal(map.guardrails[0]?.quote, 'the lead signs above 500');
+  assert.equal(cueOf(r.cues, 'say').at(-1)?.text, 'Changed the limit to 500.');
+  assert.equal(cueOf(r.cues, 'teachback').at(-1)?.text, 'You ask the lead above 500. Is this right?');
 });
 
-test('Teach: warns before a pending action that a confirmed guardrail covers, once per rule and screen', async () => {
+test('map edits: reasons keep the expert\'s words; unknown targets change nothing', () => {
+  const base: ConductorMap = { ...(structuredClone(MAP) as never as ConductorMap), comments: [] };
+  const { map, applied } = applyEdits(base, [
+    { op: 'add_rule', targetId: null, field: null, value: 'a new supplier', value2: 'check the contract first', quote: null },
+    { op: 'comment', targetId: 's1', field: null, value: 'only in December', value2: null, quote: null },
+    { op: 'set', targetId: 's9', field: 'goal', value: 'nope', value2: null, quote: null },
+    { op: 'resolve_gap', targetId: 'gap-1', field: null, value: null, value2: null, quote: null },
+    { op: 'add_step', targetId: 's1', field: null, value: 'Filed the note', value2: null, quote: null },
+  ], 'Always check the contract of a new supplier first.', 1234);
+  assert.equal(applied, 4);
+  assert.deepEqual(map.guardrails.map((g) => g.id), ['g1', 'g2']);
+  assert.equal(map.guardrails[1]?.quote, 'Always check the contract of a new supplier first.');
+  assert.deepEqual(map.comments, [{ targetId: 's1', text: 'only in December', atMs: 1234 }]);
+  assert.equal(map.gaps.length, 0);
+  assert.deepEqual(map.steps.map((s) => s.id), ['s1', 's2']);
+  assert.equal(base.guardrails.length, 1, 'the input map is not changed');
+});
+
+test('Teach: a pending action is checked fast, and the warning names the expert\'s rule and moment, once', async () => {
   const maps = new MapRegistry();
   maps.confirm('expert-session', MAP as never, 1);
   const r = rig({ guardrail_check: () => ok({ status: 'warn', guardrailId: 'g1', message: 'Your lead would stop here. Why?', regionIds: ['r-to'] }) }, maps, 'hire-1');
-  await r.send({ type: 'hello', client: 'macos', version: '1', persona: 'new_hire', language: null, mapFrom: 'expert-session' });
+  await r.send(hello('web', 'new_hire', 'expert-session'));
   await r.send({ type: 'session', mode: 'teach', live: true, reason: null });
-  assert.ok(of(r.cues, 'context').some((c) => c.cue.type === 'context' && c.cue.text.includes('budget above 300')));
+  assert.ok(cueOf(r.cues, 'context').some((c) => c.text.includes('budget above 300')));
   await r.send(obs('n1', 'Budget set to 450.', { pendingAction: 'Submit' }));
-  await r.advance(RULES.pauseMs + 10);
-  const warn = of(r.cues, 'warn')[0]?.cue;
-  assert.ok(warn?.type === 'warn' && warn.guardrailId === 'g1' && warn.regions[0]?.regionId === 'r-to');
+  await r.advance(RULES.urgentSettleMs + 10);
+  const warn = cueOf(r.cues, 'warn')[0];
+  assert.ok(warn, 'warned well before a full pause');
+  assert.ok(warn.guardrailId === 'g1' && warn.regions[0]?.regionId === 'r-to');
   assert.deepEqual(warn.evidenceIds, ['o2'], 'the expert\'s moment');
   await r.send({ type: 'cue_done', cueId: of(r.cues, 'warn')[0]!.cueId, outcome: 'spoken' });
   await r.advance(RULES.teachCheckGapMs + RULES.pauseMs);
@@ -169,8 +219,36 @@ test('Teach: warns before a pending action that a confirmed guardrail covers, on
 
 test('Teach without a confirmed map says so', async () => {
   const r = rig({});
-  await r.send({ type: 'hello', client: 'web', version: '1', persona: 'new_hire', language: null, mapFrom: null }, { type: 'session', mode: 'teach', live: true, reason: null });
-  assert.ok(of(r.cues, 'guide').some((g) => g.cue.type === 'guide' && g.cue.step === 'no_map'));
+  await r.send(hello('web', 'new_hire'), { type: 'session', mode: 'teach', live: true, reason: null });
+  assert.ok(cueOf(r.cues, 'guide').some((g) => g.step === 'no_map'));
+});
+
+test('macOS: Clipa waits in the corner, comes out to ask, and hands over to the web for Review', async () => {
+  const r = rig({ generic_question: () => ok(QUESTION) });
+  await r.send(hello('macos'));
+  assert.deepEqual(cueOf(r.cues, 'presence').map((p) => p.size), ['peek']);
+  assert.ok(of(r.cues, 'guide').every((g) => g.for === 'macos'), 'macOS gets its own lines');
+  await r.send({ type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', 'Changed.'));
+  await r.advance(RULES.pauseMs + 10);
+  assert.deepEqual(cueOf(r.cues, 'presence').map((p) => [p.size, p.anchor]), [['peek', 'corner'], ['dot', 'corner'], ['full', 'target']]);
+  await r.send({ type: 'session', mode: 'learn', live: false, reason: 'user' });
+  const open = cueOf(r.cues, 'open_web')[0];
+  assert.ok(open?.page === 'review' && open.url.includes('join=') && open.url.includes('page=review'));
+  assert.equal(of(r.cues, 'open_web')[0]?.for, 'macos');
+});
+
+test('one conductor, two faces: a linked web app gets web cues, the Mac gets Mac cues', async () => {
+  const r = rig({ map_synthesis: () => ok(MAP) });
+  await r.send(hello('macos'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', 'Changed.'));
+  await r.sendFrom('web-session', hello('web'));
+  await r.sendFrom('web-session', { type: 'session', mode: 'review', live: true, reason: null });
+  assert.equal(r.c.clientOf('web-session'), 'web');
+  assert.ok(of(r.cues, 'map').length === 1 && of(r.cues, 'map')[0]?.for === 'all');
+  const web = r.c.cuesAfter(0, 'web');
+  const mac = r.c.cuesAfter(0, 'macos');
+  assert.ok(web.some((c) => c.cue.type === 'guide' && c.cue.step === 'gaps'));
+  assert.ok(!mac.some((c) => c.cue.type === 'guide' && c.cue.step === 'gaps'), 'the Mac does not get the web\'s Review lines');
+  assert.ok(!web.some((c) => c.cue.type === 'presence'), 'presence is not sent to the web');
 });
 
 test('the language follows the expert and goes into the question task', async () => {
@@ -182,7 +260,7 @@ test('the language follows the expert and goes into the question task', async ()
   assert.equal(detectLanguage(['I just checked who I was replying to.']), null);
 });
 
-test('events are typed; a retried batch is applied once', () => {
+test('events are typed; a retried batch is applied once per face', () => {
   assert.equal(parseBatch({ events: [] }).ok, false);
   const bad = parseBatch({ events: [{ seq: 1, atMs: 0, event: { type: 'activity', state: 'dancing' } }] });
   assert.ok(!bad.ok && bad.field === 'events.0.event.state');
@@ -193,20 +271,31 @@ test('events are typed; a retried batch is applied once', () => {
   r.c.handle([{ seq: 5, atMs: 0, event: { type: 'mode', mode: 'review' } }]);
   r.c.handle([{ seq: 5, atMs: 0, event: { type: 'mode', mode: 'teach' } }]);
   assert.equal((r.c.status() as { selectedMode: string }).selectedMode, 'review');
+  r.c.handle([{ seq: 1, atMs: 0, event: { type: 'mode', mode: 'teach' } }], 'other-face');
+  assert.equal((r.c.status() as { selectedMode: string }).selectedMode, 'teach', 'another face has its own sequence');
 });
 
 // ---- HTTP ---------------------------------------------------------------------------------------------------------
+async function readUntil(reader: ReadableStreamDefaultReader<Uint8Array>, state: { text: string }, pattern: RegExp): Promise<void> {
+  const deadline = Date.now() + 3000;
+  while (!pattern.test(state.text) && Date.now() < deadline) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    state.text += new TextDecoder().decode(value);
+  }
+}
+
 test('routes: token and origin are required; events go in, cues stream out and replay after a seq', async (t) => {
   const h = await start(t);
   const s = await issue(h.base);
   const url = `${h.base}/api/agent/conductor/${s.sessionId}`;
   const post = (body: unknown, headers: Record<string, string> = { Origin: ORIGIN, 'Content-Type': 'application/json', ...bearer(s.token) }) =>
     fetch(`${url}/events`, { method: 'POST', headers, body: JSON.stringify(body) });
-  const hello = { events: [{ seq: 1, atMs: 10, event: { type: 'hello', client: 'macos', version: '1', persona: 'expert' } }] };
-  assert.equal((await post(hello, { Origin: ORIGIN, 'Content-Type': 'application/json' })).status, 401);
-  assert.equal((await post(hello, { Origin: 'https://evil.example', 'Content-Type': 'application/json', ...bearer(s.token) })).status, 403);
+  const helloBatch = { events: [{ seq: 1, atMs: 10, event: { type: 'hello', client: 'web', version: '1', persona: 'expert' } }] };
+  assert.equal((await post(helloBatch, { Origin: ORIGIN, 'Content-Type': 'application/json' })).status, 401);
+  assert.equal((await post(helloBatch, { Origin: 'https://evil.example', 'Content-Type': 'application/json', ...bearer(s.token) })).status, 403);
   assert.equal((await post({ events: [{ seq: 1, atMs: 0, event: { type: 'nope' } }] })).status, 400);
-  const r = await post(hello);
+  const r = await post(helloBatch);
   assert.equal(r.status, 200);
   assert.deepEqual(await r.json(), { ok: true, lastEventSeq: 1, lastCueSeq: 2 });
 
@@ -216,22 +305,40 @@ test('routes: token and origin are required; events go in, cues stream out and r
   assert.equal(stream.status, 200);
   assert.match(stream.headers.get('content-type') ?? '', /text\/event-stream/);
   const reader = stream.body!.getReader();
-  let text = '';
-  const until = async (pattern: RegExp): Promise<void> => {
-    const deadline = Date.now() + 3000;
-    while (!pattern.test(text) && Date.now() < deadline) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      text += new TextDecoder().decode(value);
-    }
-  };
-  await until(/"step":"welcome"/);
-  assert.match(text, /event: hello/);
-  assert.match(text, /id: 2\nevent: cue/);
+  const state = { text: '' };
+  await readUntil(reader, state, /"step":"welcome"/);
+  assert.match(state.text, /event: hello/);
+  assert.match(state.text, /id: 2\nevent: cue/);
   await post({ events: [{ seq: 2, atMs: 20, event: { type: 'share', state: 'capturing' } }] });
-  await until(/"step":"start_learn"/);
-  assert.match(text, /"step":"start_learn"/);
-  const noToken = await fetch(`${url}/cues`, { headers: { Origin: ORIGIN } });
-  assert.equal(noToken.status, 401);
+  await readUntil(reader, state, /"step":"start_learn"/);
+  assert.match(state.text, /"step":"start_learn"/);
+  assert.equal((await fetch(`${url}/cues`, { headers: { Origin: ORIGIN } })).status, 401);
+  ac.abort();
+});
+
+test('routes: the Mac hands over with a single-use code; the web joins the same conductor', async (t) => {
+  const h = await start(t, { publicWebUrl: 'https://web.example/clipa/' });
+  const mac = await issue(h.base);
+  const web = await issue(h.base);
+  const events = (id: string, token: string, body: unknown) => fetch(`${h.base}/api/agent/conductor/${id}/events`, { method: 'POST', headers: { Origin: ORIGIN, 'Content-Type': 'application/json', ...bearer(token) }, body: JSON.stringify(body) });
+  await events(mac.sessionId, mac.token, { events: [
+    { seq: 1, atMs: 0, event: { type: 'hello', client: 'macos', version: '1', persona: 'expert' } },
+    { seq: 2, atMs: 5, event: { type: 'session', mode: 'learn', live: true } },
+    { seq: 3, atMs: 50, event: { type: 'session', mode: 'learn', live: false, reason: 'user' } },
+  ] });
+  const ac = new AbortController();
+  t.after(() => ac.abort());
+  const stream = await fetch(`${h.base}/api/agent/conductor/${mac.sessionId}/cues?after=0&client=macos`, { headers: { Origin: ORIGIN, ...bearer(mac.token) }, signal: ac.signal });
+  const state = { text: '' };
+  await readUntil(stream.body!.getReader(), state, /"type":"open_web"/);
+  const url = /"url":"([^"]+)"/.exec(state.text)?.[1] ?? '';
+  assert.match(url, /^https:\/\/web\.example\/clipa\/\?join=[A-Z0-9]{8}&page=review$/);
+  const code = new URL(url).searchParams.get('join')!;
+  const link = (body: unknown) => fetch(`${h.base}/api/agent/conductor/${web.sessionId}/link`, { method: 'POST', headers: { Origin: ORIGIN, 'Content-Type': 'application/json', ...bearer(web.token) }, body: JSON.stringify(body) });
+  assert.equal((await link({ code })).status, 200);
+  assert.equal((await link({ code })).status, 404, 'single use');
+  const r = await events(web.sessionId, web.token, { events: [{ seq: 1, atMs: 0, event: { type: 'hello', client: 'web', version: '1', persona: 'expert' } }] });
+  const body = await r.json() as { lastCueSeq: number };
+  assert.ok(body.lastCueSeq > 5, 'the web joined the Mac\'s conductor, not a new one');
   ac.abort();
 });

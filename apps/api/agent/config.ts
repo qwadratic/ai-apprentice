@@ -150,7 +150,7 @@ export function resolveConfig(options: AgentOptions = {}, env: NodeJS.ProcessEnv
     tutorAgentId: tutor,
     agentIds: new Set([interviewer, tutor].filter(Boolean)),
     fastModel: options.fastModel ?? env.AGENT_FAST_MODEL ?? 'claude-haiku-4-5-20251001',
-    publicWebUrl: options.publicWebUrl ?? (env.PUBLIC_WEB_URL || 'https://qwadratic.github.io/ai-apprentice/'),
+    publicWebUrl: options.publicWebUrl ?? (env.PUBLIC_WEB_URL || 'https://qwadratic.github.io/clipa/'),
     limits, timing,
     fetch: options.fetch ?? ((input, init) => fetch(input, init)),
     now: options.now ?? Date.now,

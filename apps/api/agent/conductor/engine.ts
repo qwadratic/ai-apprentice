@@ -307,8 +307,8 @@ export class Conductor {
     const now = this.deps.now();
     this.lastSeenAt = now;
     if (this.offRecord) return;
-    const prev = this.observations.findIndex((x) => x.id === o.id);
-    if (prev >= 0) this.observations.splice(prev, 1);
+    // The same observation can arrive twice (from the screen module and from a client that forwards it): keep the first.
+    if (this.observations.some((x) => x.id === o.id)) return;
     const last = this.observations[this.observations.length - 1];
     this.observations.push(o);
     if (this.observations.length > RULES.keepObservations) this.observations.splice(0, this.observations.length - RULES.keepObservations);

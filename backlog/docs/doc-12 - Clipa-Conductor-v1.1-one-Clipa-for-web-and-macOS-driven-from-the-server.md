@@ -1,13 +1,26 @@
 ---
 id: doc-12
-title: 'Clipa Conductor v1 - one Clipa for web and macOS, driven from the server'
+title: 'Clipa Conductor v1.1 - one Clipa for web and macOS, driven from the server'
 type: specification
 created_date: '2026-10-04 04:25'
-updated_date: '2026-10-04 04:25'
+updated_date: '2026-10-04 04:56'
 ---
-# Clipa Conductor v1: one Clipa for web and macOS, driven from the server
+# Clipa Conductor v1.1: one Clipa for web and macOS, driven from the server
 
-Status: proposed by stream B on 4 Oct, 04:35 UTC, after Ivan decided that the conductor runs on the server. Stream A builds the macOS app and owns its side; counter-proposals go to the Hive integration thread. B owns the conductor and its protocol.
+Status: v1 proposed by stream B on 4 Oct, 04:35 UTC, after Ivan decided that the conductor runs on the server. v1.1 (05:30 UTC) follows Ivan's later answers: each face has its own experience, macOS hands over to the web, the person edits the map only by talking, and reactions are fast. Stream A builds the macOS app and owns its side; counter-proposals go to the Hive integration thread. B owns the conductor and its protocol. Implementation: TASK-3.44 (`apps/api/agent/conductor/`).
+
+## Two faces, one loop (v1.1)
+
+- **Web: the whole journey.** Clipa knows she is in the web app and guides through every stage: share, Learn, Review (the reflection board), Teach and the summary.
+- **macOS: a lighter face.** Clipa waits as a dot in the corner and comes out (`presence` peek or full, anchored at the target) to ask or to warn. When it is time for Review or the summary she sends the person to the web (`open_web`). The rest happens in the person's web account: they look at how Clipa understood their workflow, comment and change it.
+- **One server loop leads both.** The macOS session's `open_web` link carries a single-use join code (5 minutes). The web app creates its own session, posts `{code}` to `POST /api/agent/conductor/:webSessionId/link`, and from then on its events and cue stream belong to the same conductor. Every cue has `for: all | web | macos`. Each stream gets only its own face's cues, chosen by its hello or by `?client=`.
+- **Voice editing.** In Review the person only talks. Everything the expert says goes through `map_edit`, which returns checked operations: set a field, add a step or rule, remove, comment, resolve a gap. The conductor applies them, publishes the new `map` version, says what changed (`say`) and reads the teach-back again when it changed. A reason added by voice keeps the expert's words as its quote.
+- **Reaction speed.**
+  - Learn questions are prepared as soon as the screen settles after a change (700 ms) and said the moment the pause begins (2.5 s quiet). A newer screen makes a prepared question out of date.
+  - In Teach, a visible pending action is checked after 400 ms without waiting for a full pause.
+  - The latency-bound tasks (`generic_question`, `guardrail_check`) run on a fast model (`AGENT_FAST_MODEL`); the runner falls back to its default model when that one is not allowed.
+  - The conductor's clock ticks every 200 ms. The SSE socket has no Nagle delay.
+- **Screen.** The vision path already runs on the VM. To feed observations to the conductor server-side (without a client forwarding them), the screen module calls `agent.observeScreen(sessionId, observation)`; this needs a one-line hook in stream A's hub. Until then, clients forward observations as `observation` events.
 
 ## Why
 
@@ -53,6 +66,9 @@ Clipa must be one character across Learn, Review and Teach, and she guides both 
 | `map {version, map}` | a Work Map snapshot (steps, guardrails, gaps) for the Review board |
 | `teachback {version, text}` | the read-back that the expert confirms or corrects (`ui confirm` or `ui correct`) |
 | `warn {guardrailId, text, regions[], evidenceIds[]}` | Teach, before a pending action that a confirmed guardrail covers. Speak it, point at it, offer the expert's moment. Wording: the tutor warns; it never blocks another app |
+| `say {text}` | speak it through `[ASK]` (a reply to the person, for example what Clipa changed on the map) |
+| `presence {size: 'dot', 'peek' or 'full', anchor: 'corner' or 'target'}` | macOS only: how far Clipa comes out of the corner |
+| `open_web {page: 'review', 'teach' or 'summary', url, text}` | macOS only: say the text and open the URL (it carries a single-use join code) |
 | `cancel {cueId}` | the moment passed: stop speaking or pointing |
 | `quiet {reason}` | Clipa chose to stay silent and says why (for the log and the debug view only) |
 
@@ -68,6 +84,6 @@ Clipa must be one character across Learn, Review and Teach, and she guides both 
 - **Language.** Follow the language the person speaks now. The agents translate `[ASK]` text, and the generic tasks take the language.
 - **Silence.** Never speak while the person types or talks. Ask less and later.
 
-## Out of scope for v1
+## Out of scope
 
-Several clients on one session at once, server-side speech, and blocking clicks in other apps.
+Server-side speech, blocking clicks in other apps, and accounts that keep maps across sessions (the confirmed map lives in server memory: one team, one demo server).
