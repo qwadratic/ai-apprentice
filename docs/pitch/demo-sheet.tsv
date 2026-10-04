@@ -1,0 +1,7 @@
+Item	Paid in	Annual cost (EUR)	Q1	Q2	Q3	Q4
+Design suite licence (prepaid 12 months)	January	12000				
+Cloud hosting (monthly)	monthly	4800	1200	1200	1200	1200
+Office internet (monthly)	monthly	1440	360	360	360	360
+Team training (one-off)	March	900	900	0	0	0
+Small tools (prepaid 12 months)	February	600				
+Total		=SUM(C2:C6)	=SUM(D2:D6)	=SUM(E2:E6)	=SUM(F2:F6)	=SUM(G2:G6)
