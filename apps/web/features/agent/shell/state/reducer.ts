@@ -16,7 +16,7 @@ export function initialState(persona: Persona = DEFAULT_PERSONA): ShellState {
     phase: 'idle',
     session: null,
     voice: { phase: 'idle', thinking: false, error: null },
-    screen: { sampleOn: false, source: null, state: 'none', reason: null, capture: { state: 'idle', reason: null } },
+    screen: { sampleOn: false, sampleKind: 'demo', source: null, state: 'none', reason: null, capture: { state: 'idle', reason: null } },
     banner: null,
     brain: { name: 'NullBrain', wired: false },
     observations: [],
@@ -29,6 +29,8 @@ export function initialState(persona: Persona = DEFAULT_PERSONA): ShellState {
     decisions: [],
     events: [],
     nextLogId: 1,
+    generic: null,
+    highlight: null,
   };
 }
 
@@ -36,6 +38,9 @@ export type Action =
   | { type: 'MODE_SET'; mode: Mode }
   | { type: 'PERSONA_SET'; persona: Persona }
   | { type: 'SAMPLE_SET'; on: boolean }
+  | { type: 'SAMPLE_KIND_SET'; kind: 'generic' | 'demo' }
+  | { type: 'GENERIC_SET'; generic: ShellState['generic'] }
+  | { type: 'HIGHLIGHT_SET'; highlight: ShellState['highlight'] }
   | { type: 'SAMPLE_CASE_SET'; caseId: TeachCaseId }
   /** The person's real screen replaced the sample: what the sample produced is removed. */
   | { type: 'SOURCE_TAKEOVER'; mode: Mode }
@@ -93,6 +98,7 @@ function learnReset(state: ShellState): Partial<ShellState> {
     replay: { evidenceId: null },
     clipaHint: null,
     banner: withoutError(state.banner),
+    highlight: null,
   };
 }
 
@@ -103,6 +109,12 @@ export function reduce(state: ShellState, action: Action): ShellState {
       return action.mode === state.mode ? state : { ...state, mode: action.mode };
     case 'PERSONA_SET':
       return { ...state, persona: action.persona };
+    case 'SAMPLE_KIND_SET':
+      return { ...state, screen: { ...state.screen, sampleKind: action.kind } };
+    case 'GENERIC_SET':
+      return { ...state, generic: action.generic };
+    case 'HIGHLIGHT_SET':
+      return { ...state, highlight: action.highlight };
     case 'SAMPLE_SET':
       return { ...state, screen: { ...state.screen, sampleOn: action.on } };
     case 'SOURCE_TAKEOVER':

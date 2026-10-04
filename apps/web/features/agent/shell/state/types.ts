@@ -1,5 +1,6 @@
 // Shell state: one plain object, changed only by the reducer. Nothing secret lives here: the session token and
 // the signed URL stay inside the controller and the API module.
+import type { GenericShellState, ScreenRegion } from '../brain/generic.ts';
 import type { CheckpointStatus, ScreenState } from '@apprentice/contracts';
 import type { DecisionKind, DraftMap, GapItem } from '../brain/types.ts';
 import type { TeachCaseId } from '../screen/sample-scenarios.ts';
@@ -140,6 +141,8 @@ export interface CaptureInfo {
 
 export interface ScreenInfo {
   sampleOn: boolean;
+  /** Which sample runs: the generic mail-client screen (screen_activity) or the demo workspace's customer_07 case. */
+  sampleKind?: 'generic' | 'demo';
   /** Label of the running observation source, or null. */
   source: { label: string; synthetic: boolean } | null;
   state: ScreenState | 'none';
@@ -176,6 +179,10 @@ export interface ShellState {
   decisions: DecisionEntry[];
   events: LogLine[];
   nextLogId: number;
+  /** Generic mode: the map_synthesis map and the observations it was built from (the Review board reads them), or null. */
+  generic: GenericShellState | null;
+  /** Screen regions the current question or warning is about: boxes over the live preview (ScreenSlot). */
+  highlight: { regions: ScreenRegion[]; text: string; atMs: number } | null;
 }
 
 export const LIMITS = { observations: 60, decisions: 200, events: 400, feed: 100 } as const;

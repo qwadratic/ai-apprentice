@@ -6,6 +6,8 @@ import { parseCheckpointReply } from '@apprentice/contracts';
 import type { AgentApi, AgentSession, FetchLike, VoiceRole } from './api.ts';
 import { createLlmClient } from './brain/llm-transport.ts';
 import type { AbortableLlmClient } from './brain/llm-transport.ts';
+import type { GenericPost } from './brain/generic.ts';
+import type { SampleSourceId } from './screen/generic-sample-source.ts';
 import type { AnswerInput, AnswerResult, Brain, BrainDecision, BrainSignals, ClipaTargetRef, DraftMap, TranscriptTurn } from './brain/types.ts';
 import { isSpoken } from './brain/types.ts';
 import type { ClipaPresenter, ClipaState, TargetRect } from './clipa/presenter.ts';
@@ -15,7 +17,7 @@ import { EventUploader } from './log/uploader.ts';
 import type { LogDir, Timers } from './log/uploader.ts';
 import type { ObservationSource } from './screen/observation-source.ts';
 import { teachCase } from './screen/sample-scenarios.ts';
-import type { SampleScenarioId, TeachCaseId } from './screen/sample-scenarios.ts';
+import type { TeachCaseId } from './screen/sample-scenarios.ts';
 import { SESSION_LIMIT_MS, deadlineOf } from './session-clock.ts';
 import { deriveClipaState } from './state/derive.ts';
 import { createStore } from './state/store.ts';
@@ -70,7 +72,7 @@ export interface ControllerDeps {
   connectVoice: VoiceConnector;
   createBrain(log: (line: string) => void): Brain;
   /** The sample source for a scenario: `learn` for Learn, a Teach case for Teach, `neutral` otherwise. */
-  createSampleSource(scenario: SampleScenarioId): ObservationSource;
+  createSampleSource(scenario: SampleSourceId): ObservationSource;
   presenter: ClipaPresenter;
   /** Date.now() */
   now(): number;
@@ -126,6 +128,10 @@ export class ShellController {
   private standby: ObservationSource | null = null;
   private standbyOff: Array<() => void> = [];
   private readonly speech = new SpeechGate();
+  /** The generic model tasks of the live session; cut off with the LLM client. */
+  private postCut: AbortController | null = null;
+  /** The last [screen] line sent: an identical line is not sent again (the voice agent got ~6 copies per turn). */
+  private lastContextLine: string | null = null;
   /** The LLM client of the live session; cut off on off the record and on teardown. */
   private llm: AbortableLlmClient | null = null;
   private held: { decision: BrainDecision; atPerfMs: number } | null = null;
@@ -320,6 +326,7 @@ export class ShellController {
     this.clearPendingAsk();
     this.bufferedContext = [];
     this.contextDropNoted = false;
+    this.lastContextLine = null;
     this.lastObservationPerfMs = null;
     this.store.dispatch({ type: 'SESSION_STARTING', mode });
     let session: AgentSession;
@@ -358,9 +365,36 @@ export class ShellController {
     await this.startVoice(run, session, mode);
   }
 
+  /**
+   * Generic mode's model tasks (generic_question, guardrail_check, map_synthesis, reply_classification) on the session's LLM route,
+   * with the session token. Null on the placeholder API. Cut off on off the record and at the end of the session.
+   */
+  private makePost(session: AgentSession): GenericPost | null {
+    if (session.llm('generic_question') === null) return null;
+    const cut = new AbortController();
+    this.postCut = cut;
+    return async (task, body, signal) => {
+      if (cut.signal.aborted) throw new Error('cut off');
+      const req = session.llm(task);
+      if (req === null) throw new Error(`no route for ${task}`);
+      const timeout = AbortSignal.timeout(task === 'map_synthesis' ? 60_000 : 15_000);
+      const res = await this.deps.fetch(req.url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', accept: 'application/json', ...req.headers },
+        body: JSON.stringify(body),
+        signal: AbortSignal.any([cut.signal, timeout, ...(signal ? [signal] : [])]),
+      });
+      const json = (await res.json().catch(() => null)) as { ok?: boolean; output?: unknown; error?: string } | null;
+      if (!res.ok || json === null || json.ok === false) throw new Error(`${task} HTTP ${res.status}${json?.error ? ` ${json.error}` : ''}`);
+      this.log('sys', 'LLM', `${task}: ok`);
+      return json.output ?? json;
+    };
+  }
+
   private beginBrain(session: AgentSession, mode: Mode): void {
     const caseId = mode === 'teach' ? this.state.teach.sampleCase : null;
     this.llm?.abort();
+    this.postCut?.abort();
     const llm = createLlmClient({ session, fetch: this.deps.fetch, log: (line) => this.log('sys', 'LLM', line) });
     this.llm = llm;
     this.safe('begin', () => this.brain.begin?.({
@@ -370,6 +404,7 @@ export class ShellController {
       llm,
       caseId,
       caseTitle: caseId === null ? null : teachCase(caseId).title,
+      post: this.makePost(session),
     }), undefined);
     if (llm === null) this.sys('No LLM route (placeholder API): the brain reads answers with its heuristics.');
   }
@@ -385,6 +420,7 @@ export class ShellController {
     if (this.state.offRecord) return;
     // Before anything else: pending and queued model calls are cut off, so no expert words are posted after the switch.
     this.llm?.abort();
+    this.postCut?.abort();
     if (this.uploader?.isRecording()) {
       // This is the last line that is queued: nothing after the switch reaches the server.
       this.sys('Off the record: capture and upload stopped.');
@@ -422,6 +458,7 @@ export class ShellController {
     this.stopTick();
     // No model call is sent or left waiting once the session is over.
     this.llm?.abort();
+    this.postCut?.abort();
     const voice = this.voice;
     this.voice = null;
     // The microphone closes first: nothing below may keep it open.
@@ -628,6 +665,7 @@ export class ShellController {
     const open = [...this.state.feed].reverse().find((f) => f.status === 'asked' && f.sessionId === sessionId);
     if (!open) return;
     this.store.dispatch({ type: 'FEED_ANSWER', id: open.id, text: turn.text, atMs: turn.atMs });
+    if (this.state.highlight !== null) this.store.dispatch({ type: 'HIGHLIGHT_SET', highlight: null });
     this.store.dispatch({ type: 'VOICE_THINKING', thinking: false });
     this.deps.presenter.say('');
     this.deps.presenter.ack?.();
@@ -685,7 +723,9 @@ export class ShellController {
   private async startSample(run: number): Promise<void> {
     if (this.source || !this.session) return;
     const info = this.state.session;
-    const scenario: SampleScenarioId = info?.mode === 'teach' ? this.state.teach.sampleCase : info?.mode === 'learn' ? 'learn' : 'neutral';
+    const scenario: SampleSourceId = this.state.screen.sampleKind === 'generic' && info?.mode !== 'review'
+      ? 'generic'
+      : info?.mode === 'teach' ? this.state.teach.sampleCase : info?.mode === 'learn' ? 'learn' : 'neutral';
     await this.attach(this.deps.createSampleSource(scenario), run, true);
   }
 
@@ -822,7 +862,10 @@ export class ShellController {
     this.safe('onObservation', () => this.brain.onObservation(o), undefined);
     this.mapDirty = true;
     const context = observationToContext(o, this.source?.synthetic ?? false);
-    if (context !== null) this.sendContext(context, this.voice);
+    if (context !== null && context !== this.lastContextLine) {
+      this.lastContextLine = context;
+      this.sendContext(context, this.voice);
+    }
   }
 
   private onScreenStatus(s: ScreenStatus): void {
@@ -873,6 +916,11 @@ export class ShellController {
     }
     const decisions = this.safe('tick', () => this.brain.tick(nowMs, this.signals()), [] as BrainDecision[]);
     for (const d of decisions) this.applyDecision(d, nowMs);
+    if (this.safe('takeDirty', () => this.brain.takeDirty?.() ?? false, false)) {
+      this.store.dispatch({ type: 'GENERIC_SET', generic: this.safe('genericState', () => this.brain.genericState?.() ?? null, null) });
+      if (this.state.session?.mode === 'review' || this.state.mode === 'review') this.loadReview();
+      else this.mapDirty = true;
+    }
     if (this.mapDirty) {
       this.mapDirty = false;
       this.refreshMap();
@@ -942,6 +990,8 @@ export class ShellController {
     this.log('sent', 'USER_MSG', sent);
     this.safe('onSpoken', () => this.brain.onSpoken?.(d), undefined);
     this.record({ ...entry, spoken: true });
+    // Generic mode: the regions the question or warning is about light up over the live preview.
+    this.store.dispatch({ type: 'HIGHLIGHT_SET', highlight: d.regions && d.regions.length > 0 ? { regions: d.regions, text, atMs: nowMs } : null });
     // A question waits for the answer; a warning, a piece of feedback or a closing line is only said.
     const expectsAnswer = d.expectsAnswer ?? d.decision !== 'WARN';
     this.store.dispatch({ type: 'FEED_ADD', item: this.feedItem(entry, expectsAnswer ? 'asked' : 'said', null) });
@@ -974,6 +1024,7 @@ export class ShellController {
     this.store.dispatch({
       type: 'REVIEW_SET', gaps: review.gaps, teachBack: review.teachBack, digest: review.teachBackDigest ?? null, buttons: review.buttons ?? false,
     });
+    if (review.note !== undefined) this.store.dispatch({ type: 'REVIEW_NOTICE', notice: review.note });
     this.persistMap(review.map);
   }
 

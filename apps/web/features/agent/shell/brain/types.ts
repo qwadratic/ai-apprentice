@@ -2,6 +2,7 @@
 // (ask now, defer, skip, warn, predict), the Work Map and the tutor. The real policy, map and tutor live in
 // packages/agent (TASK-3.29); this file is the small typed boundary the shell codes against.
 // Decisions follow the BrainDecision JSON of the Clipa spec (section 6).
+import type { GenericPost, GenericShellState, ScreenRegion } from './generic.ts';
 import type { ActionCheckpoint, CheckpointReply, ScreenObservation, ScreenStatus } from '@apprentice/contracts';
 import type { LlmClient } from '@apprentice/agent';
 import type { ClipaState } from '../clipa/presenter.ts';
@@ -35,6 +36,8 @@ export interface BrainDecision {
   /** The Clipa lifecycle cue (the spec also names approach, notice, ack and retreat; the shell ignores those). */
   clipa?: { state?: ClipaState | 'notice' | 'approach' | 'ack' | 'retreat'; target?: ClipaTargetRef };
   expectsAnswer?: boolean;
+  /** Generic mode: the screen regions the question or warning is about (boxes over the live preview; Clipa points at the first). */
+  regions?: ScreenRegion[];
 }
 
 /** What the shell knows and the brain should not have to track: voice, off-record, persona, mode. */
@@ -128,6 +131,8 @@ export interface BrainSession {
   /** Teach: the sample case that is played, so the mastery summary can name it. */
   caseId?: string | null;
   caseTitle?: string | null;
+  /** Generic mode: posts an LLM task of this session (generic_question, guardrail_check, map_synthesis), or null without a route. */
+  post?: GenericPost | null;
 }
 
 /** What the brain tells the shell about an answer that changed the teach-back. */
@@ -154,6 +159,8 @@ export interface ReviewOutput {
   /** The review could not understand the expert twice: Confirm / Correct / Skip buttons are offered for the open item. */
   buttons?: boolean;
   map: DraftMap;
+  /** A status line for the Review view (generic mode: building the map, a failure, the confirmation). */
+  note?: string;
 }
 
 export interface Brain {
@@ -166,6 +173,10 @@ export interface Brain {
   onSpoken?(decision: BrainDecision): void;
   /** The source of observations changed (the sample or the person's real screen). */
   setSource?(synthetic: boolean): void;
+  /** An async model answer changed the map or the review since the last call: the shell reloads them. Optional. */
+  takeDirty?(): boolean;
+  /** Generic mode: the map_synthesis map and the Learn observations, for the shell state (the Review board reads them). */
+  genericState?(): GenericShellState | null;
   /** A spoken decision never reached the person (the voice is gone, the agent was speaking): the question goes back to the queue. */
   onNotSpoken?(decision: BrainDecision): void;
   /** Teach: what has been mastered so far, or null. */

@@ -18,6 +18,8 @@ import type {
   WorkMap,
 } from '@apprentice/agent';
 import type { Mode } from '../state/types.ts';
+import { GenericMind, genericDraft, isScreenActivity } from './generic.ts';
+import type { GenericPost, GenericShellState } from './generic.ts';
 import type {
   AnswerInput, AnswerResult, Brain, BrainDecision, BrainSession, BrainSignals, ClipaTargetRef, DraftMap, DraftStep, GuardrailRef,
   MasteryLines, ReviewOutput, TranscriptTurn,
@@ -132,8 +134,13 @@ export class AgentBrain implements Brain {
   private lastLearnDecisionAtMs = 0;
   private emptyNoted = false;
 
+  /** Generic mode (any app, entire screen): screen_activity observations; the model writes the questions and the checks. */
+  private readonly generic: GenericMind;
+  private post: GenericPost | null = null;
+
   constructor(options: AgentBrainOptions) {
     this.options = options;
+    this.generic = new GenericMind((line) => options.log(line));
     this.state = createMapState(options.customers);
   }
 
@@ -160,6 +167,8 @@ export class AgentBrain implements Brain {
     this.waitingNote = null;
     this.lastLearnDecisionAtMs = 0;
     this.emptyNoted = false;
+    this.generic.begin(session.mode);
+    this.post = session.post ?? null;
     this.clarifier = new ReviewClarifier();
     this.heard = null;
     this.buttons = false;
@@ -201,6 +210,10 @@ export class AgentBrain implements Brain {
   // ---- inputs -------------------------------------------------------------
 
   onObservation(o: ScreenObservation): void {
+    if (isScreenActivity(o as { kind: string })) {
+      this.generic.observe(o as unknown as Parameters<GenericMind['observe']>[0]);
+      return;
+    }
     this.observations.push(o);
     if (this.observations.length > MAX_OBSERVATIONS) this.observations.shift();
     try {
@@ -250,6 +263,8 @@ export class AgentBrain implements Brain {
   }
 
   onTranscript(t: TranscriptTurn): void {
+    // Expert and agent turns stay in memory for the generic questions (never in the visible log).
+    this.generic.onTranscript(t.role, t.text, t.atMs);
     if (t.role !== 'user') return;
     // A final transcript means the phrase just ended: the human channel is quiet from here for its threshold.
     this.policy?.humanSpeech(true, t.atMs);
@@ -266,7 +281,11 @@ export class AgentBrain implements Brain {
       this.policy?.setOffRecord(signals.offRecord, nowMs);
     }
     const out: BrainDecision[] = this.outbox.splice(0);
-    if (signals?.offRecord) return out;
+    if (signals?.offRecord) { this.generic.cancel(); return out; }
+    if (this.generic.active) {
+      if (nowMs < this.holdUntilMs) return out;
+      return [...out, ...this.generic.tick(nowMs, signals, this.post)];
+    }
     if (this.mode === 'review') return [...out, ...this.reviewTick(nowMs, signals)];
     const policy = this.policy;
     if (policy === null) return out;
@@ -312,6 +331,10 @@ export class AgentBrain implements Brain {
   onNotSpoken(decision: BrainDecision): void {
     const id = decision.questionId;
     if (id === undefined) return;
+    if (this.generic.notSpoken(id)) {
+      this.holdUntilMs = this.nowMs + NOT_SPOKEN_BACKOFF_MS;
+      return;
+    }
     const open = this.open;
     if (open === null || open.questionId !== id) return;
     this.open = null;
@@ -348,9 +371,13 @@ export class AgentBrain implements Brain {
   }
 
   async onAnswer(a: AnswerInput): Promise<AnswerResult | void> {
+    if (this.generic.inReview && (a.kind === 'confirm' || a.kind === 'correct' || a.kind === 'skip')) {
+      return this.generic.pressReview(a.kind, a.text, this.post) ? { changed: true } : undefined;
+    }
     if (a.kind === 'confirm') return this.pressButton(a, 'confirm');
     if (a.kind === 'skip') return this.pressButton(a, 'skip');
     if (a.kind === 'correct') return this.reply(a, 'correct');
+    if (this.generic.hasOpenQuestion && this.generic.answer(a.text, a.atMs, this.post)) return { changed: true };
     const open = this.open;
     if (open === null || this.busy) {
       this.options.log('An answer arrived with no open question: it stays in the transcript only.');
@@ -592,6 +619,7 @@ export class AgentBrain implements Brain {
    * reload for the Learn view or the draft map (shown = false) never states anything: nobody read it.
    */
   review(shown = false): ReviewOutput {
+    if (this.generic.inReview || (this.generic.map !== null && this.mode !== 'learn')) return this.genericReview();
     const map = workingMap(this.state);
     const held = this.learnPolicy?.heldForReview(this.nowMs) ?? [];
     const gaps = planFollowUps(map, { persona: this.persona, held, max: MAX_FOLLOW_UPS, unresolved: this.clarifier.unresolved() }).map((q) => ({
@@ -606,7 +634,40 @@ export class AgentBrain implements Brain {
         this.heard = tb;
       }
     }
-    return { gaps, teachBack: tb?.text ?? null, teachBackDigest: tb?.digest ?? null, buttons: this.buttons, map: this.shown(workingMap(this.state)) };
+    const shownMap = this.shown(workingMap(this.state));
+    const g = this.generic.notes.length > 0 ? this.generic.draftSteps() : null;
+    // Learn in generic mode: the answered questions are the draft steps until Review builds the map (map_synthesis).
+    const merged = g === null ? shownMap : { ...shownMap, steps: [...shownMap.steps, ...g.steps], guardrails: [...(shownMap.guardrails ?? []), ...g.guardrails] };
+    return { gaps, teachBack: tb?.text ?? null, teachBackDigest: tb?.digest ?? null, buttons: this.buttons, map: merged };
+  }
+
+  /** Review in generic mode: the map from map_synthesis, its open gaps and its teach-back. */
+  private genericReview(): ReviewOutput {
+    const view = this.generic.reviewView();
+    const map = this.generic.map;
+    const draft: DraftMap = map === null
+      ? { steps: [], guardrails: [], version: 0, confirmed: false }
+      : { ...genericDraft(map, () => null), version: map.version, confirmed: map.confirmed };
+    return {
+      gaps: view.gaps.map((g, i) => ({ id: `gap-${i + 1}`, topic: 'gap', question: g.question, evidenceIds: [...g.evidenceIds] })),
+      teachBack: view.teachBack,
+      teachBackDigest: map === null ? null : `generic-v${map.version}`,
+      buttons: view.teachBack !== null && map !== null && !map.confirmed,
+      map: draft,
+      ...(view.note !== null ? { note: view.note } : {}),
+    };
+  }
+
+  /** The generic map as map_synthesis gave it, plus what the last Learn saw: for the Review board (fromGenericMap). */
+  genericState(): GenericShellState | null {
+    return this.generic.shellState();
+  }
+
+  /** The screen should reload the map or the review (an async model answer arrived). */
+  takeDirty(): boolean {
+    const d = this.generic.dirty;
+    this.generic.dirty = false;
+    return d;
   }
 
   private shown(map: WorkMap): DraftMap {

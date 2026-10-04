@@ -249,7 +249,7 @@ export function createRig(options: { responders?: Responder[]; brain?: Brain; cr
     createBrain: (log) => { brain = options.createBrain ? options.createBrain(log) : brain; return brain; },
     // `scenarios: true` plays the scripts of the product (the customer_07 Learn run and the Teach cases); by default the neutral sample.
     createSampleSource: (scenario) => {
-      const source = new SampleObservationSource(clock.now, timers, options.scenarios ? scenario : 'neutral');
+      const source = new SampleObservationSource(clock.now, timers, options.scenarios && scenario !== 'generic' ? scenario : 'neutral');
       const stop = source.stop.bind(source);
       source.stop = async () => { trace.push('source.stop'); await stop(); };
       sources.push(source);

@@ -107,7 +107,8 @@ export function createRuntime(): ShellRuntime {
     connectVoice: harness?.connectVoice ?? connectElevenLabs,
     // The real policy, Work Map and tutor of packages/agent (TASK-3.29); model calls go through the session's LLM route.
     createBrain: (log) => new AgentBrain({ log, customers: SAMPLE_CUSTOMERS }),
-    createSampleSource: (scenario) => new SampleObservationSource(now, browserTimers, scenario),
+    // WIP: 'generic' (screen_activity sample) is not written yet; it falls back to the neutral sample.
+    createSampleSource: (scenario) => new SampleObservationSource(now, browserTimers, scenario === 'generic' ? 'neutral' : scenario),
     presenter,
     now,
     perfNow: () => performance.now(),
