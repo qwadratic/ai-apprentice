@@ -293,17 +293,50 @@ test('Show ends: the map is built in the background, so Reflect opens with it re
   assert.equal(of(f.cues, 'map').length, 1);
 });
 
-test('Review asks at most two open points, then reads the teach-back', async () => {
-  const gaps = ['Who is the lead?', 'Is 300 a hard limit?', 'Who decides above it?'].map((question) => ({ question, targetId: null, evidenceIds: [], regionIds: [] }));
+test('Review asks at most three open points, then reads the teach-back', async () => {
+  assert.equal(RULES.reviewMaxGaps, 3, 'the brief asks for at least three follow-ups in the debrief');
+  const gaps = ['Who is the lead?', 'Is 300 a hard limit?', 'Who decides above it?', 'What if the lead is away?'].map((question) => ({ question, targetId: null, evidenceIds: [], regionIds: [] }));
   const r = rig({ map_synthesis: () => ok({ ...MAP, gaps }), map_edit: () => ok(NO_EDIT) });
   await r.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', 'Changed.'));
   await r.send({ type: 'session', mode: 'learn', live: false, reason: 'user' }, { type: 'session', mode: 'review', live: true, reason: null });
-  for (const answer of ['The team lead.', 'Yes, hard.']) {
+  for (const answer of ['The team lead.', 'Yes, hard.', 'The finance director.']) {
     await r.advance(RULES.pauseMs + RULES.gapAfterAnswerMs);
     await r.send({ type: 'transcript', role: 'expert', text: answer });
   }
   await r.advance(RULES.pauseMs + RULES.gapAfterAnswerMs);
-  assert.deepEqual(cueOf(r.cues, 'ask').map((a) => a.text), ['Who is the lead?', 'Is 300 a hard limit?']);
+  assert.deepEqual(cueOf(r.cues, 'ask').map((a) => a.text), ['Who is the lead?', 'Is 300 a hard limit?', 'Who decides above it?']);
+  assert.equal(of(r.cues, 'teachback').length, 1);
+});
+
+test('Review: an answer that resolves its open point does not make Clipa skip the next one', async () => {
+  const gaps = ['Who is the lead?', 'Is 300 a hard limit?', 'Who decides above it?'].map((question) => ({ question, targetId: null, evidenceIds: [], regionIds: [] }));
+  // Each answer resolves the point just asked, which is the first one left: the list gets shorter under Clipa.
+  const resolve = { intent: 'edit', operations: [{ op: 'resolve_gap', targetId: 'gap-1', field: null, value: null, value2: null, quote: null }], reply: '', teachBack: null };
+  const r = rig({ map_synthesis: () => ok({ ...MAP, gaps }), map_edit: () => ok(resolve) });
+  await r.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', 'Changed.'));
+  await r.send({ type: 'session', mode: 'learn', live: false, reason: 'user' }, { type: 'session', mode: 'review', live: true, reason: null });
+  for (const answer of ['The team lead.', 'Yes, hard.', 'The finance director.']) {
+    await r.advance(RULES.pauseMs + RULES.gapAfterAnswerMs);
+    await r.send({ type: 'transcript', role: 'expert', text: answer });
+  }
+  await r.advance(RULES.pauseMs + RULES.gapAfterAnswerMs);
+  assert.deepEqual(cueOf(r.cues, 'ask').map((a) => a.text), ['Who is the lead?', 'Is 300 a hard limit?', 'Who decides above it?'], 'all three, in order');
+  assert.equal(of(r.cues, 'teachback').length, 1, 'then the teach-back');
+  assert.equal((cueOf(r.cues, 'map').at(-1)?.map as ConductorMap).gaps.length, 0, 'every answer resolved its point');
+});
+
+test('Review: a point the person picked on the board counts as asked; Clipa asks the others, up to three, then the teach-back', async () => {
+  const gaps = ['Who is the lead?', 'Is 300 a hard limit?', 'Who decides above it?', 'What if the lead is away?'].map((question) => ({ question, targetId: null, evidenceIds: [], regionIds: [] }));
+  const r = rig({ map_synthesis: () => ok({ ...MAP, gaps }), map_edit: () => ok(NO_EDIT) });
+  await r.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', 'Changed.'));
+  await r.send({ type: 'session', mode: 'learn', live: false, reason: 'user' }, { type: 'session', mode: 'review', live: true, reason: null });
+  await r.send({ type: 'ui', action: 'answer_gap', targetId: 'gap-3', text: null });
+  assert.deepEqual(cueOf(r.cues, 'ask').map((a) => a.text), ['Who decides above it?']);
+  for (const answer of ['The finance director.', 'The team lead.', 'Yes, hard.']) {
+    await r.send({ type: 'transcript', role: 'expert', text: answer });
+    await r.advance(RULES.pauseMs + RULES.gapAfterAnswerMs);
+  }
+  assert.deepEqual(cueOf(r.cues, 'ask').map((a) => a.text), ['Who decides above it?', 'Who is the lead?', 'Is 300 a hard limit?']);
   assert.equal(of(r.cues, 'teachback').length, 1);
 });
 

@@ -30,9 +30,9 @@ export const RULES = {
   teachCheckGapMs: 8_000,
   urgentSettleMs: 400,
   urgentCheckGapMs: 3_000,
-  /** Review: wait this long after an answer before the next gap; ask at most reviewMaxGaps of them (a 2-3 minute demo). */
+  /** Review: wait this long after an answer before the next gap; ask at most reviewMaxGaps of them (a 2-3 minute demo; the brief wants three). */
   gapAfterAnswerMs: 1500,
-  reviewMaxGaps: 2,
+  reviewMaxGaps: 3,
   /** A recognised process needs this confidence before Clipa follows its strategy. */
   processConfidence: 0.6,
   // Switches for the live demo: false turns the feature off and nothing else changes.
@@ -301,8 +301,8 @@ export class Conductor {
   private freshMap = false;
 
   /** `origin`: the map is this session's own, a copy of an earlier session's, or the demo map (Reflect's fallbacks). */
-  private review: { phase: ReviewPhase; map: ConductorMap | null; version: number; gapIndex: number; awaiting: 'gap' | 'teachback' | null; answeredAt: number; unclearAsked: boolean; editFailed: boolean; origin: MapOrigin } =
-    { phase: 'idle', map: null, version: 0, gapIndex: 0, awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false, origin: 'session' };
+  private review: { phase: ReviewPhase; map: ConductorMap | null; version: number; asked: Set<string>; awaiting: 'gap' | 'teachback' | null; answeredAt: number; unclearAsked: boolean; editFailed: boolean; origin: MapOrigin } =
+    { phase: 'idle', map: null, version: 0, asked: new Set(), awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false, origin: 'session' };
   private readonly voiceQueue: string[] = [];
 
   private readonly cues: CueEnvelope[] = [];
@@ -828,7 +828,6 @@ export class Conductor {
     if (this.review.awaiting === 'teachback') { void this.classifyReply(text); return; }
     if (this.review.awaiting === 'gap') {
       this.review.awaiting = null;
-      this.review.gapIndex++;
       this.review.answeredAt = this.deps.now();
     }
     // Everything the expert says in Review can change the map: Clipa makes the edit, the expert only talks.
@@ -978,10 +977,10 @@ export class Conductor {
     const confirmable = this.review.phase === 'teachback' || (this.review.phase === 'gaps' && this.review.origin !== 'session');
     if (action === 'confirm' && map && confirmable) { this.confirmMap(); return; }
     if (action === 'correct' && map && text) { this.voiceQueue.push(text); void this.drainVoice(); return; }
-    if (action === 'finish' && this.liveMode === 'review' && this.review.phase === 'gaps') { this.review.gapIndex = map?.gaps.length ?? 0; this.finishGaps(); return; }
+    if (action === 'finish' && this.liveMode === 'review' && this.review.phase === 'gaps') { this.finishGaps(); return; }
     if (action === 'answer_gap' && map) {
       const index = map.gaps.findIndex((g, i) => `gap-${i + 1}` === targetId || g.targetId === targetId);
-      if (index >= 0) { this.review.gapIndex = index; this.askGap(); }
+      if (index >= 0) this.askGap(index);
       return;
     }
     if (action === 'ask_about' && map && targetId) {
@@ -1066,8 +1065,10 @@ export class Conductor {
     const r = this.review;
     if (r.phase !== 'gaps' || r.awaiting !== null || this.voiceQueue.length) return;
     if (!this.paused(now) || now - r.answeredAt < RULES.gapAfterAnswerMs) return;
-    if (!r.map || r.gapIndex >= Math.min(r.map.gaps.length, RULES.reviewMaxGaps)) { this.finishGaps(); return; }
-    this.askGap();
+    // The next open point not asked yet: an answer that resolves a gap shortens the list, so a position in it would skip one.
+    const next = r.map ? r.map.gaps.findIndex((g) => !r.asked.has(g.question)) : -1;
+    if (next < 0 || r.asked.size >= RULES.reviewMaxGaps) { this.finishGaps(); return; }
+    this.askGap(next);
   }
 
   /** The rules Teach checks: the recognised process's first, then the rest of what Clipa learned (at most 10). */
@@ -1255,7 +1256,7 @@ export class Conductor {
       const map = await this.run<MapSynthesisOutput>('map_synthesis', { observations, transcript: this.transcript(60, 600), correction: null, previousTeachBack: null });
       if (map && !this.offRecord && !this.ownConfirmed()) {
         const built: ConductorMap = { ...map, baselineProvenance: provenance, comments: [] };
-        this.review = { phase: 'idle', map: built, version: this.review.version, gapIndex: 0, awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false, origin: 'session' };
+        this.review = { phase: 'idle', map: built, version: this.review.version, asked: new Set(), awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false, origin: 'session' };
         this.freshMap = true;
         this.deps.maps.recordBuilt(this.sessionId, built, this.deps.now());
       }
@@ -1287,7 +1288,7 @@ export class Conductor {
     const fallback = this.review.map !== null && this.review.origin !== 'session';
     if (this.review.map && !(fallback && observations.length > 0)) { this.publishMap(this.review.map, this.review.phase === 'confirmed', false); this.guide('talk_to_edit', 'web'); return; }
     if (observations.length === 0) { this.openFallbackMap(); return; }
-    this.review = { phase: 'building', map: null, version: this.review.version, gapIndex: 0, awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false, origin: 'session' };
+    this.review = { phase: 'building', map: null, version: this.review.version, asked: new Set(), awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false, origin: 'session' };
     this.pose('think');
     this.guide('building', 'web');
     this.thought('Putting your map together…');
@@ -1314,7 +1315,7 @@ export class Conductor {
     const origin: MapOrigin = stored === null ? 'demo' : stored.sessionId === this.sessionId ? 'session' : 'earlier';
     const source = stored === null ? demoMap() : structuredClone(stored.map);
     this.freshMap = false;
-    this.review = { phase: 'gaps', map: null, version: this.review.version, gapIndex: 0, awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false, origin };
+    this.review = { phase: 'gaps', map: null, version: this.review.version, asked: new Set(), awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false, origin };
     this.publishMap({ ...source, processes: source.processes ?? [], comments: commentsOf(source), baselineProvenance: this.provenanceSnapshot() }, false);
     this.pose('listen');
     if (origin === 'demo') this.emit({ type: 'context', text: '[map] The map on the board is a synthetic demo map, not from this session: payment terms on an invoice email and a prepaid cost spread by quarter. Say so if asked; any change the person asks for is applied by the app.' });
@@ -1338,17 +1339,19 @@ export class Conductor {
     this.emit({ type: 'map', version: this.review.version, map, confirmed, origin: this.review.origin });
   }
 
-  private askGap(): void {
+  /** Asks the open point at `index` of the map's gaps (the next one not asked yet, or the one the person picked on the board). */
+  private askGap(index: number): void {
     const map = this.review.map;
-    const gap = map?.gaps[this.review.gapIndex];
+    const gap = map?.gaps[index];
     if (!map || !gap) return;
+    this.review.asked.add(gap.question);
     this.review.awaiting = 'gap';
     const regions = this.regionsFor(gap.evidenceIds, gap.regionIds);
     if (regions[0]) {
       this.emit({ type: 'point', target: { kind: 'region', ...regions[0] } });
       this.attention({ kind: 'region', ...regions[0] });
     } else this.emit({ type: 'point', target: { kind: 'ui', name: 'board_gap' } });
-    this.emit({ type: 'ask', questionId: `gap-${this.review.gapIndex + 1}`, text: gap.question, topic: 'gap', regions, evidenceIds: this.evidenceFor(gap.evidenceIds) });
+    this.emit({ type: 'ask', questionId: `gap-${index + 1}`, text: gap.question, topic: 'gap', regions, evidenceIds: this.evidenceFor(gap.evidenceIds) });
   }
 
   /** After the gaps: rebuild the map when an answer could not be applied by voice, then read the teach-back. */
