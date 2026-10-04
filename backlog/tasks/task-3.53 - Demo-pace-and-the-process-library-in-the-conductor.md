@@ -5,6 +5,7 @@ status: In Progress
 assignee:
   - '@qwadratic'
 created_date: '2026-10-04 06:07'
+updated_date: '2026-10-04 06:58'
 labels:
   - stream-b
 dependencies: []
@@ -25,14 +26,20 @@ Ivan, 4 Oct 06:00-06:20 UTC: the full playtest took about 10 minutes; the demo m
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Conductor and llm tests updated for processes, processId and the new prompt hashes; root npm run check green
-- [ ] #2 PR merged and deployed
+- [x] #1 Conductor and llm tests updated for processes, processId and the new prompt hashes; root npm run check green
+- [x] #2 PR merged and deployed
 - [ ] #3 One Show with two processes gives a map with two processes; Pass it on recognises which one is on screen
 <!-- AC:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria checked, final summary says what changed and how it was verified
-- [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
-- [ ] #3 No secrets, keys or real personal data in the diff
+- [x] #2 Fast checks of the touched package pass; CI is green on the branch head
+- [x] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+4 Oct 06:58 UTC: finished by an Opus builder (merge of main, fail-safe background map and recognition, RULES.recognizeProcesses / RULES.mapAfterShow switches, tests for processes, processId, process_match and the new prompt hashes). Root npm run check green; PR #55 CI green on 82ba7e3; merged as 5efbce4 and deployed (VM deployed_sha 5efbce4, Pages deploy.json 5efbce4). Open: AC #3 needs one live Show with two processes. Risk for the pitch: confirmed maps from a rehearsal stay in server memory and feed recognition and Teach rules; restart apprentice-api after the rehearsal.
+<!-- SECTION:NOTES:END -->
