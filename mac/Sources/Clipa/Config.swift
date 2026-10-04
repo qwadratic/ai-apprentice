@@ -22,6 +22,8 @@ struct ClipaConfig {
     /// macOS voice processing on the microphone, so Clipa can be interrupted while she speaks. Off by default: the
     /// plain audio engine (the path the CI smoke test plays through), and the microphone is muted while she speaks.
     var echoCancellation: Bool
+    /// The pointer for vision: a magenta ring drawn on each uploaded frame plus a short pointer track with the upload.
+    var pointerMarker: Bool
 
     static let defaults = ClipaConfig(
         server: URL(string: "https://apprentice.exe.xyz")!,
@@ -32,7 +34,8 @@ struct ClipaConfig {
         jpegQuality: 0.6,
         uploadInterval: 1.6,
         voice: true,
-        echoCancellation: false
+        echoCancellation: false,
+        pointerMarker: true
     )
 
     private struct File: Decodable {
@@ -44,6 +47,7 @@ struct ClipaConfig {
         var upload_interval: Double?
         var voice: Bool?
         var echo_cancellation: Bool?
+        var pointer_marker: Bool?
     }
 
     static func load() -> ClipaConfig {
@@ -67,6 +71,7 @@ struct ClipaConfig {
         if let interval = file.upload_interval, interval >= 0.5, interval <= 10 { config.uploadInterval = interval }
         if env["CLIPA_VOICE"] == "0" || file.voice == false { config.voice = false }
         if env["CLIPA_AEC"] == "1" || file.echo_cancellation == true { config.echoCancellation = true }
+        if env["CLIPA_POINTER"] == "0" || file.pointer_marker == false { config.pointerMarker = false }
         return config
     }
 

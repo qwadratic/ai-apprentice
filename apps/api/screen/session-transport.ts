@@ -4,6 +4,7 @@ import type {VisionPublicationContext, VisionQueueEvent, VisionSurface} from '..
 import type {ProcessedFrame, ScreenEvidenceRecord} from './evidence-store.ts';
 import type {ScreenService} from './service.ts';
 import {ObservationProvenanceRegistry} from './provenance.ts';
+import type {PointerHint} from './pointer.ts';
 
 export interface SessionServiceFactoryContext {
   readonly sessionId: string; readonly generation: number;
@@ -36,6 +37,8 @@ export interface FrameUpload {
   readonly generation: number; readonly frame: ProcessedFrame; readonly provenance: {
     readonly surface: VisionSurface | null; readonly sourceRevision: string | null; readonly captureGeneration: number | null;
   };
+  /** The mouse pointer when the frame was captured (macOS app only): a hint for the vision request. */
+  readonly pointer?: PointerHint | null;
 }
 export class ScreenSessionHub {
   readonly #sessions = new Map<string, ScreenSessionHandle>();
@@ -96,7 +99,7 @@ export class ScreenSessionHub {
   offer(record: ScreenSessionHandle, upload: FrameUpload): ReturnType<ScreenService['offer']> {
     this.#assertGeneration(record, upload.generation);
     if (record.state !== 'capturing') throw new SessionTransportError('inactive');
-    return record.service.offer(upload.frame, upload.provenance);
+    return record.service.offer(upload.frame, upload.provenance, upload.pointer ?? null);
   }
   updates(record: ScreenSessionHandle, generation: number, cursor: number, limit = 50): ScreenUpdates {
     this.#assertGeneration(record, generation);

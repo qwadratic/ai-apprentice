@@ -35,6 +35,57 @@ enum ImageTools {
         return changed
     }
 
+    /// A copy of `image` in a plain 8-bit RGB bitmap, or nil when Core Graphics cannot make one.
+    static func copy(_ image: CGImage) -> CGImage? {
+        guard let context = bitmapContext(width: image.width, height: image.height) else { return nil }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        return context.makeImage()
+    }
+
+    /// `image` with the mouse pointer marked: a magenta ring (on a white halo, so it shows on any background) and a
+    /// dot at the hotspot. `x` and `y` are normalised 0..1, origin top left. Nil when the bitmap cannot be made.
+    static func markPointer(_ image: CGImage, x: Double, y: Double) -> CGImage? {
+        let width = image.width
+        let height = image.height
+        guard width > 0, height > 0, let context = bitmapContext(width: width, height: height) else { return nil }
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        // Core Graphics counts y from the bottom.
+        let w = CGFloat(width)
+        let h = CGFloat(height)
+        let cx: CGFloat = CGFloat(x) * w
+        let cy: CGFloat = (1 - CGFloat(y)) * h
+        let radius: CGFloat = max(8, 0.02 * w)
+        let stroke: CGFloat = max(3, min(4, w / 360))
+        let ring = CGRect(x: cx - radius, y: cy - radius, width: radius * 2, height: radius * 2)
+        let magenta = CGColor(srgbRed: 1, green: 0, blue: 1, alpha: 1)
+        let white = CGColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.9)
+        context.setStrokeColor(white)
+        context.setLineWidth(stroke + 2)
+        context.strokeEllipse(in: ring)
+        context.setStrokeColor(magenta)
+        context.setLineWidth(stroke)
+        context.strokeEllipse(in: ring)
+        let dot: CGFloat = max(2.5, stroke * 0.8)
+        context.setFillColor(white)
+        context.fillEllipse(in: CGRect(x: cx - dot - 1, y: cy - dot - 1, width: (dot + 1) * 2, height: (dot + 1) * 2))
+        context.setFillColor(magenta)
+        context.fillEllipse(in: CGRect(x: cx - dot, y: cy - dot, width: dot * 2, height: dot * 2))
+        return context.makeImage()
+    }
+
+    private static func bitmapContext(width: Int, height: Int) -> CGContext? {
+        let space = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+        return CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: space,
+            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+        )
+    }
+
     /// JPEG bytes of `image` at `quality` (0...1); the image is already scaled by ScreenCaptureKit.
     static func jpegData(_ image: CGImage, quality: Double) -> Data? {
         let data = NSMutableData()

@@ -5,6 +5,8 @@ import type {VisionOfferContext, VisionPublicationContext, VisionQueueEvent, Vis
 import {normalizeFrame} from './evidence-store.ts';
 import type {ProcessedFrame, ScreenEvidenceRecord, ScreenEvidenceStore} from './evidence-store.ts';
 import type {VisionRunner} from './runner-client.ts';
+import {pointerLine} from './pointer.ts';
+import type {PointerHint} from './pointer.ts';
 import {FrameStoryboard} from './storyboard.ts';
 import type {StoryboardOptions} from './storyboard.ts';
 import {createObservationFactory, parseVisionResult, VISION_RESULT_SCHEMA, WORKSPACE_VISION_SCHEMA} from './vision-contract.ts';
@@ -20,6 +22,8 @@ export const defaultVisionPrompt = 'Describe the currently visible order, email 
 const genericRules = `Describe the visible screen using only visible pixels.
 Return order_view, email_draft or ticket only for the demo workspace, whose cards are headed "source order", "compose email" and "record outcome".
 Any other readable app or website is screen_activity. pendingAction is the control under the pointer or in focus (for example a hovered Send button), else null; pendingRegionId is the id of its region in regions, else null.
+A magenta ring with a dot at its centre, when present, marks the mouse pointer and is not part of the app. A Pointer line, when given, places the pointer in the latest frame, normalised 0..1 like the boxes.
+Say in summary what the pointer rests on. When the person seems about to use the control under the pointer (it rests on a button, link or field), that control is pendingAction and its region is pendingRegionId.
 Give up to 6 regions with short unique ids (r1, r2, ...): the fields and controls the person is working with.
 Each box is [x, y, width, height] normalised 0..1 to the processed frame, with x + width <= 1 and y + height <= 1.`;
 /** One generic frame per call: the request before storyboards, byte for byte (VISION_FRAMES=1, or no earlier frame). */
@@ -46,7 +50,8 @@ type ServiceQueueOptions = Omit<VisionQueueOptions<ProcessedFrame, VisionResult,
 export interface ScreenService {
   start(session: {sessionId: string; sessionEpochMs: number}): void; pause(): void; resume(): void; stop(): void;
   snapshot(): ReturnType<VisionQueue<ProcessedFrame, VisionResult, ScreenObservation, ScreenEvidenceRecord>['snapshot']>;
-  offer(frame: unknown, context?: VisionOfferContext): ReturnType<VisionQueue<ProcessedFrame, VisionResult, ScreenObservation, ScreenEvidenceRecord>['offer']>;
+  /** `pointer`: the mouse pointer at capture (macOS app), added as one line to a generic frame's vision request. */
+  offer(frame: unknown, context?: VisionOfferContext, pointer?: PointerHint | null): ReturnType<VisionQueue<ProcessedFrame, VisionResult, ScreenObservation, ScreenEvidenceRecord>['offer']>;
   readonly evidence: ScreenEvidenceStore;
 }
 export interface ScreenServiceOptions {
@@ -76,6 +81,8 @@ export function createScreenService(options: ScreenServiceOptions): ScreenServic
   const isGeneric = (surface: VisionSurface | null): boolean => surface === null && options.genericVision !== false;
   // Recent generic frames for the next call. A workspace frame never enters it and always goes alone.
   const storyboard = new FrameStoryboard(options.storyboard);
+  // The pointer hint of each offered frame, until the queue lets go of the frame (the queue analyses the same object).
+  const pointers = new WeakMap<ProcessedFrame, PointerHint>();
   const queue = new VisionQueue<ProcessedFrame, VisionResult, ScreenObservation, ScreenEvidenceRecord>({
     ...options.queueOptions, evidence: options.evidence, publish: options.publish, onEvent: options.onEvent,
     validate: parseVisionResult, makeObservation: createObservationFactory(options.parseObservation),
@@ -84,9 +91,11 @@ export function createScreenService(options: ScreenServiceOptions): ScreenServic
       const generic = isGeneric(surface);
       // Oldest first, the analysed frame last; the queue still saves only the analysed frame as Evidence.
       const frames = generic ? storyboard.framesFor(frame) : [frame];
-      const targetedPrompt = generic ? frames.length > 1 ? storyboardPrompt(frames.length) : genericPrompt :
+      const pointer = generic ? pointers.get(frame) : undefined;
+      const basePrompt = generic ? frames.length > 1 ? storyboardPrompt(frames.length) : genericPrompt :
         surface === null ? prompt :
         `${prompt}\nAnalyze the ${surfaceLabels[surface]} surface. Return its matching kind, or incomplete if it is not readable.`;
+      const targetedPrompt = pointer ? `${basePrompt}\n${pointerLine(pointer)}` : basePrompt;
       const result = await options.runner.vision({images: frames.map(item => ({media_type: item.mediaType,
         data: Buffer.from(item.bytes).toString('base64')})), prompt: targetedPrompt,
         system: generic ? genericVisionSystem : visibleOnlySystem,
@@ -100,8 +109,10 @@ export function createScreenService(options: ScreenServiceOptions): ScreenServic
     resume: () => { storyboard.clear(); queue.resume(); },
     stop: () => { storyboard.clear(); queue.stop(); },
     snapshot: () => queue.snapshot(),
-    offer: (input, context) => {
+    offer: (input, context, pointer) => {
       const frame = normalizeFrame(input);
+      // Before queue.offer: the queue may start analysing this frame inside the call.
+      if (pointer) pointers.set(frame, pointer);
       // The queue may start analysing inside offer(); that call already has its earlier frames, and this frame is
       // added afterwards, for the calls that follow.
       const outcome = queue.offer(frame, context);

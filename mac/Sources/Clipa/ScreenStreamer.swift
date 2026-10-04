@@ -11,7 +11,9 @@ import VideoToolbox
 ///   thumbnail difference skips frames that barely moved (a blinking caret): at least `minChangedCells` cells must
 ///   differ by more than `levelThreshold` from the last frame that was sent.
 /// - Changed frames are JPEG encoded (quality about 0.6) and handed to `onFrame` with their capture time.
-/// - Clipa's own overlay is excluded from the capture, and the pointer is not drawn.
+/// - Clipa's own overlay is excluded from the capture, and the system pointer is not drawn. With a `PointerTracker`,
+///   each sent frame carries a magenta ring where the pointer is (when it is on this display) plus the pointer track,
+///   and when the pointer comes to rest elsewhere the last frame goes again with the ring moved.
 final class ScreenStreamer: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     struct Settings {
         var fps: Double = 2
@@ -40,15 +42,21 @@ final class ScreenStreamer: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
     private var lastSentThumb: [UInt8]?
     private var frameCounter = 0
     private var runId = UUID().uuidString.prefix(6).lowercased()
+    /// The last sent frame without the ring (only with a pointer tracker), for a resend when the pointer settles.
+    private var lastBase: CGImage?
+    private var lastSentPointer: CGPoint?
+    private let pointerTracker: PointerTracker?
 
     /// The display being captured, in AppKit global coordinates (for mapping a normalised box back onto the screen).
     private(set) var displayFrame: CGRect = NSScreen.screens.first?.frame ?? .zero
     private(set) var outputSize: CGSize = .zero
     var isRunning: Bool { stream != nil }
 
-    init(settings: Settings) {
+    init(settings: Settings, pointer: PointerTracker? = nil) {
         self.settings = settings
+        self.pointerTracker = pointer
         super.init()
+        pointer?.onSettled = { [weak self] in self?.pointerSettled() }
     }
 
     func start(clock: SessionClock) async throws {
@@ -88,6 +96,8 @@ final class ScreenStreamer: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
             self.lastSentThumb = nil
             self.frameCounter = 0
             self.runId = UUID().uuidString.prefix(6).lowercased()
+            self.lastBase = nil
+            self.lastSentPointer = nil
         }
         try await stream.startCapture()
         self.stream = stream
@@ -102,6 +112,21 @@ final class ScreenStreamer: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         queue.sync {
             self.clock = nil
             self.lastSentThumb = nil
+            self.lastBase = nil
+            self.lastSentPointer = nil
+        }
+    }
+
+    /// Main thread (from the tracker): the pointer came to rest. If it rests away from the ring on the last frame
+    /// sent, that frame goes again with the ring where the pointer is now: the screen itself may not have changed.
+    func pointerSettled() {
+        queue.async { [weak self] in
+            guard let self, let clock = self.clock, let base = self.lastBase, let tracker = self.pointerTracker else { return }
+            let now = ProcessInfo.processInfo.systemUptime
+            guard let spot = tracker.snapshot(at: now) else { return }
+            if let last = self.lastSentPointer,
+               hypot(Double(last.x) - spot.x, Double(last.y) - spot.y) <= PointerTracker.dwellRadius { return }
+            self.send(base, changed: 0, captured: now, clock: clock)
         }
     }
 
@@ -127,8 +152,19 @@ final class ScreenStreamer: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         let thumb = ImageTools.grayThumbnail(image, width: 128, height: 80)
         let changed = lastSentThumb.map { ImageTools.changedCells($0, thumb, threshold: settings.levelThreshold) } ?? -1
         if changed >= 0 && changed < settings.minChangedCells { return }
-        guard let jpeg = ImageTools.jpegData(image, quality: settings.jpegQuality) else { return }
+        guard send(image, changed: changed, captured: captured, clock: clock) else { return }
         lastSentThumb = thumb
+        if pointerTracker != nil { lastBase = ImageTools.copy(image) }
+    }
+
+    /// Capture queue: marks the pointer (when tracked and on this display), encodes and hands the frame on.
+    @discardableResult
+    private func send(_ image: CGImage, changed: Int, captured: TimeInterval, clock: SessionClock) -> Bool {
+        let spot = pointerTracker?.snapshot(at: captured)
+        var marked = image
+        if let spot, let withRing = ImageTools.markPointer(image, x: spot.x, y: spot.y) { marked = withRing }
+        guard let jpeg = ImageTools.jpegData(marked, quality: settings.jpegQuality) else { return false }
+        lastSentPointer = spot.map { CGPoint(x: $0.x, y: $0.y) }
         frameCounter += 1
         let frame = EncodedFrame(
             frameId: "mac-\(runId)-\(frameCounter)",
@@ -137,9 +173,11 @@ final class ScreenStreamer: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
             width: image.width,
             height: image.height,
             changedCells: changed,
-            captured: captured
+            captured: captured,
+            pointer: spot
         )
         onFrame?(frame)
+        return true
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {

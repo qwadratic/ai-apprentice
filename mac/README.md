@@ -71,7 +71,8 @@ Every request carries `Origin: app://apprentice-macos` and the session token as 
 
 `ScreenStreamer.swift` and `FrameUploader.swift`:
 
-- **Capture.** An `SCStream` of the main display, not snapshots. `minimumFrameInterval` is 0.5 s (about 2 fps). ScreenCaptureKit scales each frame to at most 1280 px wide. The pointer is not drawn, and Clipa's own overlay is excluded.
+- **Capture.** An `SCStream` of the main display, not snapshots. `minimumFrameInterval` is 0.5 s (about 2 fps). ScreenCaptureKit scales each frame to at most 1280 px wide. The system pointer is not drawn, and Clipa's own overlay is excluded.
+- **Pointer.** `PointerTracker.swift` samples the mouse every 100 ms (the last 5 s, kept on the Mac). When the pointer is on the main display, each sent frame gets a magenta ring with a dot at the hotspot, and the upload carries an optional `pointer` field: the position normalised 0..1, the dwell in ms (resting within 1.5 % of the frame width for at least 600 ms, else 0) and at most 8 trail points `[x, y, msAgo]`. When the pointer comes to rest away from the ring on the last frame, that frame goes again with the ring moved. The server tells the vision model what the ring means. Turn it off with `"pointer_marker": false` or `CLIPA_POINTER=0`.
 - **Skipping unchanged frames.** ScreenCaptureKit delivers a complete frame only when the screen changed. On top of that, a 128x80 grayscale thumbnail is compared with the last frame that was sent. A frame is skipped unless at least 2 cells moved by more than 10 gray levels, which filters out a blinking caret.
 - **Encoding.** JPEG at quality 0.6, typically 80 to 250 KB per frame.
 - **Upload.** One request in flight, and the latest frame wins: a frame that arrives while another is uploading replaces the one waiting, which is dropped as stale. Uploads are paced to 1.6 s, because the server analyses one frame per 1.5 s. If the server answers `sampled_out`, the same picture is sent again with a fresh timestamp.
@@ -147,7 +148,8 @@ Optional. Nothing secret is configured on the Mac: the server issues the session
 
 ```json
 { "server": "https://apprentice.exe.xyz", "web": "https://qwadratic.github.io/clipa/", "fps": 2,
-  "max_width": 1280, "jpeg_quality": 0.6, "upload_interval": 1.6, "voice": true, "echo_cancellation": false }
+  "max_width": 1280, "jpeg_quality": 0.6, "upload_interval": 1.6, "voice": true, "echo_cancellation": false,
+  "pointer_marker": true }
 ```
 
 | Variable | Meaning |
@@ -157,6 +159,7 @@ Optional. Nothing secret is configured on the Mac: the server issues the session
 | `CLIPA_FPS` | capture rate, 0.5 to 5 |
 | `CLIPA_VOICE=0` | no voice conversation; Clipa only shows her lines |
 | `CLIPA_AEC=1` | try macOS voice processing (echo cancellation) first, so Clipa can be interrupted while she speaks. Off by default: the plain audio engine, and the microphone is muted while she speaks |
+| `CLIPA_POINTER=0` | no pointer ring on frames and no pointer track with uploads (`"pointer_marker": false` in the file); on by default |
 
 The session log is in `~/Library/Application Support/Clipa/sessions/`. It holds one JSONL file per run with stages, cue types, voice state and per-frame latency. It never holds tokens, signed URLs, images or what was said.
 
@@ -169,7 +172,8 @@ Sources/Clipa/
   ClipaController+Face.swift     cue rendering, cue_done, [ASK] lines, pointing
   ConductorClient.swift          events out (seq, atMs, retry), SSE cues in (reconnect after last seq)
   ServerAPI.swift                sessions, signed voice URL, screen start/frames/lifecycle, conductor routes
-  ScreenStreamer.swift           SCStream capture, change detection, JPEG
+  ScreenStreamer.swift           SCStream capture, change detection, pointer ring, JPEG
+  PointerTracker.swift           pointer samples (100 ms, last 5 s), dwell, thinned trail
   FrameUploader.swift            one in flight, latest wins, pacing, latency log
   VoiceAgent.swift               ElevenLabs Conversational AI WebSocket, microphone and playback
   SmokeTest.swift                Clipa --smoke, the headless server-path check

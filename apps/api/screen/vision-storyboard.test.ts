@@ -176,9 +176,10 @@ test('a workspace frame keeps one image and its pinned prompt, system and schema
 });
 
 test('VISION_FRAMES=1 sends exactly the request from before storyboards', async t => {
-  // [genericVisionPrompt, genericVisionSystem] before storyboards, byte for byte.
+  // [genericVisionPrompt, genericVisionSystem] pinned byte for byte: the request before storyboards, plus the pointer
+  // rules (magenta ring, Pointer line). A deliberate prompt change updates this hash.
   assert.equal(createHash('sha256').update(JSON.stringify([genericVisionPrompt, genericVisionSystem])).digest('hex'),
-    '2b83aa33855b5cca4b62de793a304d8881ad7329f42aea148ff74de702f51e5c');
+    '87c5de2b598f9ad419d31028f4cf3cc8050632eaf20d781592632ba46899541b');
   const {sent, offer} = rig({frames: 1});
   for (let n = 1; n <= 3; n++) await offer(n, n * 1500);
   assert.equal(sent.length, 3);
