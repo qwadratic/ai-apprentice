@@ -14,7 +14,7 @@ Both are 1920x1080, H.264 with an AAC track, rendered with the Remotion toolkit 
 1. **Product capture.** `video/recorder/journey.ts` drives the live web app (https://qwadratic.github.io/clipa/) in headless Chromium against the live API (https://apprentice.exe.xyz) and films it through Chrome's screencast, in one take: Start Show, the expert's typing in the demo workspace, End Show, Reflect with its Work Map, the open point, the teach-back, a correction and Confirm, then Pass it on with a new case, the fix, the allow case and Off the record. The rail clip comes from `video/recorder/walkthroughs/ui-tour.json`, recorded earlier the same morning, before the header moved Off the record into its More menu.
 2. **Storyboards.** `video/capture/build-storyboards.mjs` writes `video/scripts/demo.json` and sets the clip times in `video/scripts/tech.json` from the take's markers (`assets/recordings/journey.json`). Every Clipa line quoted in a caption is copied from the cues the API sent during the take (`journey.cues.json`).
 3. **Render.** `npm run render -- Sample --script scripts/demo.json --out out/clipa-demo.mp4`, the same for `tech.json`.
-4. **Web-ready file.** `bash capture/finalize.sh out/clipa-demo.mp4 ../apps/web/public/videos/clipa-demo.mp4` re-encodes to H.264 with faststart and adds a silent AAC track.
+4. **Web-ready file.** `bash capture/finalize.sh out/clipa-demo.mp4 ../apps/web/public/videos/clipa-demo.mp4` re-encodes to H.264 with faststart and adds a silent AAC track. The committed files went through `capture/splice-outro.sh` instead, which does the same and swaps in a re-rendered closing card (`npm run render -- ClipaOutro --script …`) without rendering the whole video again.
 
 ## What is real and what is simulated
 

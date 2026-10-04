@@ -47,7 +47,7 @@ export const ClipaOutro: React.FC<ClipaOutroScript> = ({ headline, lines = [], l
         >
           {headline}
         </div>
-        <div style={{ marginTop: 34, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ marginTop: 34, display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 1150 }}>
           {lines.map((text, i) => (
             <Reveal key={i} delay={14 + i * 6} dx={-30} style={{ color: color.tealLight, fontSize: 44, fontWeight: 500 }}>
               {text}

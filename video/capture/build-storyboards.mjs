@@ -170,7 +170,7 @@ if (has('off')) {
 }
 scenes.push({
   type: 'clipa-outro', durationSec: 7, headline: "Clipa. The expert's judgment, passed on.",
-  lines: ['Clipa learns how your best people decide, teaches it to the next person,', 'and turns it into agents that ask before they break your rules.'],
+  lines: ['Clipa learns how your best people decide, teaches it to the next person, and turns it into agents that ask before they break your rules.'],
   links: [{ label: 'Demo', url: 'qwadratic.github.io/clipa' }, { label: 'Code', url: 'github.com/qwadratic/clipa' }],
   note: 'Synthetic data. The expert’s and the new hire’s answers were scripted for this recording. Masks protect the screen, not speech.',
 });
