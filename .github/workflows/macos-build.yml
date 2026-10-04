@@ -13,6 +13,8 @@ on:
 jobs:
   build:
     runs-on: macos-15
+    permissions:
+      contents: write
     defaults:
       run:
         working-directory: mac
@@ -36,6 +38,18 @@ jobs:
           name: Clipa-macos
           path: mac/build/Clipa-macos.zip
           if-no-files-found: error
+
+      # Pushes to main publish the app as one fixed public release, so the download link never changes:
+      # https://github.com/qwadratic/clipa/releases/download/clipa-macos-latest/Clipa-macos.zip
+      - name: Publish the latest main build as a release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete clipa-macos-latest --yes --cleanup-tag || true
+          gh release create clipa-macos-latest build/Clipa-macos.zip \
+            --title "Clipa for macOS (latest main build)" --target "$GITHUB_SHA" \
+            --notes "Ad-hoc signed build of mac/ at $GITHUB_SHA. Unzip it, run: xattr -dr com.apple.quarantine Clipa.app, then open Clipa.app and grant Screen Recording, Microphone and Input Monitoring."
 
       # Manual runs only: the built app talks to the live Clipa server with its own code (session, conductor events and
       # cues, one synthetic frame, the voice handshake, the hand-over). Pushes never call the server.
