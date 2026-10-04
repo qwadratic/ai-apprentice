@@ -864,3 +864,47 @@ test('Reflect: when the model cannot build the session\'s own map, the board sti
   assert.equal(cueOf(r.cues, 'guide').at(-1)?.step, 'earlier_map');
   assert.ok(r.calls.filter((c) => c.task === 'map_synthesis').length >= 1, 'it did try to build its own map');
 });
+
+// ---- what the person says reaches the question ----------------------------------------------------------------------
+const frame = (id: string, atMs: number, facts: Record<string, unknown> = {}): ClientEvent => {
+  const parsed = parseBatch({ events: [{ seq: 0, atMs: 0, event: { type: 'observation', observation: {
+    id, kind: 'screen_activity', timestampMs: atMs, evidenceIds: [`ev-${id}`],
+    facts: { app: 'Mail', surface: 'compose window', summary: `Summary ${id}`, change: null, pendingAction: null, regions: [], ...facts },
+  } } }] });
+  if (!parsed.ok) throw new Error(parsed.field);
+  return parsed.value[0]!.event;
+};
+const askedWith = (r: Rig, id: string): string[] | undefined => {
+  const call = r.calls.filter((c) => c.task === 'generic_question' && (c.body.observations as Array<{ id: string }>).some((o) => o.id === id)).at(-1);
+  return call ? (call.body.transcript as Array<{ text: string }>).map((t) => t.text) : undefined;
+};
+
+test('the question hears the person: a reworded surface of the same app keeps what was said', async () => {
+  const r = rig({ generic_question: () => ok({ question: null, topic: 'reason', observationIds: [], regionIds: [] }) });
+  await r.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, { type: 'share', state: 'capturing', reason: null });
+  await r.send(frame('m1', 0));
+  await r.advance(1_000);
+  await r.send({ type: 'transcript', role: 'expert', text: 'Lumen has a signed agreement for Net 30.' });
+  // Vision names the same app longer and the surface in other words, with a real change on it: a new screen, not a move.
+  await r.send(frame('m2', 1_500, { app: 'Google Chrome - Mail', surface: 'draft reply', change: 'Net 14 changed to Net 30' }));
+  await r.advance(RULES.pauseMs + RULES.settleMs + 50);
+  assert.deepEqual(askedWith(r, 'm2'), ['Lumen has a signed agreement for Net 30.']);
+  // Reworded again with nothing changed: still the same screen, and what was said is still there.
+  await r.send(frame('m3', 3_000, { app: 'Mail', surface: 'reply draft' }));
+  await r.advance(RULES.pauseMs + RULES.settleMs + 50);
+  assert.deepEqual(askedWith(r, 'm3'), ['Lumen has a signed agreement for Net 30.']);
+});
+
+test('the question hears the person: another app keeps what was said while its screen was already up', async () => {
+  const r = rig({ generic_question: () => ok({ question: null, topic: 'reason', observationIds: [], regionIds: [] }) });
+  await r.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, { type: 'share', state: 'capturing', reason: null });
+  await r.send(frame('m1', 0));
+  await r.advance(1_000);
+  await r.send({ type: 'transcript', role: 'expert', text: 'Lumen has a signed agreement for Net 30.' });
+  await r.advance(20_000);
+  await r.send({ type: 'transcript', role: 'expert', text: 'Now the budget: the licence was prepaid for a year.' });
+  // The Sheet was captured 2 s before that turn; vision delivers its frame after the turn.
+  await r.send(frame('s1', 19_000, { app: 'Sheets', surface: 'budget sheet', change: 'Q1 to Q4 filled with 3,000' }));
+  await r.advance(RULES.pauseMs + RULES.settleMs + 50);
+  assert.deepEqual(askedWith(r, 's1'), ['Now the budget: the licence was prepaid for a year.'], 'the Mail turn stays with Mail');
+});

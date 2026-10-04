@@ -42,6 +42,8 @@ export const RULES = {
   mapAfterShow: true,
   /** The voice agent hears a new screen at once, and the same screen again at most this often. */
   screenContextMs: 8_000,
+  /** When the person moves to another app, the turns said from this long before its first frame are kept for questions. */
+  turnsBeforeFrameMs: 5_000,
   /** A quiet cue with the same reason is not repeated sooner than this. */
   quietRepeatMs: 20_000,
   /** Thought bubbles: a short visual line about what Clipa is working on (never spoken), at most one per thoughtGapMs. */
@@ -67,9 +69,23 @@ function clip(text: string, max: number): string {
   return line.length <= max ? line : `${line.slice(0, max - 1).trimEnd()}…`;
 }
 
-/** Free-text paraphrases on a generic frame do not restart the user's pause. */
+/** A generic frame's app name, compared loosely: lower-case letters and digits only. */
+function appKey(app: string | null): string {
+  return (app ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
+/** The same app on two generic frames: equal names, one inside the other ("gmail" in "googlechromegmail"), or one unknown. */
+function sameApp(a: string, b: string): boolean {
+  return a === b || a === '' || b === '' || a.includes(b) || b.includes(a);
+}
+
+/**
+ * Free-text paraphrases on a generic frame do not restart the user's pause: the same app and pending control, and the same
+ * surface, or a reworded one when vision saw nothing change.
+ */
 function sameScreen(a: SeenObservation, b: SeenObservation): boolean {
-  return a.kind === 'screen_activity' && b.kind === 'screen_activity' && a.app === b.app && a.surface === b.surface && a.pendingAction === b.pendingAction;
+  return a.kind === 'screen_activity' && b.kind === 'screen_activity' && sameApp(appKey(a.app), appKey(b.app))
+    && a.pendingAction === b.pendingAction && (a.surface === b.surface || b.change === null);
 }
 
 export interface ConfirmedMap { sessionId: string; map: MapSynthesisOutput; confirmedAt: number }
@@ -498,12 +514,17 @@ export class Conductor {
     this.observations.push(o);
     if (this.observations.length > RULES.keepObservations) this.observations.splice(0, this.observations.length - RULES.keepObservations);
     if (o.kind === 'input_activity') return;
-    const where = `${o.app ?? ''}|${o.surface}`;
-    const moved = this.contextWhere !== null && this.contextWhere !== where;
+    // A generic frame names its surface in free words that change between frames of one screen, and its app name can gain
+    // or lose a prefix ("Google Chrome - Gmail"): for those only another app is a move. The workspace's surfaces are exact.
+    const where = o.kind === 'screen_activity' ? appKey(o.app) : `${o.app ?? ''}|${o.surface}`;
+    const moved = this.contextWhere !== null && (o.kind === 'screen_activity' ? !sameApp(this.contextWhere, where) : this.contextWhere !== where);
     if (moved) {
       this.invalidateLiveContext(true);
       this.contextObservationIds.clear();
+      // Vision runs seconds behind speech: what the person said while this new screen was already up is about it.
+      const kept = this.contextTurns.filter((t) => t.atMs >= o.atMs - RULES.turnsBeforeFrameMs);
       this.contextTurns.length = 0;
+      this.contextTurns.push(...kept);
       this.contextAskedTexts.length = 0;
     }
     this.contextWhere = where;
