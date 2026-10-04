@@ -7,7 +7,7 @@ created_date: '2026-10-04 02:44'
 
 # Demo journey v1: one shared expectation for A and B
 
-Status: **approved by Ivan on 4 Oct, 03:01 UTC (05:01 Vienna)**. Proposed by B at 02:45 UTC. Stream A can still amend in the Hive demo thread; Ivan decides conflicts. Who plays the expert and the new hire, and whether the customer_12 fact is introduced live, are still open. Times are Vienna. Pitch at 10:00.
+Status: **approved by Ivan on 4 Oct, 03:01 UTC (05:01 Vienna) as the internal demo v1**. It is the target for building and rehearsal now, and Ivan may still adjust it before the pitch. Proposed by B at 02:45 UTC. Stream A can still amend in the Hive demo thread; Ivan decides conflicts. Who plays the expert and the new hire, and whether the customer_12 fact is introduced live, are still open. Times are Vienna. Pitch at 10:00.
 
 ## The journey judges see (about 3 minutes, live)
 
