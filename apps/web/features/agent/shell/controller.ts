@@ -203,7 +203,7 @@ export class ShellController {
   private face: ConductorFace | null = null;
   /** The page's one session for the whole journey (Show, Reflect, Pass it on): the conductor is per session id. */
   private journey: { session: AgentSession; epochMs: number } | null = null;
-  private conductorBooting = false;
+  private booting: Promise<void> | null = null;
   private helloSent = false;
   private earlyEvents: ClientEvent[] = [];
   private personaSent: ConductorPersona | null = null;
@@ -335,58 +335,61 @@ export class ShellController {
    * (the macOS hand-over) the session is first linked to the macOS session's conductor. `page` opens a stage (review: Reflect).
    */
   async bootConductor(options: { join?: string | null; page?: Mode | null } = {}): Promise<void> {
+    if (!this.deps.conductor || this.conductor !== null || this.booting !== null) return;
+    // A Start pressed while the journey session is being made waits for it (start() awaits this), so both use one session.
+    const job = this.doBootConductor(options).finally(() => { this.booting = null; });
+    this.booting = job;
+    await job;
+  }
+
+  private async doBootConductor(options: { join?: string | null; page?: Mode | null }): Promise<void> {
     const opts = this.deps.conductor;
-    if (!opts || this.conductor !== null || this.conductorBooting) return;
-    this.conductorBooting = true;
+    if (!opts) return;
+    if (options.page) this.setMode(options.page);
+    let session: AgentSession;
     try {
-      if (options.page) this.setMode(options.page);
-      let session: AgentSession;
-      try {
-        session = await this.deps.api.createSession();
-      } catch (e) {
-        this.err(`Clipa conductor: no session (${errMsg(e)}). The in-browser brain leads.`);
-        return;
-      }
-      if (session.legacy) { this.sys('Clipa conductor: the server runs the placeholder API. The in-browser brain leads.'); return; }
-      this.journey = { session, epochMs: this.deps.now() };
-      const authorization = (): string | null => session.events().headers['Authorization'] ?? null;
-      let linked = false;
-      if (options.join) {
-        const result = await linkSession({ base: opts.base, sessionId: session.sessionId, authorization: authorization(), code: options.join, fetch: this.deps.fetch });
-        linked = result.ok;
-        if (result.ok) this.sys('Clipa conductor: joined the session handed over from the Mac.');
-        else this.store.dispatch({ type: 'BANNER_SET', banner: { kind: 'warn', text: 'The hand-over link has expired or was already used. This page starts its own session.' } });
-      }
-      const face = new ConductorFace(this.faceHost(), this.conductorStore);
-      this.face = face;
-      this.conductorStore.set({ enabled: true, linked, status: 'connecting' });
-      const client = new ConductorClient({
-        base: opts.base,
-        sessionId: session.sessionId,
-        authorization,
-        fetch: this.deps.fetch,
-        timers: this.deps.timers,
-        clock: () => this.journeyTime(),
-        onCue: (env) => face.onCue(env),
-        onHello: (hello, first, reset) => {
-          // A page that joined a hand-over restores the map from what was sent before, but does not replay old lines.
-          if (first && linked) face.historyUntil = hello.lastCueSeq;
-          if (reset) {
-            // The server restarted: its new conductor knows nothing of this page (nor of a hand-over link), so it is told again.
-            face.historyUntil = -1;
-            this.helloSent = false;
-          }
-          if (!this.helloSent) this.sendHello();
-        },
-        onStatus: (status, detail) => this.onConductorStatus(status, detail),
-        log: (line) => this.log('sys', 'CONDUCTOR', line),
-      });
-      this.conductor = client;
-      client.open();
-      this.sys(`Clipa conductor: session ${session.sessionId}; Clipa follows the server from now on.`);
-    } finally {
-      this.conductorBooting = false;
+      session = await this.deps.api.createSession();
+    } catch (e) {
+      this.err(`Clipa conductor: no session (${errMsg(e)}). The in-browser brain leads.`);
+      return;
     }
+    if (session.legacy) { this.sys('Clipa conductor: the server runs the placeholder API. The in-browser brain leads.'); return; }
+    this.journey = { session, epochMs: this.deps.now() };
+    const authorization = (): string | null => session.events().headers['Authorization'] ?? null;
+    let linked = false;
+    if (options.join) {
+      const result = await linkSession({ base: opts.base, sessionId: session.sessionId, authorization: authorization(), code: options.join, fetch: this.deps.fetch });
+      linked = result.ok;
+      if (result.ok) this.sys('Clipa conductor: joined the session handed over from the Mac.');
+      else this.store.dispatch({ type: 'BANNER_SET', banner: { kind: 'warn', text: 'The hand-over link has expired or was already used. This page starts its own session.' } });
+    }
+    const face = new ConductorFace(this.faceHost(), this.conductorStore);
+    this.face = face;
+    this.conductorStore.set({ enabled: true, linked, status: 'connecting' });
+    const client = new ConductorClient({
+      base: opts.base,
+      sessionId: session.sessionId,
+      authorization,
+      fetch: this.deps.fetch,
+      timers: this.deps.timers,
+      clock: () => this.journeyTime(),
+      onCue: (env) => face.onCue(env),
+      onHello: (hello, first, reset) => {
+        // A page that joined a hand-over restores the map from what was sent before, but does not replay old lines.
+        if (first && linked) face.historyUntil = hello.lastCueSeq;
+        if (reset) {
+          // The server restarted: its new conductor knows nothing of this page (nor of a hand-over link), so it is told again.
+          face.historyUntil = -1;
+          this.helloSent = false;
+        }
+        if (!this.helloSent) this.sendHello();
+      },
+      onStatus: (status, detail) => this.onConductorStatus(status, detail),
+      log: (line) => this.log('sys', 'CONDUCTOR', line),
+    });
+    this.conductor = client;
+    client.open();
+    this.sys(`Clipa conductor: session ${session.sessionId}; Clipa follows the server from now on.`);
   }
 
   private onConductorStatus(status: ConductorStatus, detail: string | null): void {
@@ -580,6 +583,7 @@ export class ShellController {
 
   /** Start of a mode: one click makes the session (id and token from the API), the epoch and the voice. */
   async start(mode: Mode): Promise<void> {
+    if (this.booting !== null) await this.booting;
     const before = this.state;
     if (before.offRecord) return;
     if (before.phase === 'starting' || before.phase === 'live' || before.phase === 'ending') return;
