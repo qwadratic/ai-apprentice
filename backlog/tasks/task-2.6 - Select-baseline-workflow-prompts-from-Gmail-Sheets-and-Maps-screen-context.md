@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@kigulx'
 created_date: '2026-10-04 06:39'
-updated_date: '2026-10-04 06:54'
+updated_date: '2026-10-04 07:11'
 labels:
   - stream-a
   - shared
@@ -62,4 +62,8 @@ Use only available screen evidence or already authorised metadata. Never require
 
 <!-- SECTION:NOTES:BEGIN -->
 Started the independent profile module while TASK-3.52 integration is pending; the baseline live integration depends on generic observations and B seam agreement.
+
+Independent baseline catalog/selector implemented with 10 passing focused tests: stable two-observation recognition, exact app names, immediate suspension on unknown/ambiguous/switching frames, immutable bounded evidence and explicitly unlearned workflow context. B merged generic vision as PR #57 at 155c573; A will not duplicate it. User reports B is resolving the overlap, so conductor/LLM/Review integration is held for agreed handoff. README documents the precise seam and live rehearsal. No claim that the module is live or that TASK-2.6 acceptance criteria are complete.
+
+User explicitly clarified that B owns live conductor integration and A should hand off the ready module only. Exports are BaselineProfileSelector, baselinePromptContext and strict parseBaselinePromptContext. Focused module suite is now 13/13 passing; independent review found no blocking issues. A full npm run check passed before the final parser-only addition; final focused tests and root typecheck passed after it. No B-owned files changed. Follow the module README for the exact remaining live/Review seam; keep task In Progress.
 <!-- SECTION:NOTES:END -->

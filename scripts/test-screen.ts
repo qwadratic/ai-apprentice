@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 const required = [
   'packages/screen/capture/tests',
   'packages/screen/vision',
+  'packages/screen/baseline',
   'packages/screen/bridge',
   'apps/api/screen',
 ];
