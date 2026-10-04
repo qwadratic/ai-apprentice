@@ -5,10 +5,13 @@
 //   - A cue past its `expiresAtMs`, or a spoken cue that arrives while the person types or talks, is dropped: `skipped`.
 //   - Off the record nothing is rendered except `state hidden`.
 //   - Cues replayed from before this page joined a hand-over (`historyUntil`) only restore the map and the teach-back.
+//   - thought goes to the store (the thought bubble beside Clipa) and is never spoken; attention makes Clipa flash and go to
+//     its target; stage opens a stage the way a click on the rail does.
 import type { ClientTimers } from './client.ts';
-import type { ClientEvent, ClipaPose, CueEnvelope, CueOutcome, Region, Target } from './protocol.ts';
+import type { ClientEvent, ClipaPose, ConductorMode, CueEnvelope, CueOutcome, Region, Target } from './protocol.ts';
 import { MAX_SAID } from './store.ts';
 import type { ConductorLine, ConductorStore, SaidItem } from './store.ts';
+import { clipaHint } from './targets.ts';
 
 export interface FaceHost {
   /** Says `text` through the voice agent ([ASK]); false when the voice cannot take it now. */
@@ -32,6 +35,10 @@ export interface FaceHost {
   now(): number;
   send(event: ClientEvent): void;
   timers: ClientTimers;
+  /** Clipa flashes briefly (the person should look where she goes). */
+  attention?(target: Target | null): void;
+  /** Opens a stage the way a click on its tab of the rail does. */
+  stage?(mode: ConductorMode): void;
 }
 
 /** A spoken cue whose speech never starts is given up after this long. */
@@ -40,6 +47,8 @@ export const SPEECH_START_TIMEOUT_MS = 12_000;
 export const SPEECH_MAX_MS = 45_000;
 /** A teach-back may be read in full (about a minute of speech); other lines keep the agent's usual limit. */
 export const TEACHBACK_MAX_CHARS = 1200;
+/** A thought bubble shows this long (the CSS fades it in and out within it). */
+export const THOUGHT_MS = 4000;
 const BUBBLE_MAX_CHARS = 280;
 
 interface Speaking { cueId: string; started: boolean; timer: unknown }
@@ -53,6 +62,7 @@ export class ConductorFace {
   private readonly done = new Set<string>();
   private latest: { atMs: number; localMs: number } | null = null;
   private targetCueId: string | null = null;
+  private thoughtTimer: unknown = null;
 
   constructor(host: FaceHost, store: ConductorStore) {
     this.host = host;
@@ -144,6 +154,7 @@ export class ConductorFace {
   /** Off the record or the end of the page: whatever is on screen goes, and a cue being spoken is reported interrupted. */
   clear(): void {
     if (this.speaking !== null) this.finish(this.speaking.cueId, 'interrupted');
+    this.store.set({ thought: null });
     this.setRegions([], null);
     this.show(null, null, null);
     this.host.guide(null);
@@ -186,6 +197,28 @@ export class ConductorFace {
       case 'open_web':
         // macOS only: the web has its own page for every stage.
         return;
+      case 'thought': {
+        // Visual only: the bubble beside Clipa shows it for THOUGHT_MS; nothing is spoken or reported.
+        const thought = { cueId: env.cueId, text: cue.text };
+        this.store.set({ thought });
+        if (this.thoughtTimer !== null) this.host.timers.clearTimeout(this.thoughtTimer);
+        this.thoughtTimer = this.host.timers.setTimeout(() => {
+          this.thoughtTimer = null;
+          if (this.store.getState().thought === thought) this.store.set({ thought: null });
+        }, THOUGHT_MS);
+        return;
+      }
+      case 'stage':
+        this.host.stage?.(cue.mode);
+        return;
+      case 'attention': {
+        // She flashes; a target she is not already at is pointed at the way a `point` cue does it.
+        const current = this.store.getState().target;
+        const there = cue.target !== null && current !== null && clipaHint(current) === clipaHint(cue.target);
+        if (cue.target !== null && !there) this.setTarget(cue.target, env.cueId);
+        this.host.attention?.(cue.target);
+        return;
+      }
       default:
         break;
     }

@@ -47,7 +47,13 @@ export type Cue =
   | { type: 'presence'; size: string; anchor: string }
   | { type: 'open_web'; page: string; url: string; text: string }
   | { type: 'cancel'; cueId: string }
-  | { type: 'quiet'; reason: string };
+  | { type: 'quiet'; reason: string }
+  /** A thought bubble beside Clipa: visual only, never spoken. */
+  | { type: 'thought'; text: string }
+  /** Clipa flashes and goes to the target (null: she flashes where she is). */
+  | { type: 'attention'; target: Target | null }
+  /** The person asked for a stage by voice: the page opens it like a click on the rail. */
+  | { type: 'stage'; mode: ConductorMode };
 
 export interface CueEnvelope {
   seq: number;
@@ -158,6 +164,14 @@ export function parseCue(v: unknown): Cue | null {
       return isStr(v.cueId) ? { type: 'cancel', cueId: v.cueId.slice(0, 64) } : null;
     case 'quiet':
       return { type: 'quiet', reason: text(v.reason, 200) ?? '' };
+    case 'thought': {
+      const t = text(v.text, 120)?.trim() ?? '';
+      return t === '' ? null : { type: 'thought', text: t };
+    }
+    case 'attention':
+      return { type: 'attention', target: parseTarget(v.target) };
+    case 'stage':
+      return oneOf(v.mode, MODES) ? { type: 'stage', mode: v.mode } : null;
     default:
       return null;
   }
