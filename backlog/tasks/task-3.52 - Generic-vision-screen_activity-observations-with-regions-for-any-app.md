@@ -3,9 +3,9 @@ id: TASK-3.52
 title: 'Generic vision: screen_activity observations with regions for any app'
 status: In Progress
 assignee:
-  - '@kigulx'
+  - '@qwadratic'
 created_date: '2026-10-04 06:01'
-updated_date: '2026-10-04 06:39'
+updated_date: '2026-10-04 06:42'
 labels:
   - stream-b
 dependencies: []
