@@ -26,8 +26,8 @@
     "pretest": "npm run build --workspace @apprentice/contracts"
   },
   "devDependencies": {
-    "typescript": "~5.9.3",
-    "@types/node": "^22.19.0"
+    "typescript": "~7.0.2",
+    "@types/node": "^22.20.5"
   },
   "packageManager": "npm@10.9.4"
 }

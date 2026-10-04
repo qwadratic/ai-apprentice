@@ -2,7 +2,9 @@
 
 ## Status and remaining decisions
 
-The foundation is implemented against base `16ab4635eb63eb75e28247e704e966a9b16e7544`.
+The original foundation was implemented against `16ab4635eb63eb75e28247e704e966a9b16e7544`
+and is now reconciled with `origin/main` at
+`f315f54a5465b7558543018dce7cafef680cfd7a`.
 It is a development scaffold. The default web view clearly labels its synthetic mock;
 no screen, voice, tutor, database, or model runner is connected.
 
@@ -17,28 +19,28 @@ B's earlier draft at `693f11a52b81891d1165c92b580bf466a73ed657` is historical.
 Doc-7 supersedes its non-null order fields, ticket note, old heartbeat, missing
 provenance, and checkpoint shapes. B migrates its private copy in TASK-3.23.
 Neutral runtime fixtures contain no customer rule, question, or tutor result.
-This worktree stays on its original base; publication belongs to the coordinator.
-Cherry-pick only the new local code commit onto current main and reconcile the
-separate TASK-2.1 notes through Backlog.
+The published foundation slice `bfe9bf7bd728e24bfba24b680dd0f0da20ed1e93`
+is based on that main revision and preserves all B, screen and infra sources. This
+TypeScript 7 reconciliation is a small follow-up delta on that slice.
 
 Open decisions (the independent scaffold does not depend on approval):
 
-1. npm, React 19/Vite 7, Express 5 and the mount wrapper need integration review.
-   Node minimum stays 22.22 per TASK-3.1. Add B's requested SDK dependencies only when
-   its consuming package needs them; do not create a second runner.
-2. Real source provenance is still an integration dependency: a registry must bind
+1. Real source provenance is still an integration dependency: a registry must bind
    each order/email observation to session/generation and source revisions, and
    revalidate both on reply and Send. HTTP vision frames are history-only until
    that trusted adapter exists. ObservationGate alone does not establish provenance.
-3. The accepted polling endpoint is owned by vision/API and remains unimplemented
+2. The accepted polling endpoint is owned by vision/API and remains unimplemented
    here; the skeleton must not claim completed server-to-browser delivery.
 
 ## Reproduce locally
 
 Use Node >=22.22 and npm >=10.9 (`.nvmrc` pins 22.22; lockfile uses npm 10.9.4).
 The system Node 16/npm 8 is not supported. With nvm: `nvm install && nvm use`.
-There is one root `package-lock.json`. `infra/` is deliberately excluded from
-workspaces and keeps TASK-4's independently specified runner installation.
+The root workspace uses TypeScript 7.0.2 with strict, `noUncheckedIndexedAccess`
+and `noImplicitOverride`, and has one root `package-lock.json`. It includes
+`packages/agent`, so root typecheck/test cannot silently omit B's package. `infra/`
+and the nested ElevenLabs/lab tools remain outside the root workspace and retain
+their independently deployed lockfiles.
 
 ```sh
 npm ci
@@ -73,7 +75,10 @@ reference only: the API reads process.env and does not implicitly load .env file
 TASK-4 and consumed by the owning modules. This bootstrap does not create another
 runner, database or model endpoint. No secret belongs in any `VITE_*` value.
 
-Built web output is `apps/web/dist/`, API entry is `apps/api/dist/server.js`.
+Built web output is `apps/web/dist/`. During integration the API build is a strict
+no-emit check and `npm start --workspace @apprentice/api` runs `apps/api/server.ts`
+through Node 22 type stripping; TASK-4 continues running the placeholder until the
+real screen and agent wrappers are mounted.
 Set `WEB_BASE_PATH=/ai-apprentice/` at build for GitHub Pages or leave `/` for root hosting.
 B owns production API URL wiring in its shell; the proxy applies only in development.
 `/health` reports only actual mounted modules, not model/voice/storage readiness.
@@ -91,11 +96,11 @@ import { createScreenFixtures } from '@apprentice/contracts/fixtures';
 
 Consumers add `"@apprentice/contracts": "0.0.0"` to their package dependencies.
 The workspace symlink and compiled exports resolve in browsers and Node production.
-A manages root dependency updates/lockfile; do not generate nested application
-lockfiles. B's standalone package can keep native node:test; replace its private
-contract imports only after shared approval. Root tests/typechecks discover new
-workspace scripts with `--workspaces --if-present`. Build ordering for newly added
-packages should be added by the skeleton owner when those manifests are available.
+A manages root dependency updates/lockfile. B's standalone package keeps native
+node:test and is now covered by root workspace checks; replace its private contract
+imports in TASK-3.23. The independently built `features/agent/lab` remains excluded
+from the shell tsconfig and is checked by `stream-b-checks.yml`. Root tests/typechecks
+discover workspace scripts with `--workspaces --if-present`.
 
 | Owner | Files and hookup |
 | --- | --- |
@@ -105,7 +110,7 @@ packages should be added by the skeleton owner when those manifests are availabl
 | Replay TASK-2.5 | apps/web/features/screen/ReplayPanel; resolve Evidence through the shared bridge |
 | Sandbox TASK-2.4 | apps/web/features/demo-workspace; CheckpointPort adapter backed by approved bridge; typed facts + local heartbeat |
 | B | packages/agent, apps/web/features/agent and app shell, apps/api/agent, fixtures/agent |
-| TASK-4 | infra only; deploy root npm ci and API build, run apps/api/dist/server.js |
+| TASK-4 | infra only; keep placeholder deployment until the real apps/api modules and `/ops/*` forwarding are explicitly integrated |
 
 No implementation files or mock placeholders are created in another worker's
 feature/module directories. Their absence does not break install/check/build.
@@ -158,7 +163,9 @@ Use our `registerWebRoute` from `src/web-routes.ts` as its framework adapter:
 `{name: 'screen', mount: app => mountScreen(app, {register: registerWebRoute,
 service, authorize})}`. The service and authorization are provided by their owners;
 no screen handler is duplicated or mounted without these dependencies.
-The API build copies imported `.mjs` modules, with checkJs disabled. The agent
+The current API build performs strict no-emit validation. Existing owner `.mjs`
+sources remain untouched and unmounted until their typed wrapper and runtime
+dependencies are registered. The agent
 wrapper and its route namespace still need B's agreement. Existing ElevenLabs
 scripts/configuration are preserved; B must supply its mount and any static assets
 needed by it. `apps/api/src/modules.ts`
@@ -184,27 +191,29 @@ missing module is live. The minimal shared API files are `server.ts`, `src/app.t
 
 ## Verified results
 
-- Node 22.22.0 / npm 10.9.4: clean `npm ci --no-audit --no-fund` passed;
-  pre-doc-7 `npm run check` passed. The doc-7 follow-up is verified separately in
-  its local commit and updates this count to 20 contract + 3 API tests.
-- Node 24.19.0 / npm 10.9.4: doc-7 `npm run check` passed with all 23 tests.
+- Node 22.22.0 and Node 24.19.0 / npm 10.9.4: integrated `npm run check`
+  passed under TypeScript 7.0.2: 55 agent + 20 contract + 3 API tests, every
+  workspace typecheck, and contracts/API/web production builds.
+- Clean root `npm ci --ignore-scripts --no-audit --no-fund` installed one shared
+  TypeScript 7.0.2 and included `@apprentice/agent` from the root lockfile.
 - `npm run dev`: both servers started. Final B-aligned UI verified start, pause
   skipping due events, resume at sequence 4 / timestampMs 4000, unknown customer
   null, and stop without more events. Both servers shut down cleanly.
-- Built `apps/api/dist/server.js`: health 200, allowed CORS preflight 204, absent
-  screen route 404. Compiled B-compatible package imports passed on Node 22.22.
+- Source-run `apps/api/server.ts`: health 200, allowed CORS preflight 204, absent
+  screen polling route 404 because no owner module is registered yet. A Pages build
+  with `WEB_BASE_PATH=/ai-apprentice/` emitted `/ai-apprentice/assets/...` URLs.
 - Fetch-handler mount test verified JSON, authorization header, path params and
   streamed response status/headers. Doc-7 schema and lifecycle tests passed.
 - `git diff --cached --check` passed; credential-pattern scan found no matches.
   All fixture data is synthetic. Remote CI is unrun because this branch is local.
-- No existing B root/app implementation path at main 0109c64 is replaced. The only
-  existing changed files are root README/.gitignore and, in a separate commit,
-  TASK-2.1. All feature-owner implementations remain untouched.
+- `origin/main` at `f315f54` was merged without modifying B agent/lab/ElevenLabs,
+  screen, or infra implementation sources. The release workflow continues to build
+  the B lab until the real integrated web shell replaces it; it was not redirected
+  to the synthetic foundation view.
 
 ## Exact implementation file inventory
 
 - `.env.example`
-- `.github/workflows/web-foundation.yml`
 - `.gitignore`
 - `.npmrc`
 - `.nvmrc`
@@ -244,15 +253,3 @@ missing module is live. The minimal shared API files are `server.ts`, `src/app.t
 
 Transfer the separate Backlog notes through the CLI against current main to
 preserve the coordinator's newer TASK-2.1 entries. This task remains In Progress.
-
-
-## Current-main publication checks
-
-The publication branch includes the existing Stream B agent workspace in the root
-lockfile. The independently built `features/agent/lab` keeps its own tsconfig and
-CI checks; it is excluded from the new web shell's compiler context.
-The API runs its TypeScript entry directly on Node 22.22+, as agreed in doc-8; its
-build command type-checks without emitting copies of imported screen sources.
-The root TypeScript 7 consolidation and complete strict flags are a separate
-in-progress follow-up. This slice exposes the canonical contract and scaffold,
-but does not connect the real screen/agent modules or replace the deployed lab.

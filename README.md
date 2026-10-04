@@ -19,4 +19,5 @@ The product is the React web app. Install, run and integrate its modules using
 field schema and lifecycle semantics follow the A/B agreement in doc-7; the
 `start`/`resume` commands keep the accepted `Promise<void>` shape. See
 [the contracts package](packages/contracts/README.md). The macOS prototype remains
-a frozen bonus.
+a frozen bonus. The root npm workspace uses TypeScript 7.0.2 and checks the shared
+contracts, API, web shell boundary and `packages/agent` together.
