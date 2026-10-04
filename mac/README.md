@@ -13,12 +13,16 @@ It is a menu-bar app built for Hack-Nation 7, challenge 01 "The AI Apprentice" (
 
 ## Run it
 
-Download the `Clipa-macos` artifact from the latest green [macos-build](../.github/workflows/macos-build.yml) run, then:
+Every push to `main` publishes the latest build as the release `clipa-macos-latest`.
+
+1. Download [Clipa.dmg](https://github.com/qwadratic/clipa/releases/download/clipa-macos-latest/Clipa.dmg), open it and drag Clipa onto the Applications shortcut.
+2. Open Clipa from Applications. The app is ad-hoc signed, not notarized, so on the first launch macOS blocks it. Open System Settings > Privacy & Security, click **Open Anyway** and confirm. This is needed once per build.
+3. Grant Screen Recording, Microphone and Input Monitoring when asked. After granting Screen Recording, quit and reopen Clipa.
+
+From Terminal instead, one line that installs into `~/Applications` without the quarantine (no Open Anyway step), resets the permission grants of the previous build and opens the app:
 
 ```bash
-unzip Clipa-macos.zip
-xattr -dr com.apple.quarantine Clipa.app   # the app is ad-hoc signed, not notarized
-open Clipa.app
+curl -fsSL https://raw.githubusercontent.com/qwadratic/clipa/main/mac/scripts/install.sh | bash
 ```
 
 Or build it yourself on macOS 14+ with Xcode 15.2+ (no external dependencies):
