@@ -66,25 +66,38 @@ export interface AgentConfig {
   log: Logger;
 }
 
-const num = (value: string | undefined, fallback: number): number => {
-  const n = Number(value);
-  return value !== undefined && value !== '' && Number.isFinite(n) && n > 0 ? n : fallback;
-};
+/** A positive integer from the environment; anything else (and an unset or empty value) falls back, with a warning if it was set. */
+function positiveInt(env: NodeJS.ProcessEnv, name: string, fallback: number, log: Logger): number {
+  const raw = env[name];
+  if (raw === undefined || raw.trim() === '') return fallback;
+  const n = Number(raw);
+  if (/^\s*\d+\s*$/.test(raw) && Number.isSafeInteger(n) && n > 0) return n;
+  log({ level: 'warn', msg: 'invalid agent limit in environment; using the default', name, default: fallback });
+  return fallback;
+}
 
 export function resolveConfig(options: AgentOptions = {}, env: NodeJS.ProcessEnv = process.env): AgentConfig {
   const origins = options.allowedOrigins ?? (env.ALLOWED_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean);
   const interviewer = options.elevenLabsAgentIdInterviewer ?? env.ELEVENLABS_AGENT_ID_INTERVIEWER ?? '';
   const tutor = options.elevenLabsAgentIdTutor ?? env.ELEVENLABS_AGENT_ID_TUTOR ?? '';
+  const log = options.log ?? ((fields: LogFields) => { process.stdout.write(JSON.stringify({ t: new Date().toISOString(), ...fields }) + '\n'); });
+  // The whole venue may share one public IP, so every rate limit can be raised from the environment.
+  const int = (name: string, fallback: number): number => positiveInt(env, name, fallback, log);
   const limits: Limits = {
-    sessionsPerMinute: 10, sessionsPerIpPerHour: 30, sessionsGlobalPerHour: 5000,
-    signedUrlPerMinute: 6, signedUrlPerIpPerHour: 30, signedUrlGlobalPerHour: 300,
-    eventsPerMinute: 120, finishPerMinute: 6,
+    sessionsPerMinute: int('AGENT_SESSIONS_PER_IP_MIN', 30),
+    sessionsPerIpPerHour: int('AGENT_SESSIONS_PER_IP_HOUR', 300),
+    sessionsGlobalPerHour: int('AGENT_SESSIONS_GLOBAL_HOUR', 5000),
+    signedUrlPerMinute: int('SIGNED_URL_PER_IP_MIN', 20),
+    signedUrlPerIpPerHour: int('SIGNED_URL_PER_IP_HOUR', 200),
+    signedUrlGlobalPerHour: int('SIGNED_URL_GLOBAL_HOUR', 1000),
+    eventsPerMinute: int('AGENT_EVENTS_PER_IP_MIN', 120),
+    finishPerMinute: int('AGENT_FINISH_PER_IP_MIN', 6),
     eventsBodyBytes: 512 * 1024, finishBodyBytes: 4096,
     sessionFileBytes: 5 * 1024 * 1024,
-    eventBytesPerHour: num(env.EVENTS_BYTES_PER_HOUR, 50 * 1024 * 1024),
+    eventBytesPerHour: int('EVENTS_BYTES_PER_HOUR', 50 * 1024 * 1024),
     maxLiveSessions: 2000,
-    warnBytes: num(env.SESSIONS_WARN_BYTES, 1024 ** 3),
-    rotateBytes: num(env.SESSIONS_ROTATE_BYTES, 2 * 1024 ** 3),
+    warnBytes: int('SESSIONS_WARN_BYTES', 1024 ** 3),
+    rotateBytes: int('SESSIONS_ROTATE_BYTES', 2 * 1024 ** 3),
     minSessionAgeMs: 24 * 3_600_000,
     tmpMaxAgeMs: 10 * 60_000,
     maintenanceIntervalMs: 10 * 60_000,
@@ -103,7 +116,7 @@ export function resolveConfig(options: AgentOptions = {}, env: NodeJS.ProcessEnv
     limits, timing,
     fetch: options.fetch ?? ((input, init) => fetch(input, init)),
     now: options.now ?? Date.now,
-    log: options.log ?? ((fields) => { process.stdout.write(JSON.stringify({ t: new Date().toISOString(), ...fields }) + '\n'); }),
+    log,
   };
 }
 

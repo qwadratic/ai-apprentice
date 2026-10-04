@@ -108,7 +108,9 @@ export function createSessionFiles(dir: string): SessionFiles {
         const id = m?.[1];
         const kind = m?.[2];
         if (!id || !kind) continue;
-        const st = await fsp.stat(join(dir, name));
+        // A file can disappear between readdir and stat (rotation, delete, a finished tmp rename): skip it.
+        const st = await fsp.stat(join(dir, name)).catch((e: unknown) => { if (errCode(e) === 'ENOENT') return null; throw e; });
+        if (!st) continue;
         total += st.size;
         const info = byId.get(id) ?? { id, size: 0, mtime: 0, hasEvents: false, hasTranscript: false, hasAudio: false };
         info.size += st.size;

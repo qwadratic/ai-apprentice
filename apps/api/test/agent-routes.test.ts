@@ -1,8 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, readdir, utimes, writeFile } from 'node:fs/promises';
+import { readFile, readdir, symlink, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { FetchFn } from '../agent/index.ts';
+import { resolveConfig } from '../agent/config.ts';
+import { createSessionFiles } from '../agent/sessions.ts';
 import { EL_AGENT, EL_KEY, ORIGIN, bearer, issue, json, postHeaders, start } from './agent-helpers.ts';
 
 const SIGNED = 'wss://api.elevenlabs.io/v1/convai/conversation?agent_id=a&conversation_signature=sig-secret';
@@ -245,4 +247,46 @@ test('rotation only warns when everything left is newer than 24 h', async (t) =>
   await agent.maintain();
   assert.ok((await readdir(dir)).includes('recent-session.jsonl'));
   assert.ok(logs.some((l) => l.msg === 'sessions over cap but all remaining are newer than 24 h; nothing deleted'));
+});
+
+test('rate limits default high enough for a shared venue IP and are configurable from the environment', () => {
+  const logs: Array<Record<string, unknown>> = [];
+  const log = (f: Record<string, unknown>): void => { logs.push(f); };
+  const defaults = resolveConfig({ log }, {}).limits;
+  assert.deepEqual(
+    [defaults.sessionsPerMinute, defaults.sessionsPerIpPerHour, defaults.sessionsGlobalPerHour, defaults.signedUrlPerMinute, defaults.signedUrlPerIpPerHour, defaults.signedUrlGlobalPerHour],
+    [30, 300, 5000, 20, 200, 1000]);
+  assert.equal(logs.length, 0);
+  const env = {
+    AGENT_SESSIONS_PER_IP_MIN: '60', AGENT_SESSIONS_PER_IP_HOUR: '600', AGENT_SESSIONS_GLOBAL_HOUR: '9000',
+    SIGNED_URL_PER_IP_MIN: '40', SIGNED_URL_PER_IP_HOUR: '400', SIGNED_URL_GLOBAL_HOUR: '2000',
+    AGENT_EVENTS_PER_IP_MIN: '240', AGENT_FINISH_PER_IP_MIN: '12',
+  };
+  const custom = resolveConfig({ log }, env).limits;
+  assert.deepEqual(
+    [custom.sessionsPerMinute, custom.sessionsPerIpPerHour, custom.sessionsGlobalPerHour, custom.signedUrlPerMinute, custom.signedUrlPerIpPerHour, custom.signedUrlGlobalPerHour, custom.eventsPerMinute, custom.finishPerMinute],
+    [60, 600, 9000, 40, 400, 2000, 240, 12]);
+  assert.equal(logs.length, 0);
+  // Invalid values (not positive integers) fall back to the default and warn once each; empty means unset.
+  const bad = resolveConfig({ log }, { AGENT_SESSIONS_PER_IP_MIN: '0', AGENT_SESSIONS_PER_IP_HOUR: '-5', AGENT_SESSIONS_GLOBAL_HOUR: '1.5', SIGNED_URL_PER_IP_MIN: 'many', SIGNED_URL_PER_IP_HOUR: '1e3', SIGNED_URL_GLOBAL_HOUR: '' }).limits;
+  assert.deepEqual([bad.sessionsPerMinute, bad.sessionsPerIpPerHour, bad.sessionsGlobalPerHour, bad.signedUrlPerMinute, bad.signedUrlPerIpPerHour, bad.signedUrlGlobalPerHour], [30, 300, 5000, 20, 200, 1000]);
+  assert.deepEqual(logs.map((l) => l.name), ['AGENT_SESSIONS_PER_IP_MIN', 'AGENT_SESSIONS_PER_IP_HOUR', 'AGENT_SESSIONS_GLOBAL_HOUR', 'SIGNED_URL_PER_IP_MIN', 'SIGNED_URL_PER_IP_HOUR']);
+  assert.ok(logs.every((l) => l.level === 'warn'));
+  // Explicit options still win over the environment (tests, embedding).
+  assert.equal(resolveConfig({ log, limits: { sessionsPerMinute: 2 } }, env).limits.sessionsPerMinute, 2);
+});
+
+test('list() and rotation skip files that disappear between readdir and stat', async (t) => {
+  const logs: Array<Record<string, unknown>> = [];
+  const { dir, agent } = await start(t, { log: (f) => { logs.push(f); } });
+  await writeFile(join(dir, 'live-session.jsonl'), 'abc');
+  // A dangling symlink is listed by readdir but its stat fails with ENOENT, like a file removed in between.
+  await symlink(join(dir, 'does-not-exist'), join(dir, 'vanished-session.jsonl'));
+  await symlink(join(dir, 'does-not-exist'), join(dir, 'vanished-session.mp3.abc.tmp'));
+  const { sessions, total } = await createSessionFiles(dir).list();
+  assert.deepEqual(sessions.map((s) => s.id), ['live-session']);
+  assert.equal(total, 3);
+  logs.length = 0;
+  await agent.maintain();
+  assert.ok(!logs.some((l) => l.msg === 'sessions rotation failed'), 'the pass is not aborted');
 });
