@@ -28,8 +28,11 @@ export interface ConductorClientOptions {
   /** Milliseconds since the session's epoch (the atMs of an event). */
   clock(): number;
   onCue(cue: CueEnvelope): void;
-  /** The stream's first message. `first` is true only for the first stream this client opened. */
-  onHello?(hello: StreamHello, first: boolean): void;
+  /**
+   * The stream's first message. `first` is true only for the first stream this client opened. `reset` is true when the server's
+   * conductor is behind this page (it restarted and lost its state): the page then says hello again.
+   */
+  onHello?(hello: StreamHello, first: boolean, reset: boolean): void;
   onStatus?(status: ConductorStatus, detail: string | null): void;
   log?(line: string): void;
   batchMs?: number;
@@ -229,7 +232,14 @@ export class ConductorClient {
         const hello = parseStreamHello(safeJson(m.data));
         this.reconnectMs = RECONNECT_MIN_MS;
         this.setStatus('live');
-        if (hello) this.o.onHello?.(hello, first);
+        if (hello === null) return;
+        // A conductor whose last cue is older than ours is a new one (the server restarted): its cues count from the start again.
+        const reset = hello.lastCueSeq < this.lastCueSeq;
+        if (reset) {
+          this.log(`conductor restarted (its last cue ${hello.lastCueSeq}, ours ${this.lastCueSeq}); following it from there`);
+          this.lastCueSeq = hello.lastCueSeq;
+        }
+        this.o.onHello?.(hello, first, reset);
         return;
       }
       if (m.event !== 'cue') return;

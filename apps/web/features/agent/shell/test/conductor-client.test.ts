@@ -17,11 +17,11 @@ const AUTH = `Bearer ${TOKEN}`;
 function makeClient(fetch: (url: string, init?: RequestInit) => Promise<Response>, timers: FakeTimers) {
   const cues: CueEnvelope[] = [];
   const statuses: ConductorStatus[] = [];
-  const hellos: Array<{ lastCueSeq: number; first: boolean }> = [];
+  const hellos: Array<{ lastCueSeq: number; first: boolean; reset: boolean }> = [];
   const logs: string[] = [];
   const client = new ConductorClient({
     base: 'https://api.example.invalid', sessionId: 'sess-1', authorization: () => AUTH, fetch, timers,
-    clock: () => timers.now, onCue: (c) => cues.push(c), onHello: (h, first) => hellos.push({ lastCueSeq: h.lastCueSeq, first }),
+    clock: () => timers.now, onCue: (c) => cues.push(c), onHello: (h, first, reset) => hellos.push({ lastCueSeq: h.lastCueSeq, first, reset }),
     onStatus: (s) => statuses.push(s), log: (l) => logs.push(l),
   });
   return { client, cues, statuses, hellos, logs };
@@ -66,7 +66,7 @@ test('the cue stream sends the token only in the Authorization header and dispat
   f.streams[0]?.push(sseCue(cue(1, { type: 'state', clipa: 'listen' })));
   f.streams[0]?.push(sseCue(cue(2, { type: 'say', text: 'Hello' })).slice(0, 20));
   await settle();
-  assert.deepEqual(hellos, [{ lastCueSeq: -1, first: true }]);
+  assert.deepEqual(hellos, [{ lastCueSeq: -1, first: true, reset: false }]);
   assert.equal(cues.length, 1);
   f.streams[0]?.push(sseCue(cue(2, { type: 'say', text: 'Hello' })).slice(20));
   await settle();
@@ -96,6 +96,25 @@ test('a broken stream reconnects with after=<last seq> and a replayed cue is not
   await settle();
   assert.deepEqual(cues.map((c) => c.seq), [1, 2, 3]);
   assert.deepEqual(hellos.map((h) => h.first), [true, false]);
+  client.close();
+});
+
+test('a restarted conductor (its last cue behind ours) is followed from its own seq again', async () => {
+  const timers = new FakeTimers();
+  const f = conductorFetch();
+  const { client, cues, hellos } = makeClient(f.fetch, timers);
+  client.open();
+  await settle();
+  f.streams[0]?.push(sseHello() + sseCue(cue(5, { type: 'say', text: 'five' })));
+  await settle();
+  f.streams[0]?.end();
+  await settle();
+  timers.advance(RECONNECT_MIN_MS);
+  await settle();
+  f.streams[1]?.push(sseHello(0) + sseCue(cue(1, { type: 'say', text: 'new one' })));
+  await settle();
+  assert.deepEqual(cues.map((c) => c.seq), [5, 1]);
+  assert.deepEqual(hellos.map((h) => h.reset), [false, true]);
   client.close();
 });
 

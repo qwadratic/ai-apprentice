@@ -7,7 +7,8 @@
 //   - Cues replayed from before this page joined a hand-over (`historyUntil`) only restore the map and the teach-back.
 import type { ClientTimers } from './client.ts';
 import type { ClientEvent, ClipaPose, CueEnvelope, CueOutcome, Region, Target } from './protocol.ts';
-import type { ConductorLine, ConductorStore } from './store.ts';
+import { MAX_SAID } from './store.ts';
+import type { ConductorLine, ConductorStore, SaidItem } from './store.ts';
 
 export interface FaceHost {
   /** Says `text` through the voice agent ([ASK]); false when the voice cannot take it now. */
@@ -70,7 +71,15 @@ export class ConductorFace {
       if (this.speaking.timer !== null) this.host.timers.clearTimeout(this.speaking.timer);
       this.speaking = null;
     }
+    const said = this.store.getState().said;
+    if (said.some((s) => s.cueId === cueId)) this.store.set({ said: said.map((s) => (s.cueId === cueId ? { ...s, outcome } : s)) });
     this.host.send({ type: 'cue_done', cueId, outcome });
+  }
+
+  /** Keeps what Clipa asked, warned or said, for the mode views (outcome filled in by finish). */
+  private remember(cueId: string, kind: SaidItem['kind'], text: string, atMs: number): void {
+    const said = [...this.store.getState().said, { cueId, kind, text, atMs, outcome: 'pending' as const }];
+    this.store.set({ said: said.length > MAX_SAID ? said.slice(said.length - MAX_SAID) : said });
   }
 
   private setLine(line: ConductorLine | null): void {
@@ -165,26 +174,29 @@ export class ConductorFace {
     if (expired) { this.finish(env.cueId, 'skipped'); return; }
     switch (cue.type) {
       case 'guide': {
-        this.setLine({ cueId: env.cueId, kind: 'guide', text: cue.text, step: cue.step || null });
+        // Point first, then the line: the bubble then opens beside the target.
         this.setTarget(cue.target, env.cueId);
         if (cue.target?.kind === 'region') this.setRegions([{ regionId: cue.target.regionId, label: cue.target.label, box: cue.target.box, evidenceId: cue.target.evidenceId }], env.cueId);
+        this.setLine({ cueId: env.cueId, kind: 'guide', text: cue.text, step: cue.step || null });
         if (cue.speak && !this.host.personBusy() && this.speakCue(env.cueId, cue.text) === 'speaking') return;
         this.finish(env.cueId, 'shown');
         return;
       }
       case 'ask':
       case 'warn': {
+        this.remember(env.cueId, cue.type, cue.text, env.atMs);
         if (this.host.personBusy()) { this.finish(env.cueId, 'skipped'); return; }
-        this.setLine({ cueId: env.cueId, kind: cue.type, text: cue.text, step: null });
         const withBox = cue.regions.filter((r) => r.box !== null);
         this.setRegions(withBox, env.cueId);
         const first = withBox[0] ?? null;
         this.setTarget(first === null ? null : { kind: 'region', ...first }, env.cueId);
         if (cue.type === 'warn') { this.store.set({ pose: 'warn' }); this.host.pose('warn'); }
+        this.setLine({ cueId: env.cueId, kind: cue.type, text: cue.text, step: null });
         if (this.speakCue(env.cueId, cue.text) === 'no_voice') this.finish(env.cueId, 'shown');
         return;
       }
       case 'say': {
+        this.remember(env.cueId, 'say', cue.text, env.atMs);
         if (this.host.personBusy()) { this.finish(env.cueId, 'skipped'); return; }
         this.setLine({ cueId: env.cueId, kind: 'say', text: cue.text, step: null });
         if (this.speakCue(env.cueId, cue.text) === 'no_voice') this.finish(env.cueId, 'shown');

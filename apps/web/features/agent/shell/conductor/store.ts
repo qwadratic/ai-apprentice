@@ -13,6 +13,16 @@ export interface ConductorLine {
   step: string | null;
 }
 
+/** A line Clipa asked or said (ask, warn, say), newest last, with how it ended. */
+export interface SaidItem {
+  cueId: string;
+  kind: 'ask' | 'warn' | 'say';
+  text: string;
+  /** Session time of the cue (ms since the conductor's epoch). */
+  atMs: number;
+  outcome: 'pending' | 'spoken' | 'shown' | 'skipped' | 'interrupted';
+}
+
 export interface ConductorMapSnapshot {
   version: number;
   /** The conductor's generic map (steps, guardrails, gaps, teachBack, comments) as sent; read it with fromGenericMap. */
@@ -43,12 +53,16 @@ export interface ConductorState {
   quiet: string | null;
   /** The screen observations this page received (newest last), for the Review board's keyframes. */
   observations: readonly ScreenObservation[];
+  /** What Clipa asked, warned or said in this page (newest last, capped). */
+  said: readonly SaidItem[];
 }
+
+export const MAX_SAID = 40;
 
 export function initialConductorState(): ConductorState {
   return {
     enabled: false, status: 'idle', statusDetail: null, linked: false, pose: null, line: null, target: null,
-    regions: [], regionsCueId: null, map: null, teachBack: null, paused: false, quiet: null, observations: [],
+    regions: [], regionsCueId: null, map: null, teachBack: null, paused: false, quiet: null, observations: [], said: [],
   };
 }
 

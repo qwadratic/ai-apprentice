@@ -73,6 +73,8 @@ export interface ConductorOptions {
   version: string;
   /** Clipa flies to a conductor target, or home for null (the director, through runtime.ts). */
   pointAt?(target: Target | null): void;
+  /** The floating Clipa shows this line in her bubble ('' clears it). The card's copy goes through the presenter. */
+  say?(text: string): void;
 }
 
 /** The conductor's pose as the shell's Clipa state, for the poses that the voice signals do not already show. */
@@ -366,9 +368,14 @@ export class ShellController {
         timers: this.deps.timers,
         clock: () => this.journeyTime(),
         onCue: (env) => face.onCue(env),
-        onHello: (hello, first) => {
+        onHello: (hello, first, reset) => {
           // A page that joined a hand-over restores the map from what was sent before, but does not replay old lines.
           if (first && linked) face.historyUntil = hello.lastCueSeq;
+          if (reset) {
+            // The server restarted: its new conductor knows nothing of this page (nor of a hand-over link), so it is told again.
+            face.historyUntil = -1;
+            this.helloSent = false;
+          }
           if (!this.helloSent) this.sendHello();
         },
         onStatus: (status, detail) => this.onConductorStatus(status, detail),
@@ -480,7 +487,10 @@ export class ShellController {
       speak: (text, maxChars) => this.speakLine(text, maxChars),
       context: (text) => this.sendContext(text, this.voice),
       personBusy: () => this.activitySent === 'typing' || this.speech.isSpeaking(this.deps.perfNow()),
-      bubble: (text) => this.deps.presenter.say(text),
+      bubble: (text) => {
+        this.deps.presenter.say(text);
+        this.deps.conductor?.say?.(text);
+      },
       point: (target) => this.pointAt(target),
       pose: () => this.syncClipa(),
       log: (type, text) => this.log('sys', type, text),

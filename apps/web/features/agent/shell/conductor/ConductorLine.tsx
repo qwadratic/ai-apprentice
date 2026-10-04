@@ -1,5 +1,43 @@
+import { clockOf } from '../components/Parts.tsx';
 import { useConductor } from './hooks.ts';
 import type { ConductorStatus } from './client.ts';
+import type { SaidItem } from './store.ts';
+
+const KIND_LABEL: Record<SaidItem['kind'], string> = { ask: 'Asked', warn: 'Warned', say: 'Said' };
+const OUTCOME_LABEL: Record<SaidItem['outcome'], string> = {
+  pending: 'saying…',
+  spoken: 'spoken',
+  shown: 'shown (no voice)',
+  skipped: 'skipped: the moment passed',
+  interrupted: 'interrupted',
+};
+
+/** What Clipa asked, warned or said in this page, newest first: the questions at natural pauses are visible here. */
+export function ConductorSaid({ title = 'What Clipa asked' }: { title?: string }) {
+  const said = useConductor((s) => s.said);
+  const asked = said.filter((s) => s.kind === 'ask').length;
+  return (
+    <section aria-labelledby="as-csaid-title" data-testid="conductor-said">
+      <h3 className="as-h3" id="as-csaid-title">{title} <span className="as-count">{asked} questions · {said.length} lines</span></h3>
+      {said.length === 0 ? (
+        <p className="as-empty">Nothing yet. Clipa speaks only at a natural pause after something changed on screen.</p>
+      ) : (
+        <ol className="as-feed" aria-live="polite">
+          {[...said].reverse().map((s) => (
+            <li key={s.cueId} className={`as-feed__item as-feed__item--${s.outcome === 'spoken' || s.outcome === 'shown' ? 'said' : 'unspoken'}`}>
+              <div className="as-feed__head">
+                <span className={`as-tag as-tag--${s.kind === 'warn' ? 'warn' : 'accent'}`}>{KIND_LABEL[s.kind]}</span>
+                <span className="as-feed__time">{clockOf(s.atMs)}</span>
+              </div>
+              <p className="as-feed__text">{s.text}</p>
+              <p className="as-note">{OUTCOME_LABEL[s.outcome]}</p>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
+  );
+}
 
 const STATUS_TEXT: Record<ConductorStatus, string> = {
   idle: 'starting',

@@ -1,5 +1,5 @@
 import { EvidenceLinks, NotWired } from '../components/Parts.tsx';
-import { ConductorLine } from '../conductor/ConductorLine.tsx';
+import { ConductorLine, ConductorSaid } from '../conductor/ConductorLine.tsx';
 import { useConductorLeads } from '../conductor/hooks.ts';
 import { useShell, useShellState } from '../hooks.ts';
 import { TEACH_CASES, isTeachCaseId } from '../screen/sample-scenarios.ts';
@@ -32,6 +32,7 @@ export function TeachView() {
           before a step that one of the expert&apos;s rules covers. She warns; she never blocks another app.
         </p>
       )}
+      {leads && <ConductorSaid title="What Clipa said" />}
       {!leads && !brain.wired && (
         <NotWired>
           the tutor ({brain.name}): it cannot explain steps, predict decisions or judge a checkpoint. Until then every

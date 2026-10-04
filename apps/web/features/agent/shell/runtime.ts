@@ -1,5 +1,5 @@
 // Wires the real world (browser fetch, timers, ElevenLabs, localStorage, the Clipa motion director) into the controller.
-import { createClipaDirector } from '../clipa/src/index.ts';
+import { createClipaDirector, estimateSpeechMs } from '../clipa/src/index.ts';
 import '../../demo-workspace/workspace.css';
 import { createDemoWorkspaceAdapter } from './slots/demo-workspace-adapter.ts';
 import type { WorkspaceAdapter } from './slots/workspace-adapter.ts';
@@ -128,6 +128,13 @@ export function createRuntime(): ShellRuntime {
     presenter.setTarget(rect === null ? null : { x: rect.left, y: rect.top, width: rect.width, height: rect.height });
     void director.point({ surface: CONDUCTOR_SURFACE, hint });
   };
+  // A conductor line in the floating Clipa's bubble. Beside a target she keeps pointing and only the bubble carries the words;
+  // the mouth moves for about as long as the line takes to say.
+  const speakLine = (text: string): void => {
+    const clean = text.trim();
+    if (clean === '') return;
+    void director.speak(clean, { durationMs: estimateSpeechMs(clean) + 2000 });
+  };
   // `?conductor=off` keeps the in-browser brain in the lead (the fallback); otherwise the page is a face of the conductor.
   const query = new URLSearchParams(window.location.search);
   const conductorOn = query.get('conductor') !== 'off';
@@ -150,7 +157,7 @@ export function createRuntime(): ShellRuntime {
     isHidden: () => document.hidden,
     storage: browserStorage,
     lastInputAt: () => lastInputAt,
-    ...(conductorOn ? { conductor: { base: API_BASE, version: WEB_FACE_VERSION, pointAt } } : {}),
+    ...(conductorOn ? { conductor: { base: API_BASE, version: WEB_FACE_VERSION, pointAt, say: speakLine } } : {}),
   });
   note = (type, text) => controller.note(type, text);
   onTyping = () => controller.noteTyping();
@@ -169,7 +176,10 @@ export function createRuntime(): ShellRuntime {
     workspace: createDemoWorkspaceAdapter(),
     live,
     pointAt,
-    say: (text) => presenter.say(text),
+    say: (text) => {
+      presenter.say(text);
+      speakLine(text);
+    },
     dispose() {
       live?.dispose();
       stopWatching();

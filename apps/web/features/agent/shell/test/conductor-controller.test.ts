@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import type { AgentApi } from '../api.ts';
 import { createAgentApi } from '../api.ts';
 import type { BrainDecision } from '../brain/types.ts';
-import { BATCH_MS } from '../conductor/client.ts';
+import { BATCH_MS, RECONNECT_MIN_MS } from '../conductor/client.ts';
 import type { Target } from '../conductor/protocol.ts';
 import { ShellController, TYPING_IDLE_MS } from '../controller.ts';
 import type { ControllerDeps } from '../controller.ts';
@@ -228,6 +228,29 @@ test('a guide cue shows its line and points at its UI target; a cancel clears it
   rig.timers.advance(BATCH_MS);
   await settle();
   assert.ok(rig.events().some((e) => e.event.type === 'cue_done' && e.event.cueId === 'c1-abcdef12' && e.event.outcome === 'shown'));
+  rig.controller.dispose();
+});
+
+test('a restarted server: the page says hello again, re-sends its live session and follows the new conductor', async () => {
+  const rig = await booted();
+  await rig.controller.start('learn');
+  await settle();
+  rig.conductor.streams[0]?.push(sseCue(cue(7, { type: 'say', text: 'before' })));
+  await settle();
+  rig.conductor.streams[0]?.end();
+  await settle();
+  rig.timers.advance(RECONNECT_MIN_MS);
+  await settle();
+  rig.conductor.streams[1]?.push(sseHello(0));
+  await settle();
+  rig.timers.advance(BATCH_MS);
+  await settle();
+  assert.equal(rig.events().filter((e) => e.event.type === 'hello').length, 2);
+  assert.ok(rig.events().filter((e) => e.event.type === 'session' && e.event.live === true).length >= 2);
+  rig.conductor.streams[1]?.push(sseCue(cue(1, { type: 'say', text: 'after restart' })));
+  await settle();
+  assert.ok(rig.voice.userMessages.includes('[ASK] after restart'));
+  assert.deepEqual(rig.controller.conductorStore.getState().said.map((s) => [s.text, s.outcome]), [['before', 'interrupted'], ['after restart', 'pending']]);
   rig.controller.dispose();
 });
 

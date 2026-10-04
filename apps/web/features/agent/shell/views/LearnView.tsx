@@ -1,5 +1,5 @@
 import { EvidenceLinks, NotWired, StepCards, clockOf } from '../components/Parts.tsx';
-import { ConductorLine } from '../conductor/ConductorLine.tsx';
+import { ConductorLine, ConductorSaid } from '../conductor/ConductorLine.tsx';
 import { useConductorLeads } from '../conductor/hooks.ts';
 import { useShellState } from '../hooks.ts';
 import type { FeedStatus } from '../state/types.ts';
@@ -50,7 +50,9 @@ export function LearnView() {
         </p>
       )}
 
-      <section aria-labelledby="as-feed-title">
+      {leads && <ConductorSaid />}
+
+      <section aria-labelledby="as-feed-title" hidden={leads}>
         <h3 className="as-h3" id="as-feed-title">Questions <span className="as-count">{counts.asked} asked · {counts.deferred} deferred</span></h3>
         {feed.length === 0 ? (
           <>
@@ -76,7 +78,7 @@ export function LearnView() {
         )}
       </section>
 
-      <section aria-labelledby="as-map-title">
+      <section aria-labelledby="as-map-title" hidden={leads}>
         <h3 className="as-h3" id="as-map-title">Draft map <span className="as-count">{map.steps.length} steps</span></h3>
         {map.steps.length === 0
           ? <p className="as-empty">No steps yet. The draft map fills as the expert works and answers.</p>
