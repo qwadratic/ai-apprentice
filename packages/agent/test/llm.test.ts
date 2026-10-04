@@ -222,7 +222,7 @@ test("reply classification through the model: three confirmations, a correction 
   for (const reply of confirmations) assert.deepEqual(await classifier.classify("teach-back text", reply), { verdict: "confirm", correction: null }, reply);
   assert.deepEqual(await classifier.classify("teach-back text", expertTeachback("correction")), {
     verdict: "correct",
-    correction: "the order number goes in as well, not only the address and the window",
+    correction: "the order number goes in as well as the address and the delivery window",
   });
   assert.equal((await classifier.classify("t", "Hmm.")).verdict, "unclear");
   assert.deepEqual(must(calls[0]).body, { teachBack: "teach-back text", reply: must(confirmations[0]) });
@@ -247,7 +247,7 @@ test("reply classification falls back to the heuristic on errors, with the fallb
     const llm = client(impl);
     const classifier = new LlmReplyClassifier({ client: llm });
     assert.equal((await classifier.classify("t", "Sounds good.")).verdict, "confirm");
-    assert.equal((await classifier.classify("t", "Yes, but the order number too.")).verdict, "correct");
+    assert.equal((await classifier.classify("t", "Yes, and the order number too.")).verdict, "correct");
     assert.deepEqual(llm.events.map((e) => [e.task, e.outcome, e.reason]), [
       ["reply_classification", "fallback", reason],
       ["reply_classification", "fallback", reason],

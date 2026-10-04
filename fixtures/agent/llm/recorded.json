@@ -19,10 +19,10 @@
       }
     },
     {
-      "answerText": "His phone can't show images, so I write the details out myself.",
+      "answerText": "His phone strips images, so I write the details out myself.",
       "output": {
-        "rationale": "his phone can't show images",
-        "quote": "His phone can't show images",
+        "rationale": "his phone strips images",
+        "quote": "His phone strips images",
         "guardrail": null,
         "exceptions": [],
         "unknowns": ["whether other devices have the same problem"],
@@ -30,10 +30,10 @@
       }
     },
     {
-      "answerText": "Customer_07 can't open pictures on his phone, that's why I handle it myself.",
+      "answerText": "Customer_07 phone hides pictures in our emails, that's why I handle it myself.",
       "output": {
-        "rationale": "can't open pictures on his phone",
-        "quote": "can't open pictures on his phone",
+        "rationale": "phone hides pictures in our emails",
+        "quote": "phone hides pictures in our emails",
         "guardrail": {
           "condition": "order of customer_07",
           "requiredAction": "include the details in the message",
@@ -84,8 +84,8 @@
     { "reply": "Sounds good.", "output": { "verdict": "confirm", "correction": null } },
     { "reply": "Uh, yes, that's right.", "output": { "verdict": "confirm", "correction": null } },
     {
-      "reply": "Almost. One correction: the order number goes in as well, not only the address and the window.",
-      "output": { "verdict": "correct", "correction": "the order number goes in as well, not only the address and the window" }
+      "reply": "One correction: the order number goes in as well as the address and the delivery window.",
+      "output": { "verdict": "correct", "correction": "the order number goes in as well as the address and the delivery window" }
     },
     { "reply": "Hmm.", "output": { "verdict": "unclear", "correction": null } }
   ],

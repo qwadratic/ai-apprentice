@@ -62,7 +62,7 @@ test("the reason survives five ways of saying it, with or without 'because'", ()
     assert.equal(x.reasonUnknown, false);
   }
   // "that's why" puts the reason before the cue, not after it.
-  assert.equal(heuristicExtract({ ...input, topic: "reason", text: "Customer_07 can't open pictures on his phone, that's why I handle it myself." }).rationale, "Customer_07 can't open pictures on his phone");
+  assert.equal(heuristicExtract({ ...input, topic: "reason", text: "Customer_07 phone hides pictures in our emails, that's why I handle it myself." }).rationale, "Customer_07 phone hides pictures in our emails");
 });
 
 test("a paraphrased reason ends in a warning at the checkpoint, not in unknown", async () => {
@@ -113,8 +113,9 @@ test("confirmations in any natural wording are confirmations; additions, negatio
   for (const reply of ["Yes, that's right.", "Yes.", "Correct.", "Yep, you got it right.", "Perfect, thank you."]) {
     assert.equal(classifyReply(reply), "confirm", reply);
   }
+  assert.equal(classifyReply("Also add the phone number."), "correct");
+  assert.equal(classifyReply("Yes, but one thing is off."), "unclear", "a contrast: left to the model or the buttons");
   for (const reply of strings("corrections")) assert.equal(classifyReply(reply), "correct", reply);
-  for (const reply of ["Yes, but one thing is off.", "Also add the phone number."]) assert.equal(classifyReply(reply), "correct", reply);
   for (const reply of ["That's not right.", "Not quite.", "No."]) assert.equal(classifyReply(reply), "unclear", `${reply}: a denial with nothing said`);
   for (const reply of strings("unclear")) assert.equal(classifyReply(reply), "unclear", reply);
 

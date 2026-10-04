@@ -17,14 +17,38 @@ import type { FactKey, MapExceptionData } from "./types.ts";
 // Order fields: required only when named
 // ---------------------------------------------------------------------------
 
-const FACT_PATTERNS: ReadonlyArray<readonly [FactKey, RegExp]> = [
-  ["deliveryAddress", /(?<!\be-?mail )\b(?:address|street)\b/i],
-  [
-    "deliveryWindow",
-    /\bwindow\b|\btime ?slot\b|\bdelivery (?:time|date|slot|day|window)\b|(?<!\b(?:at|by|on|in|from|during|all|for|about|that|this) )\bthe (?:delivery )?(?:time|date)\b|\b(?:and|plus|also) (?:the )?(?:delivery )?(?:time|date)\b/i,
-  ],
-  ["orderId", /\border (?:number|id|no\.?|ref(?:erence)?)\b|\bORD-\d+|\border ?#/i],
+/**
+ * A field matches only by its full name or an exact synonym, with no other qualifier word in front of it: "the address",
+ * "delivery address", "delivery window", "delivery time", "time slot", "order number". "billing address", "return address",
+ * a bare "time" or "date" or "window" name no field.
+ */
+const FIELD_NAMES: ReadonlyArray<readonly [FactKey, RegExp]> = [
+  ["deliveryAddress", /(?:\b([a-z'-]+)\s+)?\b(delivery address|address)\b/gi],
+  ["deliveryWindow", /(?:\b([a-z'-]+)\s+)?\b(delivery window|delivery time|time ?slot)\b/gi],
+  ["orderId", /(?:\b([a-z'-]+)\s+)?\b(order (?:number|id|no\.?|ref(?:erence)?))\b/gi],
 ];
+/** What may stand right before a field name without qualifying it: determiners, conjunctions, plain verbs. */
+const FIELD_LEAD_OK = new Set([
+  "the", "a", "an", "his", "her", "their", "our", "your", "my", "this", "that", "its", "delivery", "and", "or", "plus", "also", "with", "of",
+  "only", "just", "both", "then", "include", "includes", "add", "put", "need", "needs", "want", "wants", "write", "type", "give", "list", "show",
+]);
+const ORDER_LITERAL = /\bORD-\d+|\border ?#/i;
+
+/** The fields named in a clause. */
+function namedFields(clause: string): FactKey[] {
+  const found: FactKey[] = [];
+  for (const [key, re] of FIELD_NAMES) {
+    for (const m of clause.matchAll(re)) {
+      const lead = m[1]?.toLowerCase();
+      if (lead === undefined || FIELD_LEAD_OK.has(lead)) {
+        found.push(key);
+        break;
+      }
+    }
+  }
+  if (ORDER_LITERAL.test(clause) && !found.includes("orderId")) found.push("orderId");
+  return found;
+}
 
 /** A clause that says something is NOT wanted: the fields it names are not required. "Not only X" still wants X. */
 const NEGATION =
@@ -37,9 +61,25 @@ export function extractFacts(text: string): FactKey[] {
   for (const raw of text.split(/[,;.!?]+|\s+(?:but|except|instead of|rather than)\s+/i)) {
     const clause = raw.replace(NOT_ONLY, " only ");
     if (NEGATION.test(clause)) continue;
-    for (const [key, re] of FACT_PATTERNS) if (re.test(clause)) found.add(key);
+    for (const key of namedFields(clause)) found.add(key);
   }
   return FACT_KEYS.filter((k) => found.has(k));
+}
+
+// ---------------------------------------------------------------------------
+// The global veto: the heuristic acts only on plain, affirmative, unhedged statements
+// ---------------------------------------------------------------------------
+
+/**
+ * A question, a negation, a hedge or a contrast anywhere in the utterance. Precision over recall: such an utterance yields no
+ * reason, no field, no widening of the scope, and a reply to the teach-back becomes "unclear". The model path or the buttons
+ * handle it. (Restrictions and "I don't know" are kept: they can only narrow a rule or leave it unknown.)
+ */
+const VETO =
+  /\?|n't\b|'d\b|\b(?:not|no|never|nobody|nothing|none|nor|neither|maybe|perhaps|probably|possibly|presumably|apparently|supposedly|likely|unlikely|i think|i guess|i suppose|i assume|i assumed|assumed|assume|i believe|i imagine|i reckon|i feel|i doubt|doubt|i wish|wish|might|could|would|should|if|unless|whether|eventually|used to|anymore|any more|mostly|mainly|usually|honestly|sort of|kind of|somewhat|seems?|but|although|though|actually|however|except|unsure|unclear)\b/i;
+
+export function isVetoed(text: string): boolean {
+  return VETO.test(text.replace(/[‘’]/g, "'"));
 }
 
 /** Every fact the answer says is wanted ("everything", "all the details"), in canonical order. */
@@ -176,7 +216,7 @@ const INCLUSION =
   /\b(?:too|also|as well|likewise|both|plus)\b|\bsame (?:for|goes for|applies to|here|thing)\b|\bsame as (?:him|her|them|customer\b|that one|this one|the first)|\b(?:is|are) the same(?! as\b)|\bsame\b[\s.!]*$/i;
 /** An explicit inclusion of everyone: "for every customer", "every customer gets it", "everyone needs it". */
 const ALL_INCLUSION =
-  /\b(?:for|to|with) (?:all|every|each|any) (?:of (?:the|our) )?customers?\b|\b(?:all|every|each) customers? (?:get|gets|need|needs|want|wants|should|must|have|has|are|is|do|does)\b|\beveryone (?:gets|needs|wants|should|must|has)\b|\beverybody (?:gets|needs|wants|should|must|has)\b|\bfor (?:everyone|everybody)\b|\b(?:applies|same) (?:to|for) (?:all|every|everyone)\b/i;
+  /\b(?:for|to|with) (?:all|every|each|any) (?:of (?:the|our) )?customers?\b|\b(?:all|every|each) customers? (?:get|gets|need|needs|want|wants|should|must|have|has|are|is|do|does)\b|\beveryone (?:gets|needs|wants|should|must|has)\b|\beverybody (?:gets|needs|wants|should|must|has)\b|\bfor (?:everyone|everybody)\b|\b(?:it|this|that)(?: is|'s) for all\b(?! (?:the|these|those|my|our|your|his|her|their))|\b(?:applies|same) (?:to|for) (?:all|every|everyone)\b/i;
 const ONLY = /\b(?:only|just)\b/i;
 /** What opens a reply to the teach-back and says nothing about scope: "No,", "Not quite,", "Yes.", "Almost,". */
 const LEAD_TOKENS = /^(?:(?:no|nope|nah|not quite|not exactly|not really|almost|yes|yeah|yep|okay|ok|right|actually|well|um|uh|hmm)\b[\s,.!-]*)+/i;
@@ -296,9 +336,18 @@ export function heuristicExtract(input: ExtractionInput): AnswerExtraction {
   });
 
   const retracts = RETRACT_CUE.test(text);
-  if (retracts) {
+  const veto = isVetoed(text);
+  if (retracts || veto) {
     rationale = null;
     reasonQuote = null;
+  }
+  if (veto) {
+    // Nothing that could be wrong in the unsafe direction: no widening, no exception, no field.
+    scopeAll = false;
+    scopeCustomers.clear();
+    joinQuote = null;
+    exceptions.length = 0;
+    if (input.topic === "scope") for (const ref of mentions(restrictionQuote ?? "")) if (ref === input.entityRef) scopeCustomers.add(ref);
   }
   // Never wider than stated: an answer that restricts or contrasts anywhere does not widen the rule to everyone.
   if (restricted) scopeAll = false;
@@ -311,8 +360,8 @@ export function heuristicExtract(input: ExtractionInput): AnswerExtraction {
     unknowns.push("The expert does not know why.");
   }
 
-  const requiredFacts = extractFacts(text);
-  const factSentence = sentences.find((s) => extractFacts(s).length > 0) ?? null;
+  const requiredFacts = veto ? [] : extractFacts(text);
+  const factSentence = veto ? null : (sentences.find((s) => extractFacts(s).length > 0) ?? null);
 
   let quote: string;
   let evidenceOfClaim: boolean;

@@ -8,6 +8,7 @@ import { renderGapQuestion } from "../policy/topics.ts";
 import type { GapTopic } from "../policy/topics.ts";
 import type { ReviewItem } from "../policy/types.ts";
 import type { AnswerExtractor } from "./extractor.ts";
+import { isVetoed } from "./heuristic-extractor.ts";
 import { MapConfirmationError, confirmIssues, knownCustomerRefs, latestConfirmed, reduceMap, workingMap } from "./map.ts";
 import type { ConfirmIssue, MapState } from "./map.ts";
 import { isAnswered, labelFacts } from "./types.ts";
@@ -20,6 +21,13 @@ export interface FollowUpOptions {
   persona?: PersonaId;
   /** Learn questions that were held back for Review (budget used, no pause came). */
   held?: readonly ReviewItem[];
+  /** Follow-ups the expert could not be understood on and that were skipped (see ReviewClarifier): never asked again. */
+  unresolved?: readonly string[];
+}
+
+/** The identity of a follow-up across plans: its topic and the guardrail it extends. */
+export function followUpKey(q: Pick<Question, "topic" | "targetId">): string {
+  return `${q.topic}:${q.targetId ?? ""}`;
 }
 
 function answeredFor(map: WorkMap, topic: Topic, g: MapGuardrail): boolean {
@@ -36,7 +44,9 @@ export function planFollowUps(map: WorkMap, options: FollowUpOptions = {}): Ques
   const max = options.max ?? MAX_FOLLOW_UPS;
   const words = getPersona(options.persona ?? DEFAULT_PERSONA).maxWords;
   const out: Question[] = [];
+  const skipped = new Set(options.unresolved ?? []);
   const push = (g: MapGuardrail, topic: GapTopic): void => {
+    if (skipped.has(followUpKey({ topic, targetId: g.id }))) return;
     const who = g.scope.customers[0] ?? "this customer";
     out.push({
       id: `q-R-${out.length + 1}`,
@@ -130,9 +140,10 @@ const FILLER = "um+|uh+|er+m?|hm+|hmm+|ah+|oh+|well|like|you know|i mean";
 const DENIAL = "no|nope|nah|not quite|not exactly|not really|not right|not correct|not true|wrong|incorrect|almost|never";
 const DOUBT = "i'?m not sure|not sure|i don'?t know|don'?t know|no idea|what|pardon|sorry|repeat(?: that)?|again|come again|say that|one more time|huh|what do you mean|can you|could you";
 // Words that can stay after the confirmation tokens without adding anything: "sounds good TO ME", "yes IT IS".
-const NEUTRAL = new Set(["to", "me", "it", "is", "are", "was", "that", "this", "i", "you", "we", "so", "very", "really", "quite", "then", "there", "here", "the", "a", "my", "your", "for", "of", "all"]);
+// No scope word is neutral: "Yes, it is for all." carries a scope.
+const NEUTRAL = new Set(["to", "me", "it", "is", "are", "was", "that", "this", "i", "you", "we", "so", "very", "really", "quite", "then", "there", "here", "the", "a", "my", "your", "for", "of"]);
 // Words that connect or hedge but carry no content of their own: "yes, AND." cannot be parsed.
-const MARKERS = new Set(["and", "but", "or", "also", "too", "as", "well", "just", "not", "if", "he", "she", "they", "his", "her", "their", "our", "an", "in", "on", "at", "with", "be", "these", "those", "its", "that's", "it's", "i'm", "you're", "thats"]);
+const MARKERS = new Set(["and", "but", "or", "also", "too", "as", "well", "not", "if", "he", "she", "they", "his", "her", "their", "our", "an", "in", "on", "at", "with", "be", "these", "those", "its", "that's", "it's", "i'm", "you're", "thats"]);
 
 const normalise = (text: string): string =>
   text
@@ -169,10 +180,12 @@ const words = (core: string): string[] => core.split(" ").filter((w) => w.length
  */
 export function readReply(text: string): ReplyVerdict {
   const core = normalise(text);
-  if (core.length === 0) return { verdict: "unclear", correction: null };
+  if (core.length === 0 || text.includes("?")) return { verdict: "unclear", correction: null };
   const rest = stripAll(core, [...CONFIRMATION, FILLER]);
   const confirmedSomething = rest !== stripAll(core, [FILLER]);
   if (rest.length === 0) return { verdict: confirmedSomething ? "confirm" : "unclear", correction: null };
+  // The global veto: a negation, a hedge or a contrast in what is left makes the reply unparseable for the heuristic.
+  if (isVetoed(rest)) return { verdict: "unclear", correction: null };
   // What is left once denials, doubts and neutral words are taken away is the content of the reply.
   const substance = stripAll(rest, [DENIAL, DOUBT, FILLER]);
   const content = words(substance).filter((w) => !NEUTRAL.has(w) && !MARKERS.has(w));
@@ -257,6 +270,102 @@ export async function applyTeachBackReply(
   }
   const next = reduceMap(state, { type: "correct", extraction });
   return { outcome: "corrected", state: next, teachBack: buildTeachBack(workingMap(next)), issues: [] };
+}
+
+// ---------------------------------------------------------------------------
+// Unclear replies: ask again once, then hand over to buttons and move on
+// ---------------------------------------------------------------------------
+
+export const REVIEW_BUTTONS = ["confirm", "correct", "skip"] as const;
+export type ReviewButton = (typeof REVIEW_BUTTONS)[number];
+
+/** What to do after an unclear reply. */
+export type ClarifyStep =
+  /** Ask the same question once more (attempt 1 is the first re-ask). */
+  | { kind: "ask_again"; itemId: string; attempt: number }
+  /** Stop asking. The item is unresolved; show Confirm / Correct / Skip as buttons and move on. */
+  | { kind: "buttons"; itemId: string; options: readonly ReviewButton[] };
+
+/**
+ * Keeps the review from looping on an expert the heuristic cannot understand. An item is a teach-back (`teachback:<version>`)
+ * or a follow-up (`followUpKey`). After MAX_UNCLEAR consecutive unclear replies to the same item the clarifier stops asking:
+ * the item is marked unresolved and the host shows Confirm / Correct / Skip buttons. A reply that is not unclear starts the
+ * count again. Five unclear replies in a row produce at most one re-ask.
+ */
+export const MAX_UNCLEAR = 2;
+
+export class ReviewClarifier {
+  private readonly counts = new Map<string, number>();
+  private readonly open = new Set<string>();
+
+  /** An unclear reply to this item. */
+  unclear(itemId: string): ClarifyStep {
+    const n = (this.counts.get(itemId) ?? 0) + 1;
+    this.counts.set(itemId, n);
+    if (n >= MAX_UNCLEAR) {
+      this.open.add(itemId);
+      return { kind: "buttons", itemId, options: REVIEW_BUTTONS };
+    }
+    return { kind: "ask_again", itemId, attempt: n };
+  }
+
+  /** A reply that could be read (or a button): the count for this item starts again. */
+  understood(itemId: string): void {
+    this.counts.delete(itemId);
+    this.open.delete(itemId);
+  }
+
+  /** Skip was pressed: the item stays unresolved and is not asked again. */
+  skip(itemId: string): void {
+    this.open.add(itemId);
+  }
+
+  isUnresolved(itemId: string): boolean {
+    return this.open.has(itemId);
+  }
+
+  /** Items the review gave up asking about, to show as open points and to pass to planFollowUps as `unresolved`. */
+  unresolved(): string[] {
+    return [...this.open];
+  }
+}
+
+export type ButtonOutcome =
+  | { outcome: "confirmed"; state: MapState }
+  /** The expert wants to correct: the host takes their words (voice or text) and passes them to applyTeachBackReply. */
+  | { outcome: "needs_words"; state: MapState }
+  | { outcome: "skipped"; state: MapState }
+  | { outcome: "refused"; state: MapState; issues: ConfirmIssue[] };
+
+/**
+ * A button press on an item the review stopped asking about. Confirm on the teach-back confirms the working map (refused, with
+ * the issues, if an item lacks evidence or a quote); Confirm on a follow-up means there is nothing to add. Skip leaves the
+ * item unresolved. Correct asks for the expert's words.
+ */
+export function pressReviewButton(
+  state: MapState,
+  clarifier: ReviewClarifier,
+  itemId: string,
+  button: ReviewButton,
+  atMs: number,
+): ButtonOutcome {
+  if (button === "skip") {
+    clarifier.skip(itemId);
+    return { outcome: "skipped", state };
+  }
+  if (button === "correct") return { outcome: "needs_words", state };
+  if (!itemId.startsWith("teachback:")) {
+    clarifier.understood(itemId);
+    return { outcome: "confirmed", state };
+  }
+  try {
+    const next = reduceMap(state, { type: "confirm", atMs, quote: "(confirmed with the button)" });
+    clarifier.understood(itemId);
+    return { outcome: "confirmed", state: next };
+  } catch (e) {
+    if (e instanceof MapConfirmationError) return { outcome: "refused", state, issues: e.confirmIssues };
+    throw e;
+  }
 }
 
 export interface ReviewStatus {

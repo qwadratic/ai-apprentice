@@ -81,7 +81,7 @@ test("the teach-back quotes the map and ends with a question", async () => {
 test("a confirmation or a correction: classifyReply, then a new version", async () => {
   assert.equal(classifyReply(expertTeachback("correction")), "correct");
   assert.equal(classifyReply(expertTeachback("confirm")), "confirm");
-  assert.equal(classifyReply("Yes, but one thing is off."), "correct");
+  assert.equal(classifyReply("Yes, but one thing is off."), "unclear", "a contrast: the heuristic leaves it to the model or the buttons");
 
   const state = await buildState({ confirm: false });
   const corrected = await applyTeachBackReply(state, { text: expertTeachback("correction"), atMs: 90000 }, extractor);

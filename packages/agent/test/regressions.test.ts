@@ -63,13 +63,11 @@ test("'I'm not really sure, honestly.' and 'I don't remember anymore.' are not r
   }
 });
 
-test("a hedge in front of a real reason keeps the reason", () => {
-  const x = heuristicExtract({ ...input, topic: "reason", text: "I'm not sure. I think his phone blocks pictures." });
-  assert.match(x.rationale ?? "", /phone blocks pictures/);
-  assert.equal(x.reasonUnknown, false);
-  assert.ok(x.text.includes(must(x.reasonQuote)), "the quote is the expert's own words");
-  const because = heuristicExtract({ ...input, topic: "reason", text: "I don't know exactly, but because his phone blocks pictures, I think." });
-  assert.match(because.rationale ?? "", /his phone blocks pictures/);
+test("a hedge anywhere in the answer vetoes the reason: the model or the buttons take over", () => {
+  for (const text of ["I'm not sure. I think his phone blocks pictures.", "I don't know exactly, but because his phone blocks pictures, I think."]) {
+    const x = heuristicExtract({ ...input, topic: "reason", text });
+    assert.equal(x.rationale, null, text);
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -79,7 +77,7 @@ test("'No, that's right.' confirms", async () => {
   assert.equal(readReply("No, that's right.").verdict, "confirm");
   assert.equal(readReply("No, that is correct.").verdict, "confirm");
   assert.equal(readReply("No, that's not right.").verdict, "unclear", "a denial with nothing said: ask what to change");
-  assert.equal(readReply("No, the order number goes in too.").verdict, "correct");
+  assert.equal(readReply("No, the order number goes in too.").verdict, "unclear", "a negation: left to the model or the buttons");
   const state = await buildState({ confirm: false });
   assert.equal((await applyTeachBackReply(state, { text: "No, that's right.", atMs: 9 }, extractor)).outcome, "confirmed");
 });
@@ -171,11 +169,11 @@ test("'customers two weeks ago' names no customer, and no ref is made up from a 
 test("'The time doesn't matter' does not make the delivery window required", async () => {
   assert.deepEqual(extractFacts("The time doesn't matter."), []);
   assert.deepEqual(extractFacts("The address and the order number. The time doesn't matter."), ["orderId", "deliveryAddress"]);
-  assert.deepEqual(extractFacts("The address, not the time."), ["deliveryAddress"]);
-  assert.deepEqual(extractFacts("The address and the time."), ["deliveryAddress", "deliveryWindow"]);
-  assert.deepEqual(extractFacts("Almost. One correction: the order number goes in as well, not only the address and the window."), ["orderId", "deliveryAddress", "deliveryWindow"]);
+  assert.deepEqual(extractFacts("The address, not the delivery time."), ["deliveryAddress"]);
+  assert.deepEqual(extractFacts("The address and the delivery time."), ["deliveryAddress", "deliveryWindow"]);
+  // With the global veto the whole answer yields no field at all: never half of it.
   const state = await buildState({ followUps: false, confirm: false, texts: { essentials: "The address. The time doesn't matter." } });
-  assert.deepEqual(must(workingMap(state).guardrails[0]).requiredFacts, ["deliveryAddress"]);
+  assert.deepEqual(must(workingMap(state).guardrails[0]).requiredFacts, ["deliveryAddress", "deliveryWindow"], "falls back to what the expert typed");
 });
 
 // ---------------------------------------------------------------------------
