@@ -1,158 +1,192 @@
-# TASK-2.3 independent vision and Evidence slice
+# TASK-2.3 vision and Evidence transport
 
-This slice uses dependency-free ES modules and Node 24 built-ins. It does not choose
-the shared server framework, create a runner, add root dependencies, or define the
-external ScreenBridge/facts contract. The test schema in `screen.test.mjs` is only a
-local synthetic test shape. TASK-1 and TASK-2.1 remain integration dependencies.
+This package turns processed screen frames into validated canonical
+`ScreenObservation` objects. It imports the shared types and validators from
+`@apprentice/contracts`; it does not define a second ScreenBridge contract. The
+package is framework-neutral and leaves route registration, SQLite metadata and
+media retention to the shared API backend.
 
-## Entry points
+## Server composition
 
-- `createRunnerClient({ env, transport })`: server-only doc-5 client. Reads
-  `RUNNER_URL` and `RUNNER_TOKEN`; POSTs `images`, `prompt`, `system`, `schema`, and
-  optional `model` to `/v1/vision`. Returns `{json, ms}` only for a structured success.
-  Missing configuration, auth, limits, timeout, unavailable transport and malformed
-  output are typed errors. Response bodies and provider exception messages are never
-  included in errors. Redirects are rejected to keep bearer credentials on the runner.
-- `createFileEvidenceStore({mediaDir, metadata})`: pass the shared `MEDIA_DIR` and a
-  metadata repository exposing async `put(record)`, `get(id)`, `remove(id)`. The
-  shared backend must implement these with its existing SQLite design. This module
-  creates no tables or parallel metadata database. Media writes use temporary files
-  and atomic rename before committing metadata; metadata failure triggers cleanup.
-  `resolve(id)` checks metadata and media availability. `read(id)` serves bytes.
-- `createMemoryEvidenceStore()`: bounded nonpersistent adapter for synthetic tests.
-- `createScreenService({runner, schema, validate, makeObservation, evidence,
-  publish, prompt, onEvent, queueOptions})`: composition root. Import `schema`, the
-  strict synchronous `validate` function, and the synchronous `makeObservation`
-  factory from the approved TASK-1 implementation. Validator returns a validated
-  object or throws; falsy and Promise results fail closed. Factory receives
-  `{sessionId, frameId, timestampMs, sequence, evidence}` and must produce and
-  validate the canonical ScreenObservation, including its approved facts and
-  `evidenceIds`. `publish` must synchronously publish to the current bridge; it must
-  not return a deferred network send. The composition root owns UI/status mapping.
-- `mount(app, {register, service, authorize})`: framework-neutral registration;
-  `register(app, {method,path,handle})` adapts a Web `Request` and route `{id}` to
-  the host framework and sends the returned Web `Response`. No implicit Express,
-  Fastify, CORS, public server or browser token is introduced.
+Use `createScreenService` with the canonical `parseScreenObservation`, an
+`EvidenceMetadataRepository` backed by the shared SQLite database, and either a
+file or compatible processed-media store. `createRunnerClient` reads
+`RUNNER_URL` and `RUNNER_TOKEN` on the server and calls `POST /v1/vision`.
+Neither value belongs in browser configuration, fixtures, responses or logs.
 
-## Proposed internal routes (pending framework/recording integration)
+The runner must return the strict `VISION_RESULT_SCHEMA`. `parseVisionResult`
+rejects extra fields, unsupported fact shapes and incomplete results. The
+observation factory validates its output again with the canonical parser. It
+copies only visible facts; unknown identities stay `null`, and customer/order
+references remain separate fields.
 
-- `POST /screen/frames`: JSON `{sessionId,frameId,timestampMs,processed:true,
-  mediaType,data}` where `data` is standard padded base64 of a processed PNG/JPEG/WebP.
-  Returns 202 for accepted scheduling, 200 for duplicate/sampled frames, 400 for
-  invalid input, 409 for inactive/stale/out-of-order frames. Acceptance is not a
-  successful recognition; observations/errors arrive through the service callbacks.
-- `GET /screen/evidence/:id`: verifies availability and returns the internal record.
-- `GET /screen/evidence/:id/asset`: returns stored media, with no-store and nosniff.
+`createFileEvidenceStore` writes only frames marked `processed: true`, verifies
+PNG/JPEG/WebP signatures and byte limits, atomically installs media before
+metadata, and verifies both before resolving an Evidence reference. Inject the
+shared backend's metadata repository; this package intentionally creates no
+database or deployment. `createMemoryEvidenceStore` exists for tests only.
 
-`authorize(request, null)` authenticates before reading any body or metadata.
-`authorize(request, sessionId)` then authorizes access to that specific session.
-The shared API supplies its actual user/session authentication and exact-origin
-CORS policy. Missing authorization callbacks prevent mounting. Never expose
-`RUNNER_TOKEN` or the infrastructure test `API_TOKEN` to the browser.
+## Session HTTP contract
 
-The internal storage record contains `id`, `kind:'frame'`, `sessionId`, `frameId`,
-`assetRef`, `startMs`, `endMs`, `mediaType`, `byteLength`. It is an adapter record,
-not a second ScreenBridge. Its `assetRef` currently uses the proposed asset route;
-recording and the orchestrator must agree the final resolver/mapping before integration.
-No clip recording is implemented here. Frame records use equal start/end times.
+All routes require an exact configured Origin. Except for session start, routes
+also require the opaque session bearer returned by start. The API stores only a
+SHA-256 hash of that token.
 
-## Lifecycle, bounds and freshness
+### Start
 
-Call `start({sessionId,sessionEpochMs})` from the bridge lifecycle, then offer
-processed frames using session-relative `timestampMs`. Capture owns unique
-`frameId`s and monotonic capture times. The service copies input bytes before
-scheduling so caller mutation cannot change model input or stored Evidence.
+`POST /screen/sessions/{sessionId}/start`
 
-Default sampling is 1500 ms; exact processed-byte SHA-256 deduplication is server-side.
-There is one active request and one latest pending frame by default; concurrency
-may be configured to two to match the runner. An older accepted response can publish
-while newer frames are pending. Results older than the last *published* capture
-ordinal never publish. A new capture alone does not invalidate a slow response.
+```json
+{"sessionEpochMs": 100000, "clientGeneration": 1}
+```
 
-Pause, stop, resume and every start invalidate generations and clear pending work.
-Active calls receive AbortSignal. A physical request holds its slot until its
-transport/storage promise settles, even if an injected transport ignores abort;
-thus repeated pause/resume cannot bypass the request limit. Such a broken transport
-may stall progress; timeout is reported without silently admitting unlimited work.
-The real fetch adapter honors abort. No automatic model retry loop is implemented;
-a failed frame can be retried on a subsequent capture after sampling, including
-unchanged pixels once the failed request settles.
+The response is `201`:
 
-**Provisional, configurable timing:** client timeout 65000 ms and capture-to-result
-age limit 75000 ms, accommodating doc-5's 60 s runner timeout. The queue rejects a
-configured age limit shorter than its request timeout. The orchestrator must confirm
-the production freshness criterion using real latency measurements. Queued frames
-are checked again before dispatch; results again after model, storage and resolver.
+```json
+{
+  "sessionId": "session-id",
+  "generation": 1,
+  "sessionToken": "opaque-ephemeral-token",
+  "nextCursor": 1,
+  "status": {"schemaVersion": 1, "sessionId": "session-id", "state": "capturing"}
+}
+```
 
-### History is separate from current checkpoint eligibility
+### Submit a processed frame
 
-The 75 s limit permits historical observations to finish. It is **not** proof that
-an observation describes the draft currently being sent. Internal methods
-`setSourceRevision(revision)` and `offer(frame, {sourceRevision})` connect the
-scheduler to an authoritative draft/source revision without adding fields to
-ScreenBridge or to model JSON. Use a new opaque revision for every relevant change
-to draft text, recipients, attachments, selected customer/order or source geometry.
-Attach the revision that was current **at capture**, not the revision at upload.
-Setting the revision to `null` explicitly marks the source as untracked.
+`POST /screen/sessions/{sessionId}/frames` with `Authorization: Bearer ...`:
 
-Before using a frame for Preview/Send, the checkpoint owner must call
-`canUseForCheckpoint({sessionId,frameId,sourceRevision})`. It fails closed unless
-the latest published frame has matching capture provenance, the source-generation
-and lifecycle-generation still match, capture is active, and the frame satisfies
-the separate `maxCheckpointAgeMs` (provisional default 2500 ms). Revision changes
-invalidate eligibility immediately, even if the old response later publishes to
-history within 75 s. An intermediate edit invalidates old work even when a previous
-revision label is reused. Unknown provenance never gives eligibility. Pause/resume
-and session starts clear provenance and require the source owner to resynchronize it.
-The internal `published` diagnostic event also exposes `checkpointEligible`.
+```json
+{
+  "generation": 1,
+  "frameId": "frame-id",
+  "timestampMs": 1500,
+  "processed": true,
+  "mediaType": "image/png",
+  "data": "padded-base64",
+  "provenance": {
+    "surface": "order",
+    "sourceRevision": "opaque-order-revision",
+    "captureGeneration": 7
+  }
+}
+```
 
-This guard establishes source freshness only; it is not the agent's `clear` result
-and does not authorize Send. The checkpoint owner must recheck it when applying an
-agent reply, and verify the draft revision again at Send. A changed source requires
-a new checkpoint or an explicit incomplete/unknown state. The proposed HTTP upload
-handler does not trust a browser-supplied revision and therefore produces history-only
-frames until an authoritative capture/checkpoint provenance adapter is wired.
+`surface`, `sourceRevision` and `captureGeneration` are opaque capture context,
+not DOM-derived facts. Capture should alternate `order` and `email` surfaces for
+a combined workspace. The service adds a surface-specific instruction and uses
+the surface in its deduplication key, so identical processed pixels may be
+analyzed once for each surface. A result gets `sourceRevision` only when its
+vision-derived kind matches the requested surface. A mismatch may remain useful
+as history but cannot satisfy a checkpoint.
 
-Integration proposal for TASK-1/TASK-2.4: map checkpoint observation IDs to internal
-session/frame/source-revision provenance (or approve a versioned contract field),
-invalidate checkpoint replies on source/lifecycle changes, and resynchronize revision
-updates with capture. Neither this module nor its tests extend the shared contract.
-The orchestrator must confirm the checkpoint age limit after real latency tests;
-a slow API may produce useful history while the checkpoint remains incomplete.
+The response is `202` for accepted work, `200` for duplicate or sampled frames,
+`400` for malformed frames, and `409` for inactive, stale, out-of-order or old
+generation work. Acceptance means queued for recognition; it is not an
+observation.
 
-Events contain only `type`, safe `code`/discard `reason`, session/frame/time identifiers,
-sequence and capture-to-publication `latencyMs`. No model payload, image, prompt,
-credentials or provider messages are logged. The host UI must surface typed errors
-and dropped/stale results instead of turning them into successful recognition.
+### Poll results
 
-## Processed media trust and retention
+`GET /screen/sessions/{sessionId}/updates?cursor=N&generation=G`
 
-Only explicitly processed frames are accepted. MIME signature and byte limits are
-checked; the marker does **not** prove redaction or image decodability. Actual masking
-and processed-preview equivalence must be verified by the capture owner in a browser.
-This module does not receive or save a parallel raw frame. Disk files use UUID names
-and mode 0600; metadata is published only after the media write completes. Failed
-publication, pause during persistence, crash or partial cleanup can leave unreferenced
-processed files. The shared backend owns retention, quota and orphan reconciliation.
-MEDIA_DIR must be a trusted directory writable only by the backend service account.
+```json
+{
+  "sessionId": "session-id",
+  "generation": 1,
+  "observations": [],
+  "statuses": [],
+  "nextCursor": 1
+}
+```
+
+The event log is bounded to 128 entries and each response returns at most 50. A
+client must advance to the returned cursor. A cursor older than retained history
+returns `409 cursor_expired` with `minCursor` and `nextCursor`; a generation
+mismatch returns `409 generation_mismatch` with the current generation and
+cursor. The client must resynchronize instead of silently treating either case
+as an empty result.
+
+### Lifecycle
+
+`POST /screen/sessions/{sessionId}/lifecycle`:
+
+```json
+{"generation": 1, "command": "pause", "reason": "off_record"}
+```
+
+Pause, resume and stop cancel active work, clear pending work, increment the
+server generation and reset the event log. The first new event is the lifecycle
+status, so the response has `nextCursor: 1`:
+
+```json
+{
+  "sessionId": "session-id",
+  "generation": 2,
+  "nextCursor": 1,
+  "status": {
+    "schemaVersion": 1,
+    "sessionId": "session-id",
+    "state": "paused",
+    "reason": "off_record"
+  }
+}
+```
+
+Subsequent frames, polls and lifecycle requests must use generation 2. A delayed
+model response from generation 1 cannot publish after this transition.
+
+### Evidence
+
+- `GET /screen/sessions/{sessionId}/evidence/{id}` resolves metadata.
+- `GET /screen/sessions/{sessionId}/evidence/{id}/asset` serves processed bytes
+  with `no-store` and `nosniff` headers.
+
+Every observation contains an Evidence ID only after save and resolve succeed.
+Its `assetRef` uses the scoped asset route above. Authorization checks the
+session before returning metadata or bytes.
+
+## Queue, freshness and checkpoints
+
+Defaults are one active request, one replaceable pending frame, a 1500 ms sample
+interval, a 65 second request timeout, and a 75 second maximum capture-to-result
+age. Concurrency may be raised to two. The pending slot keeps the newest accepted
+frame, exact processed pixels are deduplicated per requested surface, and older
+responses cannot overwrite a newer published result. A timed-out physical call
+keeps its concurrency slot until its transport settles, preventing repeated
+pause/resume from bypassing the limit.
+
+The 75 second limit permits useful historical observations. It does not make an
+observation current enough for Preview or Send. `ObservationProvenanceRegistry`
+retains the latest vision-derived `order_view` and `email_draft` bindings. A
+checkpoint is usable only when both observation IDs are present, both opaque
+revisions match the checkpoint, and both records belong to the current server
+and capture generations. Without trustworthy surface context, observations have
+`sourceRevision: null` and remain history-only. If either surface has not produced
+a matching valid result, the checkpoint stays incomplete.
+
+Provider, validation, timeout, limit and storage failures become safe error
+statuses. They never become successful observations. Diagnostics expose safe
+codes and processing/capture latency only; they exclude images, model payloads,
+prompts, credentials and provider exception text.
 
 ## Verification
 
-From the repository root with Node 24 available:
+With Node 22 or newer and the canonical contracts available:
 
 ```sh
-node --test packages/screen/vision/queue.test.mjs apps/api/screen/runner-client.test.mjs apps/api/screen/screen.test.mjs
+node --test packages/screen/vision/queue.test.ts \
+  apps/api/screen/runner-client.test.ts \
+  apps/api/screen/screen.test.ts
 ```
 
-Tests use deferred fake model responses, a fake clock, a test-only schema, an opaque
-synthetic PNG, bounded memory and temporary disk directories. They verify queue
-bounds, ordering, slow/expired responses, pause/session cancellation, timeout,
-resolvable Evidence before publication, unknown-customer preservation, safe failures,
-doc-5 transport shapes, HTTP authorization and persistence failures. File-store
-recreation tests reuse an injected metadata repository; they do not verify SQLite or
-VM reboot persistence. Mock latency tests verify calculation, not provider performance.
+The tests use synthetic processed media and mock runner responses. They cover
+bounded scheduling, per-surface deduplication, out-of-order completion,
+pause/session invalidation, cursor expiry, exact lifecycle generations,
+session-scoped authorization, strict model validation, unknown identity,
+resolvable Evidence before publication and safe runner errors.
 
-Real runner/OCR/schema accuracy, p50/p95 latency, sustained 1 frame per 2 s, browser
-capture, privacy equivalence, recording/replay navigation, approved facts imports,
-host framework mounting, SQLite adapter, CORS and actual session authentication
-remain integration checks. No real provider call or credentials were used.
+The reported infrastructure benchmark for `/v1/vision` is approximately 3.77 s
+p95. This package has not repeated a real provider call. Real runner accuracy and
+latency, browser masking equivalence, SQLite persistence, retention and host
+framework wiring remain integration checks and must be reported separately from
+the mock suite.
