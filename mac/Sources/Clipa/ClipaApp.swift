@@ -3,9 +3,18 @@ import AppKit
 /// Entry point. Menu-bar only: `.accessory` activation policy means no Dock icon and no app menu,
 /// also when started with `swift run` (the bundled app additionally sets LSUIElement in Info.plist).
 @main
-struct ApprenticeMain {
+struct ClipaMain {
     @MainActor
     static func main() {
+        let arguments = CommandLine.arguments
+        if arguments.contains("--smoke") || arguments.contains("--smoke-audio") {
+            // Headless check of the server path (see SmokeTest.swift); no menu bar, no overlay.
+            Task { @MainActor in
+                let code = await SmokeTest.run(playback: arguments.contains("--smoke-audio"))
+                exit(code)
+            }
+            dispatchMain()
+        }
         let app = NSApplication.shared
         let delegate = AppDelegate()
         app.delegate = delegate
@@ -19,15 +28,15 @@ struct ApprenticeMain {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var controller: ApprenticeController?
+    private var controller: ClipaController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let controller = ApprenticeController()
+        let controller = ClipaController()
         self.controller = controller
-        controller.start()
+        controller.launch()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        controller?.stop()
+        controller?.terminate()
     }
 }

@@ -1,6 +1,6 @@
 import Foundation
 
-/// Tiny JSONL helpers shared by the session log and learned.jsonl.
+/// Tiny JSONL helpers for the session log.
 enum JSONLFile {
     /// One compact JSON line (with trailing newline), or nil if the dictionary is not valid JSON.
     static func line(_ object: [String: Any]) -> Data? {
@@ -28,15 +28,15 @@ enum JSONLFile {
     }
 }
 
-/// Append-only JSONL log of one app run: state changes, screen events, interventions, answers.
-/// Raw material for the Work Map. OCR text is stored redacted and truncated (see Redactor).
+/// Append-only JSONL log of one app run: stages, cues, voice state and per-frame upload latency.
+/// Never written here: tokens, signed URLs, images or what was said.
 @MainActor
 final class SessionLog {
     static let shared = SessionLog()
 
     let fileURL: URL
     let sessionId: String
-    private let queue = DispatchQueue(label: "apprentice.sessionlog", qos: .utility)
+    private let queue = DispatchQueue(label: "com.hacknation.clipa.sessionlog", qos: .utility)
     private let formatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

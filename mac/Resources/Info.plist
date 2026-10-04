@@ -5,19 +5,19 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleExecutable</key>
-	<string>Apprentice</string>
+	<string>Clipa</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.hacknation.apprentice</string>
+	<string>com.hacknation.clipa</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Apprentice</string>
+	<string>Clipa</string>
 	<key>CFBundleDisplayName</key>
-	<string>Apprentice</string>
+	<string>Clipa</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.1.0</string>
+	<string>0.2.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
@@ -29,10 +29,8 @@
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSScreenCaptureUsageDescription</key>
-	<string>Apprentice looks at your screen to notice what changes while you work, so it can ask you why at a natural pause. Text is read on this Mac.</string>
+	<string>While Show or Pass it on runs, Clipa streams your main display to the Clipa server, which turns it into screen events so she can ask about your work at a natural pause.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Apprentice listens only while you hold Control+Option, so you can answer its question out loud.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Apprentice turns your spoken answer into text on this Mac and saves it to its knowledge base.</string>
+	<string>While Show or Pass it on runs, Clipa sends your voice to her voice agent (ElevenLabs) so you can talk to her. Off the record closes the conversation.</string>
 </dict>
 </plist>
