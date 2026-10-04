@@ -2,7 +2,7 @@
 // One conductor serves every face of the session: the web app (the whole journey) and the macOS app (a lighter face
 // that hands over to the web). Pure apart from the injected clock, LLM call, id source and web link, so tests drive it
 // with a fake clock and fake tasks.
-import type { GenericQuestionOutput, GuardrailCheckOutput, MapEditOutput, MapSynthesisOutput, ReplyOutput } from '../llm-tasks.ts';
+import type { GenericQuestionOutput, GuardrailCheckOutput, MapEditOutput, MapSynthesisOutput, ProcessMatchOutput, ReplyOutput } from '../llm-tasks.ts';
 import type { TaskResult } from '../llm.ts';
 import { GUIDE, OPEN_WEB, detectLanguage } from './lines.ts';
 import { applyEdits } from './map-edits.ts';
@@ -11,13 +11,13 @@ import type { Activity, Audience, ClientEnvelope, ClientEvent, ClientKind, Cue, 
 
 export const RULES = {
   /** Quiet this long after the last typing, talking or screen change is a pause. */
-  pauseMs: 2500,
+  pauseMs: 1800,
   /** The screen counts as settled this long after a change: the question is prepared from then on, ready for the pause. */
-  settleMs: 700,
+  settleMs: 500,
   /** Learn: at most this many questions per window, at least minGapMs apart. */
   learnMaxQuestions: 4,
   learnWindowMs: 10 * 60_000,
-  learnMinGapMs: 45_000,
+  learnMinGapMs: 15_000,
   /** How long an ask or a warning stays valid before the moment has passed. */
   askTtlMs: 12_000,
   warnTtlMs: 15_000,
@@ -25,8 +25,16 @@ export const RULES = {
   teachCheckGapMs: 8_000,
   urgentSettleMs: 400,
   urgentCheckGapMs: 3_000,
-  /** Review: wait this long after an answer before the next gap. */
+  /** Review: wait this long after an answer before the next gap; ask at most reviewMaxGaps of them (a 2-3 minute demo). */
   gapAfterAnswerMs: 1500,
+  reviewMaxGaps: 2,
+  /** A recognised process needs this confidence before Clipa follows its strategy. */
+  processConfidence: 0.6,
+  // Switches for the live demo: false turns the feature off and nothing else changes.
+  /** Recognise a learned process on screen (process_match), say so and follow its strategy. */
+  recognizeProcesses: true,
+  /** Build the map in the background as soon as Show ends; false: Reflect builds it when it opens, as before. */
+  mapAfterShow: true,
   /** A quiet cue with the same reason is not repeated sooner than this. */
   quietRepeatMs: 20_000,
   keepCues: 300,
@@ -49,7 +57,38 @@ export class MapRegistry {
   find(from: string | null): ConfirmedMap | null {
     return (from !== null ? this.bySession.get(from) : undefined) ?? this.latest;
   }
+  /**
+   * Every process Clipa has learned, newest map first (the map of `prefer` first when named): what she can recognise on
+   * screen and follow. A map without named processes counts as one process; a step or rule that names no known process
+   * belongs to the first one, so no rule is ever lost. Rules of the first map keep their own ids (g1 ..), the warning
+   * then names the rule as the expert's map shows it; older maps' rules are prefixed (m2-g1 ..) to stay unique.
+   */
+  library(prefer: string | null = null): LearnedProcess[] {
+    const maps = [...this.bySession.values()].sort((a, b) => b.confirmedAt - a.confirmedAt);
+    if (prefer !== null) maps.sort((a, b) => Number(b.sessionId === prefer) - Number(a.sessionId === prefer));
+    const out: LearnedProcess[] = [];
+    maps.slice(0, 6).forEach((entry, m) => {
+      const map = entry.map;
+      const named = Array.isArray(map.processes) ? map.processes : [];
+      const processes = named.length ? named : [{ id: 'p1', title: map.steps[0]?.goal ?? 'The expert\'s task', summary: '' }];
+      const known = new Set(processes.map((p) => p.id));
+      processes.forEach((p, i) => {
+        const mine = (pid: string | null | undefined): boolean => (typeof pid === 'string' && known.has(pid) ? pid === p.id : i === 0);
+        out.push({
+          key: `m${m + 1}-${p.id}`, title: p.title, summary: p.summary,
+          steps: map.steps.filter((x) => mine(x.processId)).map((x) => x.action),
+          rules: map.guardrails.filter((g) => mine(g.processId)).map((g) => ({
+            id: m === 0 ? g.id : `m${m + 1}-${g.id}`, condition: g.condition, requiredAction: g.requiredAction, reason: g.reason, quote: g.quote, evidenceIds: g.evidenceIds,
+          })),
+        });
+      });
+    });
+    return out.slice(0, 12);
+  }
 }
+
+export interface LearnedRule { id: string; condition: string; requiredAction: string; reason: string | null; quote: string | null; evidenceIds: string[] }
+export interface LearnedProcess { key: string; title: string; summary: string; steps: string[]; rules: LearnedRule[] }
 
 export interface ConductorDeps {
   now(): number;
@@ -101,6 +140,15 @@ export class Conductor {
   private lastAskAt = -Infinity;
   private lastTeachCheckAt = -Infinity;
   private readonly warned = new Set<string>();
+  /** The learned process Clipa recognised on screen in this stage, and the app it was recognised in. */
+  private recognized: LearnedProcess | null = null;
+  private recognizedFor: string | null = null;
+  private lastRecognitionAt = -Infinity;
+  /** A line to say at the next pause (so it never cuts into the person's work). */
+  private pendingSay: string | null = null;
+  /** The map being built in the background as soon as Show ends, so Reflect opens with it ready. */
+  private mapPrefetch: Promise<void> | null = null;
+  private freshMap = false;
 
   private review: { phase: ReviewPhase; map: ConductorMap | null; version: number; gapIndex: number; awaiting: 'gap' | 'teachback' | null; answeredAt: number; unclearAsked: boolean; editFailed: boolean } =
     { phase: 'idle', map: null, version: 0, gapIndex: 0, awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false };
@@ -331,6 +379,11 @@ export class Conductor {
       this.liveMode = mode;
       this.selectedMode = mode;
       this.cancelActive();
+      this.recognized = null;
+      this.recognizedFor = null;
+      this.pendingSay = null;
+      // A new Show supersedes the map still being built from the last one (its end builds a map of everything again).
+      if (mode === 'learn' && this.mapPrefetch) this.inflight?.abort();
       // On the web the screen is shared after Start: until it is, the next step is to share it.
       if ((mode === 'learn' || mode === 'teach') && !this.sharing && this.has('web')) this.guide('share_now', 'web');
       if (mode === 'learn') { this.pose('listen'); this.presence('dot'); if (this.sharing || !this.has('web')) this.guideOnce('work'); }
@@ -343,9 +396,10 @@ export class Conductor {
     this.inflight?.abort();
     this.inflight = null;
     this.prefetch = null;
+    this.pendingSay = null;
     this.cancelActive();
     if (reason === 'off_record') return;
-    if (mode === 'learn' && this.persona === 'expert') this.handOver('review', 'review');
+    if (mode === 'learn' && this.persona === 'expert') { this.handOver('review', 'review'); if (RULES.mapAfterShow) this.prefetchMap(); }
     if (mode === 'teach') this.handOver('summary', 'summary');
     this.pose('idle');
   }
@@ -409,6 +463,8 @@ export class Conductor {
     const now = this.deps.now();
     if (this.active && !this.active.done && this.active.expiresAt !== null && now > this.active.expiresAt) { this.cancelActive(); this.presence('dot'); }
     if (this.offRecord) return;
+    if (this.pendingSay && this.paused(now) && (!this.active || this.active.done)) { this.emit({ type: 'say', text: this.pendingSay }); this.pendingSay = null; return; }
+    if ((this.liveMode === 'learn' || this.liveMode === 'teach') && this.inflight === null && this.shouldRecognize(now)) { void this.recognize(); return; }
     if (this.liveMode === 'learn') this.tickLearn(now);
     if (this.inflight !== null) return;
     if (this.active && !this.active.done) return;
@@ -444,19 +500,69 @@ export class Conductor {
     const r = this.review;
     if (r.phase !== 'gaps' || r.awaiting !== null || this.voiceQueue.length) return;
     if (!this.paused(now) || now - r.answeredAt < RULES.gapAfterAnswerMs) return;
-    if (!r.map || r.gapIndex >= r.map.gaps.length) { this.finishGaps(); return; }
+    if (!r.map || r.gapIndex >= Math.min(r.map.gaps.length, RULES.reviewMaxGaps)) { this.finishGaps(); return; }
     this.askGap();
   }
 
+  /** The rules Teach checks: the recognised process's first, then the rest of what Clipa learned (at most 10). */
+  private teachRules(): LearnedRule[] {
+    const library = this.deps.maps.library(this.mapFrom);
+    const first = this.recognized ? library.find((p) => p.key === this.recognized?.key) : undefined;
+    const ordered = first ? [first, ...library.filter((p) => p !== first)] : library;
+    return ordered.flatMap((p) => p.rules.map((r) => ({ ...r, condition: ordered.length > 1 ? `[${p.title}] ${r.condition}` : r.condition }))).slice(0, 10);
+  }
+
   private tickTeach(now: number): void {
-    const confirmed = this.deps.maps.find(this.mapFrom);
-    if (!confirmed || confirmed.map.guardrails.length === 0) return;
+    const rules = this.teachRules();
+    if (rules.length === 0) return;
     // About to commit (a pending action is visible): check fast, without waiting for a full pause.
     if (this.urgentTeachCheck && this.activity !== 'typing' && now - this.lastChangeAt >= RULES.urgentSettleMs && now - this.lastTeachCheckAt >= RULES.urgentCheckGapMs) {
-      void this.checkGuardrails(confirmed.map);
+      void this.checkGuardrails(rules);
       return;
     }
-    if (this.pendingTeachCheck && this.paused(now) && now - this.lastTeachCheckAt >= RULES.teachCheckGapMs) void this.checkGuardrails(confirmed.map);
+    if (this.pendingTeachCheck && this.paused(now) && now - this.lastTeachCheckAt >= RULES.teachCheckGapMs) void this.checkGuardrails(rules);
+  }
+
+  // ---- strategy: which learned process is this? ----------------------------
+  /** Recognise once the screen shows something, and again when the person moves to another app or surface. */
+  private shouldRecognize(now: number): boolean {
+    if (!RULES.recognizeProcesses) return false;
+    const latest = [...this.observations].reverse().find((o) => o.kind !== 'input_activity');
+    if (!latest || now - this.lastChangeAt < RULES.settleMs) return false;
+    const where = `${latest.app ?? ''}|${latest.surface}`;
+    if (where === this.recognizedFor || now - this.lastRecognitionAt < 4000) return false;
+    return this.deps.maps.library(this.mapFrom).length > 0;
+  }
+
+  /** process_match: silent on any failure or doubt (no line is said); a late answer for an ended stage is dropped. */
+  private async recognize(): Promise<void> {
+    const mode = this.liveMode;
+    const library = this.deps.maps.library(this.mapFrom);
+    const observations = this.genericObservations(6);
+    const latest = [...this.observations].reverse().find((o) => o.kind !== 'input_activity');
+    if (!latest || library.length === 0 || observations.length === 0) return;
+    this.recognizedFor = `${latest.app ?? ''}|${latest.surface}`;
+    this.lastRecognitionAt = this.deps.now();
+    const out = await this.run<ProcessMatchOutput>('process_match', {
+      processes: library.map((p) => ({ id: p.key, title: p.title.slice(0, 120), summary: p.summary.slice(0, 300), steps: p.steps.slice(0, 10).map((x) => x.slice(0, 300)), rules: p.rules.slice(0, 8).map((r) => `when ${r.condition}, ${r.requiredAction}`.slice(0, 400)) })),
+      observations,
+    });
+    if (this.offRecord || this.liveMode !== mode || !out || out.processId === null || out.confidence < RULES.processConfidence) return;
+    const match = library.find((p) => p.key === out.processId);
+    if (!match || match.key === this.recognized?.key) return;
+    this.recognized = match;
+    this.pendingSay = this.liveMode === 'learn'
+      ? `I know this one: ${match.title}. I will only ask about what is different.`
+      : `This is ${match.title}. I will step in if one of the expert's rules applies.`;
+    this.quiet(`recognised: ${match.title}`);
+  }
+
+  /** In Learn, a recognised process goes to the question task as context, so Clipa asks only about what differs. */
+  private knownContext(): Turn[] {
+    const p = this.recognized;
+    if (!p) return [];
+    const text = `[known process from an earlier session] ${p.title}. Steps: ${p.steps.join('; ')}. Rules: ${p.rules.map((r) => `when ${r.condition}, ${r.requiredAction}`).join('; ')}. Ask only about what is different from this.`;
+    return [{ role: 'agent', text: text.slice(0, 1000), atMs: 0 }];
   }
 
   // ---- LLM steps -----------------------------------------------------------
@@ -467,6 +573,9 @@ export class Conductor {
       const r = await this.deps.llm(task, body, controller.signal);
       if (controller.signal.aborted || !r.ok) return null;
       return r.output as T;
+    } catch {
+      // A thrown call is a failed call: the caller falls back, and nothing rejects into the void (a crash on a live server).
+      return null;
     } finally {
       if (this.inflight === controller) this.inflight = null;
     }
@@ -510,7 +619,7 @@ export class Conductor {
     this.prefetch = entry;
     this.pose('think');
     const out = await this.run<GenericQuestionOutput>('generic_question', {
-      observations, transcript: this.transcript(16), asked: this.askedTexts.slice(-20).map((a) => a.slice(0, 300)), language: this.language,
+      observations, transcript: [...this.knownContext(), ...this.transcript(this.recognized ? 15 : 16)], asked: this.askedTexts.slice(-20).map((a) => a.slice(0, 300)), language: this.language,
     });
     if (this.prefetch !== entry) return; // superseded or reset
     entry.status = out ? 'ready' : 'failed';
@@ -542,9 +651,39 @@ export class Conductor {
     this.emit({ type: 'ask', questionId: `q${this.askTimes.length}-${this.seq + 1}`, text, topic, regions, evidenceIds: this.evidenceFor(obsIds) }, { ttlMs: RULES.askTtlMs });
   }
 
+  /** As soon as Show ends, the map is built in the background, so Reflect opens with it ready. */
+  // If it fails, Reflect builds the map itself as before; if it is slow, Reflect waits for it (a second build would only
+  // queue behind it). A confirmed map stays as it is, as before.
+  private prefetchMap(): void {
+    const observations = this.genericObservations(40);
+    if (observations.length === 0 || this.mapPrefetch || this.review.phase === 'confirmed') return;
+    this.mapPrefetch = (async () => {
+      const map = await this.run<MapSynthesisOutput>('map_synthesis', { observations, transcript: this.transcript(60, 600), correction: null, previousTeachBack: null });
+      if (map && !this.offRecord && this.review.phase !== 'confirmed') {
+        this.review = { phase: 'idle', map: { ...map, comments: [] }, version: this.review.version, gapIndex: 0, awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false };
+        this.freshMap = true;
+      }
+    })().catch(() => undefined).finally(() => { this.mapPrefetch = null; });
+  }
+
   private async startReview(): Promise<void> {
+    if (this.mapPrefetch) {
+      this.pose('think');
+      this.guide('building', 'web');
+      await this.mapPrefetch;
+      if (this.offRecord || this.liveMode !== 'review') return;
+    }
     const observations = this.genericObservations(40);
     const turns = this.transcript(60, 600);
+    if (this.review.map && this.freshMap) {
+      // Built in the background after Show: go straight to the open points.
+      this.freshMap = false;
+      const map = this.review.map;
+      this.publishMap(map, false);
+      if (map.gaps.length > 0) { this.review.phase = 'gaps'; this.guide('gaps', 'web'); }
+      else this.readTeachBack();
+      return;
+    }
     if (this.review.map) { this.publishMap(this.review.map, this.review.phase === 'confirmed', false); this.guide('talk_to_edit', 'web'); return; }
     if (observations.length === 0) { this.guide('no_session_yet', 'web'); return; }
     this.review = { phase: 'building', map: null, version: this.review.version, gapIndex: 0, awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false };
@@ -667,19 +806,19 @@ export class Conductor {
   private startTeach(): void {
     this.pose('listen');
     this.presence('dot');
-    const confirmed = this.deps.maps.find(this.mapFrom);
-    if (!confirmed) { this.guide('no_map'); return; }
-    this.emit({ type: 'context', text: `[map] The expert's confirmed rules: ${confirmed.map.guardrails.map((g) => `when ${g.condition}, ${g.requiredAction}`).join('; ') || 'none'}. Do not state them unless the app asks.` });
+    const library = this.deps.maps.library(this.mapFrom);
+    if (library.length === 0) { this.guide('no_map'); return; }
+    this.emit({ type: 'context', text: `[map] The expert's confirmed rules: ${library.flatMap((p) => p.rules.map((g) => `[${p.title}] when ${g.condition}, ${g.requiredAction}`)).join('; ') || 'none'}. Do not state them unless the app asks.`.slice(0, 2000) });
     this.guideOnce('work');
   }
 
-  private async checkGuardrails(map: MapSynthesisOutput): Promise<void> {
+  private async checkGuardrails(rules: LearnedRule[]): Promise<void> {
     this.pendingTeachCheck = false;
     this.urgentTeachCheck = false;
     this.lastTeachCheckAt = this.deps.now();
     const observations = this.genericObservations(6);
     if (observations.length === 0) return;
-    const guardrails = map.guardrails.slice(0, 10).map((g) => ({
+    const guardrails = rules.slice(0, 10).map((g) => ({
       id: g.id, condition: g.condition.slice(0, 300), requiredAction: g.requiredAction.slice(0, 300), reason: g.reason?.slice(0, 400) ?? null, quote: g.quote?.slice(0, 600) ?? null,
     }));
     const out = await this.run<GuardrailCheckOutput>('guardrail_check', { guardrails, observations, transcript: this.transcript(8), language: this.language });
@@ -691,7 +830,7 @@ export class Conductor {
     const key = `${out.guardrailId}:${latestId}`;
     if (this.warned.has(key)) return;
     this.warned.add(key);
-    const rule = map.guardrails.find((g) => g.id === out.guardrailId);
+    const rule = rules.find((g) => g.id === out.guardrailId);
     const regions = this.regionsFor([latestId], out.regionIds);
     this.pose('warn');
     this.presence('full', regions[0] ? 'target' : 'corner');
