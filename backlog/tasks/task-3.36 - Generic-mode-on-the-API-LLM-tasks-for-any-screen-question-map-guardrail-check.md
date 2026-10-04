@@ -7,6 +7,7 @@ status: In Progress
 assignee:
   - '@qwadratic'
 created_date: '2026-10-04 04:06'
+updated_date: '2026-10-04 04:18'
 labels:
   - stream-b
 dependencies: []
@@ -35,3 +36,9 @@ The live demo runs outside our demo workspace on workflows nobody knows in advan
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+4 Oct 04:25 UTC: Ivan raised the runner's per-call budget for text tasks (RUNNER_COMPLETE_MAX_BUDGET_USD on the VM) from 0.10 to 0.50 USD. map_synthesis takes up to 96 KiB of input; at 0.10 it risked error_max_budget_usd (502 sdk_error). Vision calls already had 0.50 (MAX_BUDGET_USD).
+<!-- SECTION:NOTES:END -->
