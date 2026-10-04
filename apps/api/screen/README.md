@@ -170,6 +170,14 @@ analyzed once for each surface. A result gets `sourceRevision` only when its
 vision-derived kind matches the requested surface. A mismatch may remain useful
 as history but cannot satisfy a checkpoint.
 
+An optional `pointer` field (sent by the macOS app, not by the web) is the mouse
+pointer at capture: `{"x": 0.62, "y": 0.81, "dwellMs": 1400, "trail": [[0.4, 0.5, 2000]]}`,
+positions normalised 0..1 to the frame (origin top left), at most 8 trail points
+`[x, y, msAgo]`. It is never stored: a generic frame's vision request gets one
+line such as `Pointer: resting 1.4 s at (0.62, 0.81).` A malformed hint is
+dropped and the frame still goes (`pointer.ts`). The macOS app also draws a
+magenta ring at the pointer, and the generic prompt says what the ring means.
+
 The response is `202` for accepted work, `200` for duplicate or sampled frames,
 `400` for malformed frames, and `409` for inactive, stale, out-of-order or old
 generation work. Acceptance means queued for recognition; it is not an

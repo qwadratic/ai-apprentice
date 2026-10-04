@@ -174,7 +174,7 @@ test('Chromium: real canvas/PNG/processed stream pixels, panel masks, lifecycle 
     await page.getByRole('button', { name: 'Choose screen or window' }).click();
     await page.waitForFunction(() => window.capture.getSnapshot().geometry?.width === 320);
     assert.equal(await page.evaluate(() => window.framesReceived.length), 0);
-    assert.deepEqual(await page.evaluate(() => window.requests), [{ video: true, audio: false }]);
+    assert.deepEqual(await page.evaluate(() => window.requests), [{ video: { cursor: 'always' }, audio: false }]);
     assert.deepEqual(await page.evaluate(() => window.controllerCalls), ['start']);
     // Accessible coordinate entry covers the complete synthetic email.
     await page.getByLabel('Left (%)').fill('6.25');

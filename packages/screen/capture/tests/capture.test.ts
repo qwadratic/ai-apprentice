@@ -20,7 +20,7 @@ test('reject malformed masks; round fractional edges outwards', () => {
 test('request video without audio; review before output; masked preview = PNG pixels = stream pixels', async () => {
   const h = harness(ScreenCapture);
   await h.start();
-  assert.deepEqual(h.requests, [{ video: true, audio: false }]);
+  assert.deepEqual(h.requests, [{ video: { cursor: 'always' }, audio: false }]);
   assert.equal(h.audioTrack.stopped, 1);
   assert.equal(h.capture.getSnapshot().state, 'paused');
   assert.equal(h.capture.resume(), false);

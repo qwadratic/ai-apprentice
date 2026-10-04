@@ -44,7 +44,11 @@ export interface CaptureInvalidation {
   readonly reason: CaptureReason;
   readonly timestampMs: number;
 }
-export interface DisplayCaptureOptions { readonly video: true; readonly audio: false; }
+/**
+ * `cursor: 'always'` asks for the pointer in every frame, so vision sees what the person points at. Browsers that do
+ * not know the constraint ignore it (Chrome already draws the pointer on screen and window shares).
+ */
+export interface DisplayCaptureOptions { readonly video: true | { readonly cursor: 'always' }; readonly audio: false; }
 /** How a frame for vision is encoded. Masks are already painted on the processed canvas before any scaling or encoding. */
 export interface FrameEncoding {
   /** A wider frame is scaled down to this width, keeping its aspect ratio; a narrower one keeps its size. Infinity: never scale. */
@@ -226,7 +230,7 @@ export class ScreenCapture {
     let stream: MediaStream | null = null;
     try {
       // Call directly in the start-button gesture: do not await before opening the picker.
-      stream = await this.runtime.getDisplayMedia({ video: true, audio: false });
+      stream = await this.runtime.getDisplayMedia({ video: { cursor: 'always' }, audio: false });
       if (operation !== this.operation) { this.stopTracks(stream); return; }
       // Defensively discard unexpected audio even if a browser ignores the request.
       stream.getAudioTracks().forEach((track) => track.stop());
