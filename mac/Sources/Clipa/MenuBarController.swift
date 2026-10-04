@@ -1,29 +1,36 @@
 import AppKit
 
-/// The only visible chrome: a status item with a menu. No Dock icon, no windows.
+/// The only chrome besides Clipa herself: a status item with a menu. No Dock icon, no windows.
 @MainActor
 final class MenuBarController: NSObject, NSMenuDelegate {
     private let statusItem: NSStatusItem
     private let menu = NSMenu()
-    private unowned let app: ApprenticeController
+    private unowned let app: ClipaController
 
-    init(app: ApprenticeController) {
+    init(app: ClipaController) {
         self.app = app
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
         menu.delegate = self
         menu.autoenablesItems = false
         statusItem.menu = menu
-        refreshIcon()
+        refresh()
     }
 
-    func refreshIcon() {
+    func refresh() {
         guard let button = statusItem.button else { return }
-        let symbol = app.offTheRecord ? "eye.slash" : "eye"
-        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Apprentice")
+        let symbol: String
+        if app.offTheRecord {
+            symbol = "eye.slash"
+        } else if app.isRunning {
+            symbol = "paperclip.circle.fill"
+        } else {
+            symbol = "paperclip"
+        }
+        let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Clipa")
         image?.isTemplate = true
         button.image = image
-        button.toolTip = app.offTheRecord ? "Apprentice: off the record (not watching, not listening)" : "Apprentice"
+        button.toolTip = app.isRunning ? "Clipa: \(app.stageTitle) (the screen is streamed to the Clipa server)" : "Clipa"
     }
 
     // MARK: - NSMenuDelegate
@@ -34,50 +41,25 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     private func rebuild() {
         menu.removeAllItems()
-
         for line in app.statusLines() {
             menu.addItem(item(line, nil, enabled: false))
         }
         menu.addItem(.separator())
 
-        menu.addItem(item("Show buddy", #selector(toggleBuddy), checked: app.buddyPinned))
-        menu.addItem(item("Off the record", #selector(toggleOffTheRecord), checked: app.offTheRecord))
-        if app.hasClaude {
-            menu.addItem(item("Use Claude brain (sends screenshots to Anthropic)", #selector(toggleClaude), checked: app.useClaude))
-        }
-
-        let modeItem = NSMenuItem(title: "Mode", action: nil, keyEquivalent: "")
-        let modeMenu = NSMenu()
-        modeMenu.autoenablesItems = false
-        for mode in [CoachMode.learn, CoachMode.teach] {
-            let entry = item(mode.label, #selector(selectMode(_:)), checked: app.mode == mode)
-            entry.representedObject = mode.rawValue
-            modeMenu.addItem(entry)
-        }
-        modeItem.submenu = modeMenu
-        menu.addItem(modeItem)
-
-        let scenarioItem = NSMenuItem(title: "Scenario", action: nil, keyEquivalent: "")
-        let scenarioMenu = NSMenu()
-        scenarioMenu.autoenablesItems = false
-        if app.kb.scenarios.isEmpty {
-            scenarioMenu.addItem(item("No scenarios found in kb/index.json", nil, enabled: false))
-        }
-        for scenario in app.kb.scenarios {
-            let entry = item("\(scenario.name): \(scenario.title)", #selector(selectScenario(_:)), checked: scenario.id == app.scenarioId)
-            entry.representedObject = scenario.id
-            scenarioMenu.addItem(entry)
-        }
-        scenarioItem.submenu = scenarioMenu
-        menu.addItem(scenarioItem)
-
+        let idle = app.isIdle
+        menu.addItem(item("Start Show (expert)", #selector(startShow), enabled: idle))
+        menu.addItem(item("Start Pass it on (new hire)", #selector(startPassItOn), enabled: idle))
+        menu.addItem(item("End", #selector(end), enabled: app.isRunning))
         menu.addItem(.separator())
-        menu.addItem(item("Open knowledge base folder", #selector(openKnowledgeBase)))
-        menu.addItem(item("Open session log", #selector(openSessionLog)))
+        menu.addItem(item("Off the record", #selector(toggleOffTheRecord), checked: app.offTheRecord, enabled: app.isLive))
+        menu.addItem(item("Open Reflect in browser", #selector(openReflect)))
+        menu.addItem(.separator())
+        menu.addItem(item("While a stage runs, the main display is streamed to the Clipa server.", nil, enabled: false))
         menu.addItem(item("Grant permissions...", #selector(grantPermissions)))
+        menu.addItem(item("Open session log", #selector(openSessionLog)))
         menu.addItem(.separator())
 
-        let quit = NSMenuItem(title: "Quit Apprentice", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "Quit Clipa", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         quit.target = NSApp
         menu.addItem(quit)
     }
@@ -92,26 +74,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     // MARK: - Actions
 
-    @objc private func toggleBuddy() { app.toggleBuddyPinned() }
-    @objc private func toggleOffTheRecord() { app.setOffTheRecord(!app.offTheRecord) }
-    @objc private func toggleClaude() { app.toggleClaude() }
-
-    @objc private func selectMode(_ sender: NSMenuItem) {
-        if let raw = sender.representedObject as? String, let mode = CoachMode(rawValue: raw) {
-            app.setMode(mode)
-        }
-    }
-
-    @objc private func selectScenario(_ sender: NSMenuItem) {
-        if let id = sender.representedObject as? String {
-            app.selectScenario(id)
-        }
-    }
-
-    @objc private func openKnowledgeBase() {
-        try? FileManager.default.createDirectory(at: Paths.kbDir, withIntermediateDirectories: true)
-        NSWorkspace.shared.open(Paths.kbDir)
-    }
+    @objc private func startShow() { app.startStage(.expert) }
+    @objc private func startPassItOn() { app.startStage(.newHire) }
+    @objc private func end() { app.endStage() }
+    @objc private func toggleOffTheRecord() { app.toggleOffTheRecord() }
+    @objc private func openReflect() { app.openReflect() }
+    @objc private func grantPermissions() { app.requestPermissions() }
 
     @objc private func openSessionLog() {
         let url = app.log.fileURL
@@ -125,6 +93,4 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             NSWorkspace.shared.activateFileViewerSelecting([url])
         }
     }
-
-    @objc private func grantPermissions() { app.requestPermissions() }
 }

@@ -2,31 +2,41 @@ import AppKit
 import QuartzCore
 import SwiftUI
 
-/// Owns the overlay panels (one per screen) and the buddy's motion.
+/// How much of Clipa is out (the conductor's `presence` cue), plus hidden.
+enum ClipaPresence: String {
+    case hidden, dot, peek, full
+
+    var scale: Double {
+        switch self {
+        case .hidden, .dot: return 0.6
+        case .peek: return 0.95
+        case .full: return 1.35
+        }
+    }
+}
+
+/// Owns the overlay panels (one per screen) and Clipa's motion.
 ///
-/// The buddy is hidden by default. `present` snaps it next to the cursor, fades it in and shows a bubble;
-/// `dismiss` fades both out. While visible, a ~60 Hz timer reads NSEvent.mouseLocation and moves the buddy
-/// with a damped spring toward a point offset from the pointer (so it never covers the pointer).
+/// Clipa lives in the lower right corner of the main screen. `point(at:)` flies her next to a rectangle on screen
+/// (a region the conductor pointed at); `setPresence(..., anchorTarget: false)` sends her back to the corner.
+/// A ~60 Hz timer moves her toward the goal with a damped spring. The panels never take clicks or focus.
 @MainActor
 final class OverlayController {
     let model = BuddyModel()
+    private(set) var presence: ClipaPresence = .hidden
 
-    /// "Show buddy" in the menu: keep a small buddy visible even when it has nothing to say.
-    var pinnedVisible = false {
-        didSet { applyPinned() }
-    }
-
+    private var targetPoint: CGPoint?
+    private var targetBubbleOnLeft = false
     private var panels: [OverlayPanel] = []
     private var timer: Timer?
     private var screenObserver: NSObjectProtocol?
-    private var hideTask: Task<Void, Never>?
-    private var tracking = false
+    private var lineTask: Task<Void, Never>?
     private var velocity = CGVector(dx: 0, dy: 0)
     private var lastTime = CACurrentMediaTime()
 
-    // Spring: stiffness / damping (mass 1). Damping ratio about 0.8: quick, with a little overshoot.
-    private let stiffness: CGFloat = 220
-    private let damping: CGFloat = 24
+    // Spring (mass 1): a calm flight across the screen with a little overshoot.
+    private let stiffness: CGFloat = 90
+    private let damping: CGFloat = 16
 
     func start() {
         rebuildPanels()
@@ -42,7 +52,8 @@ final class OverlayController {
         }
         RunLoop.main.add(t, forMode: .common)
         timer = t
-        applyPinned()
+        model.position = goal()
+        model.bubbleOnLeft = true
     }
 
     func stop() {
@@ -57,101 +68,101 @@ final class OverlayController {
         panels.removeAll()
     }
 
-    // MARK: - Showing and hiding
+    // MARK: - Presence and pointing
 
-    func present(_ text: String, mood: BuddyMood) {
-        hideTask?.cancel()
-        if !tracking || model.opacity < 0.05 {
-            snapToCursor()
+    func setPresence(_ next: ClipaPresence, anchorTarget: Bool = false) {
+        presence = next
+        if !anchorTarget { targetPoint = nil }
+        model.scale = next.scale
+        model.opacity = next == .hidden ? 0 : 1
+        if next != .hidden && !anchorTarget { model.bubbleOnLeft = true }
+    }
+
+    /// Flies next to `rect` (AppKit global coordinates) and stands beside it, the arm toward it.
+    func point(at rect: CGRect) {
+        let screen = NSScreen.screens.first { $0.frame.intersects(rect) } ?? NSScreen.screens.first
+        let frame = screen?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let gap: CGFloat = 46
+        let bubbleRoom: CGFloat = 380
+        var point: CGPoint
+        if rect.maxX + gap + bubbleRoom < frame.maxX {
+            point = CGPoint(x: rect.maxX + gap, y: rect.midY)
+            targetBubbleOnLeft = false
+        } else if rect.minX - gap - bubbleRoom > frame.minX {
+            point = CGPoint(x: rect.minX - gap, y: rect.midY)
+            targetBubbleOnLeft = true
+        } else {
+            point = CGPoint(x: min(max(rect.midX, frame.minX + 60), frame.maxX - 60), y: rect.minY - gap)
+            targetBubbleOnLeft = point.x > frame.midX
         }
-        tracking = true
-        model.mood = mood
+        point.y = min(max(point.y, frame.minY + 50), frame.maxY - 50)
+        targetPoint = point
+        model.bubbleOnLeft = targetBubbleOnLeft
+        if presence == .hidden || presence == .dot { setPresence(.full, anchorTarget: true) }
+    }
+
+    // MARK: - Lines
+
+    /// Shows `text` in the bubble; it stays until `clearLine` (or the next line).
+    func say(_ text: String, warning: Bool = false) {
+        lineTask?.cancel()
+        lineTask = nil
+        model.warning = warning
         model.bubbleText = text
-        model.opacity = 1
         model.bubbleOpacity = text.isEmpty ? 0 : 1
+        if presence == .hidden && !text.isEmpty { setPresence(.peek) }
+    }
+
+    /// Fades the bubble out after `delay` seconds.
+    func clearLine(after delay: TimeInterval) {
+        lineTask?.cancel()
+        lineTask = Task { [weak self] in
+            if delay > 0 { try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
+            guard let self, !Task.isCancelled else { return }
+            self.model.bubbleOpacity = 0
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            guard !Task.isCancelled else { return }
+            self.model.bubbleText = ""
+            self.model.warning = false
+        }
     }
 
     func setMood(_ mood: BuddyMood) {
         model.mood = mood
     }
 
-    /// Fade the bubble (and the buddy, unless pinned) out after `delay` seconds.
-    func dismiss(after delay: TimeInterval) {
-        hideTask?.cancel()
-        hideTask = Task { [weak self] in
-            let nanos = UInt64(max(0, delay) * 1_000_000_000)
-            try? await Task.sleep(nanoseconds: nanos)
-            guard !Task.isCancelled, let self = self else { return }
-            self.model.bubbleOpacity = 0
-            self.model.mood = .idle
-            if !self.pinnedVisible { self.model.opacity = 0 }
-            try? await Task.sleep(nanoseconds: 500_000_000)
-            guard !Task.isCancelled else { return }
-            self.model.bubbleText = ""
-            if !self.pinnedVisible { self.tracking = false }
-        }
-    }
-
-    /// Off the record: vanish immediately.
-    func hideNow() {
-        hideTask?.cancel()
-        model.bubbleOpacity = 0
-        model.bubbleText = ""
-        model.opacity = 0
-        model.mood = .idle
-        tracking = false
-    }
-
     func setDimmed(_ value: Bool) {
         model.dimmed = value
     }
 
-    private func applyPinned() {
-        if pinnedVisible {
-            if !tracking { snapToCursor() }
-            tracking = true
-            model.opacity = 1
-        } else if model.bubbleText.isEmpty {
-            model.opacity = 0
-            tracking = false
-        }
-    }
-
     // MARK: - Motion
 
-    private func snapToCursor() {
-        let mouse = NSEvent.mouseLocation
-        model.position = target(for: mouse)
-        velocity = CGVector(dx: 0, dy: 0)
-        lastTime = CACurrentMediaTime()
+    private func corner() -> CGPoint {
+        let frame = NSScreen.screens.first?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
+        return CGPoint(x: frame.maxX - 70, y: frame.minY + 70)
     }
 
-    private func target(for mouse: CGPoint) -> CGPoint {
-        let frame = NSScreen.screens.first { $0.frame.contains(mouse) }?.frame
-            ?? NSScreen.main?.frame
-            ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
-        let roomOnRight = mouse.x < frame.maxX - 360
-        let roomBelow = mouse.y > frame.minY + 90
-        let onLeft = !roomOnRight
-        if model.bubbleOnLeft != onLeft { model.bubbleOnLeft = onLeft }
-        // Lower right of the pointer by default; flips near the screen edges.
-        let dx: CGFloat = roomOnRight ? 30 : -30
-        let dy: CGFloat = roomBelow ? -34 : 40
-        return CGPoint(x: mouse.x + dx, y: mouse.y + dy)
+    private func goal() -> CGPoint {
+        targetPoint ?? corner()
     }
 
     private func step() {
-        guard tracking else { return }
         let now = CACurrentMediaTime()
         let dt = CGFloat(min(max(now - lastTime, 0.001), 0.05))
         lastTime = now
 
-        let goal = target(for: NSEvent.mouseLocation)
+        let goal = self.goal()
         let dx = goal.x - model.position.x
         let dy = goal.y - model.position.y
         let nearGoal = abs(dx) < 0.1 && abs(dy) < 0.1
         let atRest = abs(velocity.dx) < 0.1 && abs(velocity.dy) < 0.1
         if nearGoal && atRest { return }
+        if model.opacity < 0.05 {
+            // Out of sight: no flight, just be there.
+            model.position = goal
+            velocity = CGVector(dx: 0, dy: 0)
+            return
+        }
 
         velocity.dx += (stiffness * dx - damping * velocity.dx) * dt
         velocity.dy += (stiffness * dy - damping * velocity.dy) * dt

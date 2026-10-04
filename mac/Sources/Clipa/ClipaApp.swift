@@ -3,7 +3,7 @@ import AppKit
 /// Entry point. Menu-bar only: `.accessory` activation policy means no Dock icon and no app menu,
 /// also when started with `swift run` (the bundled app additionally sets LSUIElement in Info.plist).
 @main
-struct ApprenticeMain {
+struct ClipaMain {
     @MainActor
     static func main() {
         let app = NSApplication.shared
@@ -19,15 +19,15 @@ struct ApprenticeMain {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var controller: ApprenticeController?
+    private var controller: ClipaController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let controller = ApprenticeController()
+        let controller = ClipaController()
         self.controller = controller
-        controller.start()
+        controller.launch()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        controller?.stop()
+        controller?.terminate()
     }
 }

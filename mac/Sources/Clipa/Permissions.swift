@@ -1,8 +1,9 @@
 import AppKit
+import AVFoundation
 import ApplicationServices
 import CoreGraphics
 
-/// Thin wrappers over the TCC checks. Microphone and Speech are requested lazily by SpeechInput.
+/// Thin wrappers over the TCC checks.
 enum Permissions {
     static var screenRecordingGranted: Bool { CGPreflightScreenCaptureAccess() }
 
@@ -16,22 +17,26 @@ enum Permissions {
 
     static var accessibilityTrusted: Bool { AXIsProcessTrusted() }
 
-    static func promptAccessibility() {
-        // Literal key instead of kAXTrustedCheckOptionPrompt (a mutable global, noisy under strict concurrency).
-        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
-        _ = AXIsProcessTrustedWithOptions(options)
+    static var microphoneGranted: Bool { AVCaptureDevice.authorizationStatus(for: .audio) == .authorized }
+
+    /// Asks once (the system prompt), then answers from the stored decision.
+    static func requestMicrophone() async -> Bool {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized: return true
+        case .notDetermined: return await AVCaptureDevice.requestAccess(for: .audio)
+        default: return false
+        }
     }
 
     enum Pane: String {
         case screenRecording = "Privacy_ScreenCapture"
         case microphone = "Privacy_Microphone"
-        case speech = "Privacy_SpeechRecognition"
         case accessibility = "Privacy_Accessibility"
         case inputMonitoring = "Privacy_ListenEvent"
     }
 
     static func openSettings(_ pane: Pane) {
-        // Deep link into System Settings > Privacy & Security (works on macOS 13-15). If it ever stops, the user opens the pane by hand.
+        // Deep link into System Settings > Privacy & Security. If it ever stops working, open the pane by hand.
         let urlString = "x-apple.systempreferences:com.apple.preference.security?\(pane.rawValue)"
         if let url = URL(string: urlString) {
             NSWorkspace.shared.open(url)

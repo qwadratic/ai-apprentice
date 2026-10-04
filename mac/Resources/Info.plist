@@ -29,10 +29,8 @@
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSScreenCaptureUsageDescription</key>
-	<string>Apprentice looks at your screen to notice what changes while you work, so it can ask you why at a natural pause. Text is read on this Mac.</string>
+	<string>While Show or Pass it on runs, Clipa streams your main display to the Clipa server, which turns it into screen events so she can ask about your work at a natural pause.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Apprentice listens only while you hold Control+Option, so you can answer its question out loud.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Apprentice turns your spoken answer into text on this Mac and saves it to its knowledge base.</string>
+	<string>While Show or Pass it on runs, Clipa sends your voice to her voice agent (ElevenLabs) so you can talk to her. Off the record closes the conversation.</string>
 </dict>
 </plist>

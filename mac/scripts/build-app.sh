@@ -22,7 +22,6 @@ rm -rf "${APP}"
 mkdir -p "${APP}/Contents/MacOS" "${APP}/Contents/Resources"
 cp "${BIN_DIR}/${APP_NAME}" "${APP}/Contents/MacOS/${APP_NAME}"
 cp Resources/Info.plist "${APP}/Contents/Info.plist"
-cp -R Resources/kb "${APP}/Contents/Resources/kb"
 if [[ -f Resources/AppIcon.icns ]]; then
   cp Resources/AppIcon.icns "${APP}/Contents/Resources/AppIcon.icns"
 fi
