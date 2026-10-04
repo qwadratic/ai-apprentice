@@ -99,9 +99,28 @@ function parseBox(v: unknown): [number, number, number, number] | null | undefin
   return x! + w! <= 1.0001 && y! + h! <= 1.0001 ? [x!, y!, w!, h!] : undefined;
 }
 
+/** The LLM tasks take a summary of at most this many characters. */
+const SUMMARY_MAX = 400;
+
+/**
+ * One untrusted fact as a single clean line: control characters and runs of whitespace become one space, and the result is
+ * cut to max characters (an ellipsis marks the cut) without splitting a surrogate pair. Null when it is not a non-empty string.
+ */
+function factText(v: unknown, max: number): string | null {
+  if (typeof v !== 'string' || max < 2) return null;
+  const clean = v.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (clean === '') return null;
+  if (clean.length <= max) return clean;
+  let cut = clean.slice(0, max - 1);
+  if (/[\ud800-\udbff]$/.test(cut)) cut = cut.slice(0, -1);
+  return `${cut.trimEnd()}…`;
+}
+
 /**
  * A ScreenObservation (contracts, plus the generic screen_activity kind from stream A) turned into what the conductor
- * keeps. Unknown kinds are kept with a neutral summary so that the conductor never depends on one scenario.
+ * keeps. Unknown kinds are kept with a neutral summary so that the conductor never depends on one scenario. The email
+ * draft and the order card get their own summary: the typed body and the attachments are what a question or a check is
+ * about, so they must survive (other facts stay short).
  */
 export function parseObservation(v: unknown): P<SeenObservation> {
   if (!isRecord(v)) return bad('observation');
@@ -131,8 +150,26 @@ export function parseObservation(v: unknown): P<SeenObservation> {
       if (box === undefined) continue;
       regions.push({ regionId: r.id, label: r.label, box, evidenceId: firstEvidence });
     }
+  } else if (v.kind === 'email_draft') {
+    // The draft as the question and the check need it: what is written, what is attached, and whether it is about to go out.
+    const state = oneOf(facts.previewState, ['editing', 'preview', 'sent'] as const) ? facts.previewState : 'unknown';
+    const kinds = Array.isArray(facts.attachments)
+      ? (facts.attachments as unknown[]).slice(0, 5).map((a) => (isRecord(a) && typeof a.kind === 'string' && /^[a-z_]{1,20}$/.test(a.kind) ? a.kind : 'other'))
+      : [];
+    const head = `to ${factText(facts.recipientRef, 64) ?? 'unknown'}; subject ${factText(facts.subject, 80) ?? '(none)'}; body: `;
+    const tail = `; attachments: ${kinds.length ? kinds.join(', ') : 'none'}; state ${state}`;
+    const body = factText(facts.bodyText, Math.min(300, SUMMARY_MAX - head.length - tail.length)) ?? '(empty)';
+    summary = `${head}${body}${tail}`;
+    if (state === 'preview') pendingAction = 'Send';
+  } else if (v.kind === 'order_view') {
+    summary = [
+      `order ${factText(facts.orderId, 64) ?? 'unknown'}`,
+      `customer ${factText(facts.customerRef, 64) ?? 'unknown'}`,
+      `address ${factText(facts.deliveryAddress, 120) ?? 'unknown'}`,
+      `window ${factText(facts.deliveryWindow, 80) ?? 'unknown'}`,
+    ].join('; ');
   } else {
-    // The three workspace kinds and anything newer: a short neutral line built from whichever facts are strings.
+    // The ticket and anything newer: a short neutral line built from whichever facts are strings.
     const parts = Object.entries(facts)
       .filter(([, value]) => typeof value === 'string' && value.length > 0 && value.length <= 120)
       .slice(0, 5)
