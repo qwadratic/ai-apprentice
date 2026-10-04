@@ -16,6 +16,7 @@ extension ClipaController {
         speaking = nil
         doneCues.removeAll()
         lineCueId = nil
+        pendingContext.removeAll()
     }
 
     func render(_ envelope: CueEnvelope) {
@@ -28,7 +29,13 @@ extension ClipaController {
             let size = ClipaPresence(rawValue: envelope.string("size") ?? "") ?? .peek
             overlay.setPresence(size, anchorTarget: envelope.string("anchor") == "target")
         case "context":
-            if let text = envelope.string("text") { voice.sendContext(text) }
+            guard let text = envelope.string("text") else { break }
+            if voice.isLive {
+                voice.sendContext(text)
+            } else {
+                pendingContext.append(text)
+                if pendingContext.count > 5 { pendingContext.removeFirst(pendingContext.count - 5) }
+            }
         case "point":
             point(envelope)
         case "ask", "warn", "say", "teachback", "guide":
@@ -189,7 +196,7 @@ extension ClipaController {
             finishCue(envelope.cueId, "skipped")
             return
         }
-        lastReflect = (url, Date())
+        lastReflect = url
         overlay.setPresence(.peek)
         overlay.setMood(.happy)
         overlay.say(envelope.string("text") ?? "Reflect is open in your browser.")

@@ -1,174 +1,176 @@
-# Apprentice (macOS)
+# Clipa for macOS
 
-A small buddy that lives next to your cursor and learns how you work. It watches the screen, stays quiet while you type or talk, and at a natural pause asks one short question: why did you do that, is there a limit, when would you stop and ask someone. Your spoken answer is saved as knowledge.
+Clipa without a window. She lives in the corner of your screen, streams the main display to the Clipa server while a stage runs, talks with you through the same ElevenLabs agents as the web app, and at the end hands you a link to the web app, where you reflect on what was done.
 
-This is the macOS app for Hack-Nation 7, challenge 01 "The AI Apprentice" (ElevenLabs). It is a menu-bar app: no Dock icon, no window, one status item.
+The app is one face of the **Clipa Conductor** (backlog doc-12). What Clipa says, and when, is decided on the server, the same way for the web app and for this app. The app's jobs:
 
-Built in the spirit of [Clicky](https://github.com/farzaa/clicky) (MIT), the open-source cursor buddy. See `THIRD_PARTY_NOTICES.md`.
+- stream the screen;
+- report what the person does: typing, pauses, talking, what they said;
+- render the conductor's cues: how far Clipa comes out, where she points, her lines;
+- speak through the voice agent.
 
-## How it maps to the brief
+It is a menu-bar app built for Hack-Nation 7, challenge 01 "The AI Apprentice" (ElevenLabs). It has no Dock icon and no windows: a paperclip in the menu bar, and Clipa on a click-through overlay.
 
-| Brief module | Status here |
-| --- | --- |
-| 1. Capture: watch the screen, turn changes into events, ask why at pauses, at least one guardrail question | Done. This is the app. |
-| 2. Map: debrief, teach-back, clickable Work Map | Next. The session log (`sessions/*.jsonl`) and `learned.jsonl` are the raw material: every screen event, intervention, answer and OCR snippet with a timestamp and a rule id. |
-| 3. Teach: tutor coaches a new hire, catches a wrong decision before it is saved | First slice done: **Teach mode** speaks the expert's warning, with the expert's own reason, when the cursor reaches a risky button on a risky screen. Predict-the-next-step, replay of the expert's screen moment and the mastery summary are next. |
+## Run it
 
-How the app answers the five Apprentice Test questions:
+Download the `Clipa-macos` artifact from the latest green [macos-build](../.github/workflows/macos-build.yml) run, then:
 
-1. **When to ask.** Input timing only (`CGEventSource.secondsSinceLastEventType`): typing, working, pause (2.5 to 8 s without input), idle, away. Questions only in `pause`, never while the expert holds push-to-talk or the buddy is speaking.
-2. **What to ask.** A question is picked only after a meaningful screen change matched a rule from the knowledge base (cues seen by on-device OCR). The question is the rule's, or in Claude mode a screenshot-aware rewording of it. Answered rules do not come back.
-3. **When it has understood.** Not in this module (debrief is the Map module). `learned.jsonl` already tells which rules have an expert answer and which are still seed text.
-4. **Whether the new hire learned.** Teach mode logs every warning and the novice's spoken replies (`novice_answer`). Scoring is next.
-5. **Trust.** "Off the record" in the menu stops screenshots, OCR, the microphone and the hotkey, forgets in-memory screen text, and logs only the switch itself. OCR text goes to logs only as a short redacted excerpt (emails, IBANs, card numbers, phone numbers masked). Everything on the default path runs on this Mac.
+```bash
+unzip Clipa-macos.zip
+xattr -dr com.apple.quarantine Clipa.app   # the app is ad-hoc signed, not notarized
+open Clipa.app
+```
 
-## The intervention policy
-
-All in `InterventionPolicy.swift` and `ApprenticeController+Flow.swift`.
-
-- Silent while typing (a key within 1.5 s), while the expert talks (push-to-talk held) or while the buddy speaks.
-- Learn mode asks only at a `pause`, and only about a screen that just changed meaningfully and matched a rule.
-- At most 4 interventions per 10 minutes.
-- A rule never repeats in a session unless the screen context changed (the set of numbers and ids on screen, for example invoice 4471 versus 4473). Switching scenario starts a new session.
-- At least one guardrail question per session: after two "why" questions with no guardrail, the next question is turned into "is there a limit here, when would you stop and ask someone?" about the matched rule.
-- Teach mode warnings protect a novice, so they skip the pause gate and the 4-per-10-minutes budget (they still count in it, still obey the no-repeat rule, and have a 20 s cooldown). A warning fires only when the cursor is on or near one of the rule's `action_words` (Merge, Post, Approve, Refund...) on a screen where the rule's cues are visible.
-
-A rule matches when any `cues` string appears in the OCR text (case-insensitive) and all `requires` strings appear. `kind` ("why" or "guardrail") does not gate the mode; it only labels the entry for the Work Map.
-
-## Build
-
-Requires macOS 14+, Xcode 15.2+ or the Swift 5.9+ toolchain. No external dependencies.
+Or build it yourself on macOS 14+ with Xcode 15.2+ (no external dependencies):
 
 ```bash
 cd mac
-swift build                    # debug binary, quick compile check
-scripts/build-app.sh           # release build -> build/Apprentice.app, ad-hoc signed
-UNIVERSAL=1 scripts/build-app.sh   # arm64 + x86_64
-open build/Apprentice.app
+scripts/build-app.sh            # release build -> build/Clipa.app, ad-hoc signed
+open build/Clipa.app
 ```
 
-`swift run` also works (the binary sets the accessory activation policy itself and finds `Resources/kb` next to the package), but macOS then attributes permissions to your terminal. Use the `.app` for the demo.
+Then use the paperclip in the menu bar:
 
-CI: `.github/workflows/macos-build.yml` (repo root) builds on `macos-15` and uploads `Apprentice-macos.zip` as an artifact. An app downloaded from a browser is quarantined and ad-hoc signed: run `xattr -dr com.apple.quarantine Apprentice.app` once, or right-click and Open.
+| Menu item | What happens |
+| --- | --- |
+| **Start Show (expert)** | Starts the conductor's `learn` stage with the interviewer agent: the expert does the real task and talks; Clipa asks at natural pauses. |
+| **Start Pass it on (new hire)** | Starts the `teach` stage with the tutor agent on the latest confirmed Work Map: Clipa steps in before a guardrail is broken. |
+| **End** | Ends the stage. The conductor answers with a link, and Clipa opens it in your browser: Reflect for the expert, the summary for the new hire. |
+| **Off the record** | Clipa stops the screen stream (no capture at all) and closes the voice conversation. The conductor is told first. |
+| **Open Reflect in browser** | Opens the last Reflect link again, or the web app. |
+| **Grant permissions..., Open session log, Quit Clipa** | |
+
+The menu says plainly that while a stage runs, the main display is streamed to the Clipa server. Its first lines show the stage, the stream (frames sent, last outcome, latency), the voice and the cue stream.
+
+### Demo cases
+
+Two cases, on synthetic data only:
+
+- **An email.** A mail draft for customer_07 with the order details as text.
+- **A table.** An order table.
+
+Open them in any app (the vision on the server is generic), start Show, and work while talking.
+
+## How it works
+
+```
+Clipa.app ──POST /api/agent/sessions──────────────────────────────▶ session id + token
+          ──POST /screen/sessions/{id}/start, /frames (JPEG) ───▶ server vision ──▶ conductor
+          ──POST /api/agent/conductor/{id}/events ─────────────▶ conductor
+          ◀─GET  /api/agent/conductor/{id}/cues (SSE) ──────────── cues: presence, point, ask, warn, open_web...
+          ◀▶ ElevenLabs Conversational AI WebSocket (signed URL from /api/agent/elevenlabs/signed-url)
+```
+
+Every request carries `Origin: app://apprentice-macos` and the session token as `Authorization: Bearer`. The token is never logged.
+
+### Screen streaming
+
+`ScreenStreamer.swift` and `FrameUploader.swift`:
+
+- **Capture.** An `SCStream` of the main display, not snapshots. `minimumFrameInterval` is 0.5 s (about 2 fps). ScreenCaptureKit scales each frame to at most 1280 px wide. The pointer is not drawn, and Clipa's own overlay is excluded.
+- **Skipping unchanged frames.** ScreenCaptureKit delivers a complete frame only when the screen changed. On top of that, a 128x80 grayscale thumbnail is compared with the last frame that was sent. A frame is skipped unless at least 2 cells moved by more than 10 gray levels, which filters out a blinking caret.
+- **Encoding.** JPEG at quality 0.6, typically 80 to 250 KB per frame.
+- **Upload.** One request in flight, and the latest frame wins: a frame that arrives while another is uploading replaces the one waiting, which is dropped as stale. Uploads are paced to 1.6 s, because the server analyses one frame per 1.5 s. If the server answers `sampled_out`, the same picture is sent again with a fresh timestamp.
+- **Latency.** Every upload writes a `frame` line to the session log: `queue_ms` (capture to request), `upload_ms` and `total_ms` (capture to server reply), plus size, changed cells and the server's outcome. The menu shows the last value and a moving average.
+- **Lifecycle.** Off the record pauses the server session and stops the capture. Back on the record resumes both. End stops both.
+- **Timestamps.** The server vision turns frames into observations and feeds them straight to the session's conductor; the app does not forward observations. Frame timestamps count from `sessionEpochMs`, which is aligned to the server clock once per stage.
+
+### Conductor client
+
+`ConductorClient.swift`:
+
+- **Events.** The app sends `hello {client: macos, persona}`, `mode`, `session` (live, then ended), `share`, `activity` from the idle monitor (typing / working / pause / idle / away), `talking` (the person, from the agent's voice activity score; Clipa, from playback), final `transcript` turns, `cue_done`, and `off_record`.
+- **Delivery.** Events are batched (at most 50), each with `seq` and `atMs`. A failed POST is retried; the server skips a seq it already has.
+- **Cues.** The cue stream is read with `URLSession.bytes`. It reconnects with `after=<last seq>`, so no cue is rendered twice.
+
+### The face
+
+`ClipaController+Face.swift`, `OverlayController.swift`, `BuddyView.swift` (Clipa's SwiftUI drawing from `feat/clipa`):
+
+- **`presence`.** `dot` is small, in the lower right corner. `peek` is medium. `full` is large, next to the target when the anchor is `target`.
+- **`point`.** The region box `[x, y, w, h]` is normalised 0..1 to the captured frame. The app maps it onto the captured display and Clipa flies beside it, her arm toward it.
+- **Lines.** `ask`, `warn`, `say`, `teachback`, and a `guide` with `speak` appear in the speech bubble and are said by the voice agent as `[ASK] text`.
+  - `cue_done` reports `spoken` when the agent has finished, and `shown` without voice.
+  - It reports `skipped` when the cue expired, or the person was typing or talking.
+  - It reports `interrupted` when the line was cancelled while it was being said.
+- **`context`.** Goes to the agent as a `contextual_update`.
+- **`open_web`.** Opens the URL with `NSWorkspace`.
+- **`state`.** Sets Clipa's pose.
+- **`cancel`.** Clears the line.
+
+### Voice
+
+`VoiceAgent.swift` speaks the ElevenLabs Conversational AI WebSocket protocol directly:
+
+- **Microphone.** 16 kHz mono 16-bit PCM, sent as base64 `user_audio_chunk`.
+- **Playback.** The agent's `audio` events are played as they arrive; `interruption` flushes playback; `ping` is answered with `pong`.
+- **Echo.** Voice processing (echo cancellation) is switched on when the Mac supports it. Without it, the microphone sends silence while Clipa speaks.
+- **Roles.** Show uses `role=interviewer`; Pass it on uses `role=tutor`.
+- **Secrets.** The signed URL is a secret: it is never logged, and connection errors are reported by code only.
 
 ## Permissions
 
-Grant these on first use (menu: "Grant permissions..." opens the right panes).
-
-| Permission | Why | Needed for |
+| Permission | Why | Without it |
 | --- | --- | --- |
-| Screen Recording | ScreenCaptureKit screenshots | watching the screen (without it the buddy is blind, nothing else breaks) |
-| Microphone | push-to-talk answers | voice input |
-| Speech Recognition | on-device transcription | voice input |
-| Input Monitoring **or** Accessibility | global Control+Option hotkey | push-to-talk while another app is in front |
+| Screen Recording | the SCStream of the main display | No screen stream. The stage still runs, with voice. After granting, quit and reopen Clipa. |
+| Microphone | talking with Clipa | Clipa still speaks, but cannot hear you. |
+| Input Monitoring (or Accessibility) | typing detection from input timing (`CGEventSource`), so Clipa never asks while you type | Typing may not be detected. |
 
-Granting Screen Recording usually needs an app restart. Idle detection uses only event timing and needs no permission.
-
-Reset after a rebuild (ad-hoc signatures change on every build, so macOS may keep a stale grant that no longer matches):
+The menu item **Grant permissions...** asks for them and opens the right pane in System Settings. Ad-hoc signatures change on every build, so after a rebuild macOS may keep a stale grant. Reset it like this:
 
 ```bash
-tccutil reset ScreenCapture com.hacknation.apprentice
-tccutil reset Microphone com.hacknation.apprentice
-tccutil reset SpeechRecognition com.hacknation.apprentice
-tccutil reset Accessibility com.hacknation.apprentice
-tccutil reset ListenEvent com.hacknation.apprentice
+tccutil reset ScreenCapture com.hacknation.clipa
+tccutil reset Microphone com.hacknation.clipa
+tccutil reset ListenEvent com.hacknation.clipa
 ```
-
-## Using it
-
-Menu bar eye icon (it becomes a crossed-out eye when off the record):
-
-- **Show buddy**: keep a small buddy visible. By default it is hidden and fades in only to speak.
-- **Off the record**: pause all capture and listening.
-- **Mode**: Learn (asks the expert why) or Teach (warns the novice).
-- **Scenario**: from `kb/index.json`.
-- **Open knowledge base folder**, **Open session log**, **Quit**.
-- Disabled lines at the top show activity state, screen status, mode, voice, brain and the question budget.
-
-Push-to-talk: hold **Control+Option**, speak, release. The transcript is attached to the last question (within 3 minutes) and appended to `kb/<scenario>/learned.jsonl` with timestamp, rule id and the OCR snippet. Without a recent question it is saved as a note. In Teach mode it is only logged as the novice's answer.
-
-### Demo
-
-Sandbox pages with fake data and 20 px text (so fast OCR reads them) are in `../sandbox/`: `accountant.html`, `programmer.html`, `support.html`. Open one in a browser, pick the matching scenario, and follow `Resources/kb/<scenario>/demo.md` (it is copied to `~/Library/Application Support/Apprentice/kb/<scenario>/demo.md`). For the accountant: Learn mode, open invoice 4471, re-code the cost center to 0400, stop typing for three seconds, and the buddy asks why. Switch to Teach mode, move the pointer to "Post" on a risky invoice, and it warns with the expert's reason.
-
-## Knowledge base
-
-On every launch the bundled `Resources/kb/` is copied to `~/Library/Application Support/Apprentice/kb/`: files that already exist are never overwritten (your edits win), missing files are added, and `index.json` entries are merged by id. To reset a scenario, delete its folder.
-
-```
-kb/index.json                  [{"id": "programmer", "name": "...", "title": "..."}]
-kb/<id>/profile.md             role, specialty, duties (free markdown; goes into Claude prompts)
-kb/<id>/rules.json             [{"id", "title", "kind": "why"|"guardrail", "cues": [...], "requires": [...],
-                                 "action_words": [...], "question", "warning", "why", "source": "seed"|"learned"}]
-kb/<id>/learned.jsonl          appended by the app: {ts, scenario, rule_id, question, answer, ocr_snippet, mode, kind}
-```
-
-The newest learned answer for a rule replaces its seed `why` (shown as `source: learned`) and is what Teach mode quotes.
 
 ## Configuration
 
-Optional. With no keys at all the app is complete: rules brain, system voice, on-device OCR and speech.
-
-Environment variables win over `~/Library/Application Support/Apprentice/config.json`. A Finder-launched app does not see shell variables, so for the `.app` use the file:
+Optional. Nothing secret is configured on the Mac: the server issues the session token and the signed voice URL. Use `~/Library/Application Support/Clipa/config.json` or environment variables:
 
 ```json
-{
-  "elevenlabs_api_key": "YOUR_ELEVENLABS_KEY",
-  "elevenlabs_voice_id": "YOUR_VOICE_ID",
-  "elevenlabs_model_id": "eleven_v4_turbo",
-  "anthropic_api_key": "YOUR_ANTHROPIC_KEY",
-  "claude_model": "claude-sonnet-5-5",
-  "speech_locale": "en-US"
-}
+{ "server": "https://apprentice.exe.xyz", "web": "https://qwadratic.github.io/clipa/", "fps": 2,
+  "max_width": 1280, "jpeg_quality": 0.6, "upload_interval": 1.6, "voice": true }
 ```
 
 | Variable | Meaning |
 | --- | --- |
-| `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` | both set: speak with ElevenLabs (`POST /v1/text-to-speech/{voice_id}`, `model_id` `eleven_v4_turbo`), otherwise the system voice |
-| `ELEVENLABS_MODEL_ID` | override the TTS model |
-| `ANTHROPIC_API_KEY` | enables the Claude brain (menu toggle "Use Claude brain") |
-| `APPRENTICE_CLAUDE_MODEL` | default `claude-sonnet-5-5` |
-| `APPRENTICE_LOCALE` | speech locale for dictation and the system voice, default `en-US` |
+| `CLIPA_SERVER` | API base (default `https://apprentice.exe.xyz`) |
+| `CLIPA_WEB` | web app opened when there is no Reflect link |
+| `CLIPA_FPS` | capture rate, 0.5 to 5 |
+| `CLIPA_VOICE=0` | no voice conversation; Clipa only shows her lines |
 
-Keys are never printed or logged. The Claude brain sends a downscaled screenshot (not redacted) to Anthropic: it only runs when a key is configured and the menu toggle is on.
-
-### Swap SystemVoice for ElevenLabs
-
-Nothing to edit: set `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID` (or the two config fields) and restart. `VoiceFactory.make` in `VoiceOutput.swift` picks `ElevenLabsVoice`; if a request fails the line is spoken by `SystemVoice`, so the buddy is never mute. To add another engine, implement the `VoiceOutput` protocol (`speak(_:) async`, `stop()`).
+The session log is in `~/Library/Application Support/Clipa/sessions/`. It holds one JSONL file per run with stages, cue types, voice state and per-frame latency. It never holds tokens, signed URLs, images or what was said.
 
 ## Code map
 
 ```
-Sources/Apprentice/
-  ApprenticeApp.swift             entry point, accessory app
-  ApprenticeController.swift      wiring, state, menu actions, off the record
-  ApprenticeController+Flow.swift screen change -> rule -> pause -> words -> speech -> record
-  InterventionPolicy.swift        when may the buddy speak
-  RulesEngine.swift               cues / requires / action words, context signature
-  IdleMonitor.swift               typing / working / pause / idle / away
-  ScreenWatcher.swift             ScreenCaptureKit, difference hash, settle logic
-  TextRecognizer.swift            Vision OCR (fast mode)
-  Brain.swift, ClaudeBrain.swift  RuleBrain (offline), ClaudeBrain (optional)
-  VoiceOutput.swift               SystemVoice, ElevenLabsVoice
-  PushToTalk.swift, SpeechInput.swift
-  OverlayWindow.swift, OverlayController.swift, BuddyView.swift, BuddyModel.swift
-  MenuBarController.swift
-  KnowledgeBase.swift, KnowledgeModels.swift
-  SessionLog.swift, Redactor.swift, ImageTools.swift, Paths.swift, AppSettings.swift, Permissions.swift
-Resources/                        Info.plist, kb/
+Sources/Clipa/
+  ClipaApp.swift                 entry point, accessory app
+  ClipaController.swift          stages (Show, Pass it on), off the record, screen and voice wiring, menu status
+  ClipaController+Face.swift     cue rendering, cue_done, [ASK] lines, pointing
+  ConductorClient.swift          events out (seq, atMs, retry), SSE cues in (reconnect after last seq)
+  ServerAPI.swift                sessions, signed voice URL, screen start/frames/lifecycle, conductor routes
+  ScreenStreamer.swift           SCStream capture, change detection, JPEG
+  FrameUploader.swift            one in flight, latest wins, pacing, latency log
+  VoiceAgent.swift               ElevenLabs Conversational AI WebSocket, microphone and playback
+  OverlayController.swift        presence, flight to a target, speech bubble
+  BuddyView.swift, BuddyModel.swift, OverlayWindow.swift   Clipa and the click-through overlay
+  IdleMonitor.swift              typing / working / pause / idle / away
+  MenuBarController.swift, Permissions.swift, Config.swift, Paths.swift, SessionLog.swift, ImageTools.swift
+Resources/Info.plist
+Resources/kb/                    the old knowledge bases, kept only for sandbox/check_cues.py; not in the app
 scripts/build-app.sh
 ```
 
-Data lives in `~/Library/Application Support/Apprentice/`: `kb/`, `sessions/session-<time>.jsonl`, `config.json`.
+## Honest limits
 
-## Known limits
+- **Not run on a Mac yet.** The macos-15 CI build compiles the app and assembles it, and the server contract was checked from a script: session, screen start, a JPEG frame accepted, events, cues, `open_web` on End. The app itself has not run on a Mac yet. Screen capture, the microphone path (voice processing, format conversion), playback and the overlay motion are untested on real hardware.
+- **No masking on macOS frames yet.** Frames leave the Mac as they are on screen: no masks, no redaction. Use synthetic demo data only. Off the record stops the stream and the voice, but does not recall frames or audio already sent. The screen pipeline does not clean speech.
+- **Main display only.** Pointing maps onto the main display, and the overlay sits on every screen.
+- **Typing detection.** It needs Input Monitoring on current macOS. Without it, Clipa may start a question while you type; the conductor still waits for pauses in what it sees.
+- **Echo cancellation.** It depends on macOS voice processing. Where that is unavailable, Clipa cannot be interrupted by voice while she speaks.
+- **Reflect link.** The link from `open_web` carries a join code that works once, for five minutes. Opened later, the web app starts unlinked.
+- **Distribution.** Ad-hoc signed only: no notarization and no auto-update.
 
-- Uncertain Apple API calls were reviewed against Apple documentation; the first real check is the macos-15 CI build.
-- Screen watching follows the display under the cursor, one display at a time. The first frame after switching displays counts as a meaningful change.
-- On macOS 15 the system may ask every few weeks to re-approve screen recording for the app. Approve it, or the buddy goes blind again.
-- Fast-mode OCR misses small or low-contrast text. Rules should use cues that are visible words at normal UI sizes.
-- Personal data: redaction is regex only (email, IBAN, card, phone). Names and addresses are not caught. Raw OCR text stays in memory and is never written in full. The screenshot sent to Claude is not redacted. Microsoft Presidio is the planned upgrade.
-- The expert's speech is captured only while the hotkey is held. A buddy that hears you think aloud (voice activity detection) is not built, so "stay silent while the expert talks" covers push-to-talk and the buddy's own voice, not ambient talking.
-- Push-to-talk needs Input Monitoring or Accessibility; modifier-only shortcuts cannot be seen otherwise.
-- No debrief, teach-back or Work Map viewer yet (modules 2 and 3 of the brief).
-- Ad-hoc signing only: no notarization, no auto-update, no login item.
+The cursor-companion patterns come from [Clicky](https://github.com/farzaa/clicky) (MIT); see `THIRD_PARTY_NOTICES.md`.

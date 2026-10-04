@@ -58,9 +58,16 @@ final class ScreenStreamer: NSObject, SCStreamOutput, SCStreamDelegate, @uncheck
         guard let display = content.displays.first(where: { $0.displayID == mainID }) ?? content.displays.first else {
             throw StreamError.noDisplay
         }
+        // Never capture Clipa herself: exclude this app, or at least its windows (the overlay panels).
         let ownPID = ProcessInfo.processInfo.processIdentifier
         let ownApps = content.applications.filter { $0.processID == ownPID }
-        let filter = SCContentFilter(display: display, excludingApplications: ownApps, exceptingWindows: [])
+        let filter: SCContentFilter
+        if ownApps.isEmpty {
+            let ownWindows = content.windows.filter { $0.owningApplication?.processID == ownPID }
+            filter = SCContentFilter(display: display, excludingWindows: ownWindows)
+        } else {
+            filter = SCContentFilter(display: display, excludingApplications: ownApps, exceptingWindows: [])
+        }
 
         let configuration = SCStreamConfiguration()
         let pointWidth = max(display.width, 1)

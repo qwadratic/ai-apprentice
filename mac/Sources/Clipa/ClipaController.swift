@@ -60,7 +60,8 @@ final class ClipaController {
     var speaking: SpeakingCue?
     var doneCues = Set<String>()
     var lineCueId: String?
-    var lastReflect: (url: URL, at: Date)?
+    var lastReflect: URL?
+    var pendingContext: [String] = []
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -116,7 +117,11 @@ final class ClipaController {
 
         voice.onAgentSpeaking = { [weak self] active in self?.agentSpeakingChanged(active) }
         voice.onPersonTalking = { [weak self] active in self?.personTalkingChanged(active) }
-        voice.onUserTranscript = { [weak self] text in self?.transcript(role: "expert", text: text) }
+        voice.onUserTranscript = { [weak self] text in
+            // Clipa's own "[ASK]" lines are never the person's words.
+            guard !text.trimmingCharacters(in: .whitespaces).uppercased().hasPrefix("[ASK]") else { return }
+            self?.transcript(role: "expert", text: Self.withoutAudioTags(text))
+        }
         voice.onAgentResponse = { [weak self] text in self?.transcript(role: "agent", text: Self.withoutAudioTags(text)) }
         voice.onStateChange = { [weak self] state in self?.voiceStateChanged(state) }
 
@@ -386,7 +391,12 @@ final class ClipaController {
     private func voiceStateChanged(_ state: VoiceAgent.State) {
         log.write("voice_state", ["state": state.rawValue, "detail": voice.detail, "echo_cancellation": voice.echoCancellation])
         menuBar?.refresh()
-        if state == .live { voiceRetries = 0 }
+        if state == .live {
+            voiceRetries = 0
+            // Screen context that arrived before the conversation was up.
+            for text in pendingContext { voice.sendContext(text) }
+            pendingContext.removeAll()
+        }
         // A dropped conversation comes back with a fresh signed URL, a few times.
         if state == .failed, isLive, !offTheRecord, voiceRetries < 3 {
             voiceRetries += 1
@@ -435,13 +445,9 @@ final class ClipaController {
     }
 
     func openReflect() {
-        // A Reflect link carries a join code that works once, for a few minutes; after that open the web app itself.
-        if let last = lastReflect, Date().timeIntervalSince(last.at) < 270 {
-            NSWorkspace.shared.open(last.url)
-            lastReflect = nil
-        } else {
-            NSWorkspace.shared.open(config.web)
-        }
+        // The Reflect link joins the web page to this session once, within five minutes; opened again later it still
+        // opens the web app (the page then starts unlinked).
+        NSWorkspace.shared.open(lastReflect ?? config.web)
     }
 
     func requestPermissions() {
