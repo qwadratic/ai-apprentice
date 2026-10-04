@@ -132,17 +132,25 @@ jobs:
     with:
       ref: ${{ needs.prepare.outputs.sha }}
 
+  # Root workspace (stream A's web and API, stream B's packages): npm ci + npm run check on Node 22.22 and 24.
+  checks-workspace:
+    needs: prepare
+    if: needs.prepare.outputs.publish == 'true'
+    uses: ./.github/workflows/workspace-checks.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+
   pages-build:
     name: build site and deploy.json
-    needs: [prepare, gate, checks-stream-b, checks-backlog]
+    needs: [prepare, gate, checks-stream-b, checks-backlog, checks-workspace]
     if: needs.prepare.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pages: read # configure-pages
     env:
-      # The one directory that is published: the launch page at its root, the lab under lab/ and deploy.json at the root
-      # (the VM's DEPLOY_SOURCE=pages mode reads <pages>/deploy.json).
+      # The one directory that is published: the launch page at its root, the web app (stream A + B) under app/
+      # and deploy.json at the root (the VM's DEPLOY_SOURCE=pages mode reads <pages>/deploy.json).
       SITE_DIR: _site
     steps:
       - uses: actions/checkout@v4
@@ -162,62 +170,61 @@ jobs:
             echo "::error::$SHA is no longer the head of main ($head). A re-run must not publish an older commit; use a manual run (with the freeze) for a rollback."
             exit 1
           fi
-      - name: Lab lockfile exists at this commit
-        env:
-          SHA: ${{ needs.prepare.outputs.sha }}
-        run: |
-          if [ ! -f apps/web/features/agent/lab/package-lock.json ]; then
-            echo "::error::apps/web/features/agent/lab/package-lock.json is missing at $SHA. This commit predates the lab lockfile and cannot be built; pick a newer sha."
-            exit 1
-          fi
-      # Unlike the lab, the launch page may be absent: a rollback to a commit that predates it must still publish.
-      - name: Launch page lockfile at this commit
-        id: launchpad
+      # Every releasable commit is after the webhook merge (prepare refuses older ones), so both the root
+      # workspace and the launch page exist.
+      - name: Root workspace and launch page exist at this commit
         env:
           SHA: ${{ needs.prepare.outputs.sha }}
         run: |
           set -euo pipefail
-          if [ -f apps/web/features/agent/launchpad/package-lock.json ]; then
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::apps/web/features/agent/launchpad/package-lock.json is missing at $SHA (a rollback to a commit before the launch page). Publishing the lab at the site root and under lab/, as before."
-          fi
+          for f in package-lock.json apps/web/package.json apps/web/features/agent/launchpad/package-lock.json; do
+            [ -f "$f" ] || { echo "::error::$f is missing at $SHA; this commit cannot be published."; exit 1; }
+          done
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.22.0
           cache: npm
           cache-dependency-path: |
-            apps/web/features/agent/lab/package-lock.json
+            package-lock.json
             apps/web/features/agent/launchpad/package-lock.json
-      - name: Build the lab page (tsc to dist/)
-        working-directory: apps/web/features/agent/lab
+      - name: Build the web app (stream A scaffold + stream B shell) for Pages
+        env:
+          WEB_BASE_PATH: /ai-apprentice/app/
+          VITE_API_BASE: https://apprentice.exe.xyz
         run: |
+          set -euo pipefail
           npm ci
-          npm run typecheck
-          npm run build
+          npm run build --workspace @apprentice/contracts
+          npm run build --workspace @apprentice/web
       - name: Build the launch page (tsc to dist/)
-        if: steps.launchpad.outputs.present == 'true'
         working-directory: apps/web/features/agent/launchpad
         run: |
           npm ci
           npm run typecheck
           npm run build
-      - name: Assemble the site (launch page at the root, the lab under lab/)
-        env:
-          LAUNCHPAD: ${{ steps.launchpad.outputs.present }}
+      # The web app stays under app/ until the product shell replaces A's debug view (A asked not to put a
+      # mock-only scaffold at the public root); then the two swap places.
+      - name: Assemble the site (launch page at the root, web app under app/)
         run: |
           set -euo pipefail
           rm -rf "$SITE_DIR"
-          mkdir -p "$SITE_DIR/lab"
-          cp -R apps/web/features/agent/lab/dist/. "$SITE_DIR/lab/"
-          if [ "$LAUNCHPAD" = "true" ]; then
-            cp -R apps/web/features/agent/launchpad/dist/. "$SITE_DIR/"
-          else
-            # No launch page at this commit: the lab stays at the root, as before.
-            cp -R apps/web/features/agent/lab/dist/. "$SITE_DIR/"
-          fi
+          mkdir -p "$SITE_DIR/app"
+          cp -R apps/web/features/agent/launchpad/dist/. "$SITE_DIR/"
+          cp -R apps/web/dist/. "$SITE_DIR/app/"
           find "$SITE_DIR" -type f | sort
+      # Anthropic keys, ElevenLabs keys (sk_ + hex) and any api-key/xi-api-key assignment of a long literal.
+      # A bare "api-key" grep would flag the app's own header-redaction code, so only assigned values count.
+      # grep exits 1 on no match; 0 (a match) and 2 (an error, e.g. a PCRE limit) both fail the job.
+      # The step runs under bash -e, so grep's status is caught with ||. -R follows symlinks (the Pages
+      # artifact dereferences them) and -a scans files with NUL bytes too.
+      - name: The published site carries no key-shaped values
+        run: |
+          set -uo pipefail
+          rc=0
+          grep -RalP 'sk-ant-[\w-]{20,}|sk_[a-fA-F0-9]{40,}|(?i:api[_-]?key|xi-api-key|elevenlabs_api_key)["\x27]?\s*[:=]\s*["\x27][\w-]{20,}' "$SITE_DIR" || rc=$?
+          if [ $rc -eq 1 ]; then echo "No key-shaped values in $SITE_DIR"; exit 0; fi
+          if [ $rc -eq 0 ]; then echo "::error::A key-shaped value is in the published site (files above)"; else echo "::error::The key scan failed (grep exit $rc)"; fi
+          exit 1
       - name: Write deploy.json at the site root
         env:
           SHA: ${{ needs.prepare.outputs.sha }}

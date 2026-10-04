@@ -1,0 +1,51 @@
+import { useEffect, useState } from 'react';
+import type { EvidenceRef } from '@apprentice/contracts';
+import { useShell, useShellState } from '../hooks.ts';
+import { formatClock } from '../session-clock.ts';
+
+type Resolved = { kind: 'loading' } | { kind: 'ok'; evidence: EvidenceRef } | { kind: 'error'; message: string };
+
+/**
+ * The slot of stream A's ReplayPanel (TASK-2.5). The real panel receives `resolveEvidence`, the evidence id and
+ * onClose (doc-9, section 2.3) and plays the processed clip. Until then this resolves the evidence through the
+ * bridge and shows what it found, so that the wiring is visible.
+ */
+export function ReplaySlot() {
+  const { controller } = useShell();
+  const evidenceId = useShellState((s) => s.replay.evidenceId);
+  const [resolved, setResolved] = useState<Resolved>({ kind: 'loading' });
+
+  useEffect(() => {
+    if (evidenceId === null) return undefined;
+    let current = true;
+    setResolved({ kind: 'loading' });
+    controller.resolveEvidence(evidenceId).then(
+      (evidence) => { if (current) setResolved({ kind: 'ok', evidence }); },
+      (e: unknown) => { if (current) setResolved({ kind: 'error', message: e instanceof Error ? e.message : String(e) }); },
+    );
+    return () => { current = false; };
+  }, [controller, evidenceId]);
+
+  if (evidenceId === null) return null;
+  return (
+    <section className="as-card as-replay" aria-labelledby="as-replay-title" data-testid="replay-slot">
+      <div className="as-card__head">
+        <h2 className="as-card__title" id="as-replay-title">Replay of a screen moment</h2>
+        <button type="button" className="as-btn as-btn--small" onClick={() => controller.closeEvidence()}>Close</button>
+      </div>
+      <p className="as-note"><strong>Not wired yet:</strong> the replay panel is stream A&apos;s (TASK-2.5). This card only resolves the evidence.</p>
+      <dl className="as-props">
+        <div><dt>evidence</dt><dd>{evidenceId}</dd></div>
+        {resolved.kind === 'loading' && <div><dt>resolving</dt><dd>...</dd></div>}
+        {resolved.kind === 'error' && <div><dt>not available</dt><dd>{resolved.message}</dd></div>}
+        {resolved.kind === 'ok' && (
+          <>
+            <div><dt>asset</dt><dd>{resolved.evidence.assetRef}</dd></div>
+            <div><dt>from</dt><dd>{formatClock(resolved.evidence.startMs)} to {formatClock(resolved.evidence.endMs)} of the session</dd></div>
+            {resolved.evidence.assetRef.startsWith('mock://') && <div><dt>note</dt><dd>A mock reference: a label, not a recording.</dd></div>}
+          </>
+        )}
+      </dl>
+    </section>
+  );
+}

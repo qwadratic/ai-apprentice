@@ -1,9 +1,11 @@
 ---
 id: TASK-3.9
 title: Frontend deploy to GitHub Pages and VM API wiring
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@qwadratic'
 created_date: '2026-10-03 21:10'
+updated_date: '2026-10-04 02:04'
 labels:
   - stream-b
   - infra
