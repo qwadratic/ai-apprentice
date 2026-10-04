@@ -215,11 +215,13 @@ jobs:
       # Anthropic keys, ElevenLabs keys (sk_ + hex) and any api-key/xi-api-key assignment of a long literal.
       # A bare "api-key" grep would flag the app's own header-redaction code, so only assigned values count.
       # grep exits 1 on no match; 0 (a match) and 2 (an error, e.g. a PCRE limit) both fail the job.
+      # The step runs under bash -e, so grep's status is caught with ||. -R follows symlinks (the Pages
+      # artifact dereferences them) and -a scans files with NUL bytes too.
       - name: The published site carries no key-shaped values
         run: |
           set -uo pipefail
-          grep -rIlP 'sk-ant-[\w-]{20,}|\bsk_[a-f0-9]{40,}|(?i:api[_-]?key|xi-api-key|elevenlabs_api_key)["\x27]?\s*[:=]\s*["\x27][\w-]{20,}' "$SITE_DIR"
-          rc=$?
+          rc=0
+          grep -RalP 'sk-ant-[\w-]{20,}|sk_[a-fA-F0-9]{40,}|(?i:api[_-]?key|xi-api-key|elevenlabs_api_key)["\x27]?\s*[:=]\s*["\x27][\w-]{20,}' "$SITE_DIR" || rc=$?
           if [ $rc -eq 1 ]; then echo "No key-shaped values in $SITE_DIR"; exit 0; fi
           if [ $rc -eq 0 ]; then echo "::error::A key-shaped value is in the published site (files above)"; else echo "::error::The key scan failed (grep exit $rc)"; fi
           exit 1
