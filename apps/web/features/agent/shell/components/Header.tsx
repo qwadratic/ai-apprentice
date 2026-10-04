@@ -8,6 +8,12 @@ import { ToneMenu } from './ToneMenu.tsx';
 /** The latest macOS build, published by macos-build.yml on every push to main under one fixed release tag. */
 export const MAC_DOWNLOAD_URL = 'https://github.com/qwadratic/clipa/releases/download/clipa-macos-latest/Clipa.dmg';
 
+/** The Vite base path (`/clipa/` on Pages). Node tests render this file without import.meta.env, hence the fallback. */
+const BASE_URL: string = import.meta.env?.BASE_URL ?? '/';
+/** The submission videos, served from apps/web/public/videos. */
+export const DEMO_VIDEO_URL = `${BASE_URL}videos/clipa-demo.mp4`;
+export const TECH_VIDEO_URL = `${BASE_URL}videos/clipa-tech.mp4`;
+
 interface HeaderProps {
   debugOpen: boolean;
   onToggleDebug: () => void;
@@ -15,7 +21,7 @@ interface HeaderProps {
   headerRef?: Ref<HTMLElement>;
 }
 
-/** The header: the Clipa wordmark, the journey rail (the mode switcher), the macOS download, Off the record, Clipa's tone and Debug. */
+/** The header: the Clipa wordmark, the journey rail (the mode switcher), the macOS download, the two videos, the microphone, Clipa's tone and Debug. */
 export function Header({ debugOpen, onToggleDebug, headerRef }: HeaderProps) {
   const { controller } = useShell();
   const offRecord = useShellState((s) => s.offRecord);
@@ -33,6 +39,12 @@ export function Header({ debugOpen, onToggleDebug, headerRef }: HeaderProps) {
       <div className="as-header__tools">
         <a className="as-btn as-btn--link" href={MAC_DOWNLOAD_URL} title="Clipa for macOS: open the disk image and drag Clipa to Applications. Not notarized: on the first launch, System Settings > Privacy & Security > Open Anyway.">
           macOS app
+        </a>
+        <a className="as-btn as-btn--link" href={DEMO_VIDEO_URL} target="_blank" rel="noopener noreferrer">
+          Demo video
+        </a>
+        <a className="as-btn as-btn--link" href={TECH_VIDEO_URL} target="_blank" rel="noopener noreferrer">
+          Tech video
         </a>
         {offRecord ? (
           <button type="button" className="as-btn as-btn--off is-on" aria-pressed onClick={() => controller.backOnRecord()}>

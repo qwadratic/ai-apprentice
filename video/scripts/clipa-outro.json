@@ -1,0 +1,10 @@
+{
+  "durationSec": 5,
+  "headline": "Try it, or read the code",
+  "lines": ["Learn from the expert.", "Review the Work Map.", "Teach the new hire."],
+  "links": [
+    { "label": "Demo", "url": "https://qwadratic.github.io/ai-apprentice/" },
+    { "label": "Code", "url": "https://github.com/qwadratic/ai-apprentice" }
+  ],
+  "note": "All data in this video is synthetic. Off the record stops capture and voice; it does not recall data already sent."
+}

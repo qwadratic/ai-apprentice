@@ -1,0 +1,13 @@
+{
+  "description": "Sample walkthrough of the public demo: switch the modes, tick the synthetic sample observations, start Learn. Start Learn opens a real session on the backend of the URL; the recording stops right after and the session expires on its own.",
+  "url": "https://qwadratic.github.io/ai-apprentice/",
+  "permissions": ["microphone"],
+  "steps": [
+    { "do": "goto", "ready": { "role": "tab", "name": "Learn" }, "wait": 1400, "marker": "open" },
+    { "do": "click", "role": "tab", "name": "Review", "wait": 1200, "marker": "review" },
+    { "do": "click", "role": "tab", "name": "Teach", "wait": 1200, "marker": "teach" },
+    { "do": "click", "role": "tab", "name": "Learn", "wait": 800, "marker": "learn" },
+    { "do": "check", "byLabel": "Use sample observations", "wait": 1200, "marker": "sample" },
+    { "do": "click", "role": "button", "name": "Start Learn", "wait": 2200, "marker": "start" }
+  ]
+}
