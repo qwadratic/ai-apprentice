@@ -96,7 +96,7 @@ function makeLimiter(perMinute: number, perHour: number): (ip: string) => boolea
     return false;
   };
 }
-const deployLimited = makeLimiter(6, 30);
+const failedLimited = makeLimiter(6, 30); // requests with a missing or wrong signature
 
 // A valid signature is accepted once; replays inside the time window get 409.
 const seenSignatures = new Map<string, number>(); // signature hex -> expiry (ms)
@@ -184,13 +184,6 @@ const server = http.createServer(async (req, res) => {
       resBytes = send(res, 405, { ok: false, error: 'method_not_allowed' });
       return;
     }
-    if (deployLimited(clientIp(req))) {
-      code = 429;
-      req.resume();
-      res.setHeader('Retry-After', '60');
-      resBytes = send(res, 429, { ok: false, error: 'rate_limited' });
-      return;
-    }
     if (!SECRET) {
       code = 503;
       req.resume();
@@ -213,6 +206,14 @@ const server = http.createServer(async (req, res) => {
     const sigHeader = req.headers['x-deploy-signature'];
     const sig = signatureOk(raw, typeof sigHeader === 'string' ? sigHeader : undefined);
     if (!sig) {
+      // Only failed signatures spend the rate limit, so unsigned noise cannot
+      // block real deploys; valid ones are bounded by the ts window and replay check.
+      if (failedLimited(clientIp(req))) {
+        code = 429;
+        res.setHeader('Retry-After', '60');
+        resBytes = send(res, 429, { ok: false, error: 'rate_limited' });
+        return;
+      }
       code = 401;
       resBytes = send(res, 401, { ok: false, error: 'bad_signature' });
       return;

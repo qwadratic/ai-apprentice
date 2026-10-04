@@ -77,7 +77,7 @@ DSHA="$(echo "$b" | jq -r '.deployed_sha // empty' 2>/dev/null)"
 if [ -n "$WS" ] && [ -n "$DSHA" ] && command -v node >/dev/null; then
   body="$(jq -cn --arg sha "$DSHA" --argjson ts "$(date +%s)" '{sha: $sha, ts: $ts}')"
   sig="$(BODY="$body" WS="$WS" node -e 'process.stdout.write(require("crypto").createHmac("sha256", process.env.WS).update(process.env.BODY).digest("hex"))')"
-  r="$(curl -s -w ' %{http_code}' -X POST "$BASE/ops/deploy" -H 'Content-Type: application/json' -H "X-Deploy-Signature: sha256=$sig" --data-raw "$body")"; c="${r##* }"
+  r="$(curl -s -w ' %{http_code}' -X POST "$BASE/ops/deploy" -H 'Content-Type: application/octet-stream' -H "X-Deploy-Signature: sha256=$sig" --data-raw "$body")"; c="${r##* }"
   if [ "$c" = 202 ]; then
     state=""
     for _ in $(seq 30); do
@@ -89,7 +89,7 @@ if [ -n "$WS" ] && [ -n "$DSHA" ] && command -v node >/dev/null; then
   elif [ "$c" = 422 ]; then
     ok "signed request accepted by HMAC; ${DSHA:0:12} is not on origin/main -> 422"
   else ko "signed request -> $r"; fi
-  c="$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/ops/deploy" -H 'Content-Type: application/json' -H "X-Deploy-Signature: sha256=$sig" --data-raw "$body")"
+  c="$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/ops/deploy" -H 'Content-Type: application/octet-stream' -H "X-Deploy-Signature: sha256=$sig" --data-raw "$body")"
   [ "$c" = 409 ] && ok "replayed signature -> 409" || ko "replayed signature -> $c"
 else
   echo "SKIP  signed webhook test (needs DEPLOY_WEBHOOK_SECRET and node)"

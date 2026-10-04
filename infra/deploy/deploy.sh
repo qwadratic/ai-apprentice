@@ -16,11 +16,14 @@
 # A requested or published sha must be 40 hex characters and an ancestor of
 # origin/main; otherwise nothing happens (no fallback to main).
 #
-# Builds and restarts only what changed between the old and the new commit,
-# health-checks (/health and /ops/deploy/status through port 8000), and on
-# failure checks the old commit out again and exits 1. A sha that failed is
-# skipped until a new one comes or --force is given. Progress goes to
-# /var/lib/apprentice/deploy-status.json (GET /ops/deploy/status).
+# Builds and restarts only what changed between the last deployed commit
+# (/var/lib/apprentice/deployed-sha) and the new one, health-checks (/health
+# and /ops/deploy/status through port 8000), and on failure checks the last
+# deployed commit out again and exits 1. A sha that failed is skipped by manual
+# and timer runs until a new one comes or --force is given; a signed webhook
+# request for it is an explicit retry. Every install or build step has a
+# 10 min timeout. Progress goes to /var/lib/apprentice/deploy-status.json
+# (GET /ops/deploy/status).
 # systemd units, sudoers, install.sh and this script are never applied here:
 # when they change, the paths are logged with "run sudo infra/install.sh".
 # --force rebuilds and restarts everything; --build-only builds the current
@@ -33,6 +36,9 @@ DEPLOY_JSON_URL="${DEPLOY_JSON_URL:-https://qwadratic.github.io/ai-apprentice/de
 # Keep only what deploy needs; never hand secrets to install or build scripts.
 for v in ELEVENLABS_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY RUNNER_TOKEN API_TOKEN DEPLOY_WEBHOOK_SECRET; do unset "$v"; done
 export COREPACK_ENABLE_DOWNLOAD_PROMPT=0 CI=1
+# A stalled git transfer fails instead of hanging the deploy.
+export GIT_HTTP_LOW_SPEED_LIMIT=1000 GIT_HTTP_LOW_SPEED_TIME=30
+STEP_TIMEOUT=600 # seconds for each install or build step
 
 REPO=/opt/apprentice/repo
 STATE=/var/lib/apprentice
@@ -92,32 +98,34 @@ changed() { # from to paths...
 
 checkout() {
   # The checkout holds no data (that lives in /var/lib/apprentice). Untracked and
-  # ignored files go, except dependency and build dirs that are rebuilt when
-  # their sources change.
+  # ignored files go, except dependency dirs and build output, which are kept
+  # until their sources change and they are rebuilt.
   git checkout -q --detach --force "$1" &&
-    git clean -qfdx -e /node_modules -e /infra/claude-runner/node_modules -e /infra/claude-runner/dist
+    git clean -qfdx -e node_modules -e /infra/claude-runner/dist -e /apps/api/dist
 }
 
 # set -e is inactive inside `if`, `||` and `&&`, so every step returns explicitly.
 build_runner() {
   [ -f infra/claude-runner/package.json ] || return 0
   log "building infra/claude-runner (npm ci + tsc)"
-  (cd infra/claude-runner && npm ci --include=optional --no-fund --no-audit --loglevel=error && npm run -s build) || return 1
+  (cd infra/claude-runner && timeout $STEP_TIMEOUT npm ci --include=optional --no-fund --no-audit --loglevel=error &&
+    timeout $STEP_TIMEOUT npm run -s build) || return 1
 }
 
 build_api() {
   local pm=npm
+  rm -rf apps/api/dist # kept by git clean; rebuilt here or gone
   if [ -f pnpm-lock.yaml ]; then
     log "pnpm install --frozen-lockfile"
-    pnpm install --frozen-lockfile || return 1
+    timeout $STEP_TIMEOUT pnpm install --frozen-lockfile || return 1
     pm=pnpm
   elif [ -f package-lock.json ]; then
     log "npm ci"
-    npm ci --no-fund --no-audit || return 1
+    timeout $STEP_TIMEOUT npm ci --no-fund --no-audit || return 1
   fi
   if [ -f apps/api/package.json ] && jq -e '.scripts.build' apps/api/package.json >/dev/null; then
     log "building apps/api with $pm"
-    (cd apps/api && "$pm" run build) || return 1
+    (cd apps/api && timeout $STEP_TIMEOUT "$pm" run build) || return 1
   fi
   # The placeholder and ops run on Node's type stripping; they need an install
   # only if they ever get runtime dependencies.
@@ -125,7 +133,7 @@ build_api() {
   for p in infra/placeholder-api infra/ops; do
     if [ -f $p/package.json ] && jq -e '(.dependencies // {}) | length > 0' $p/package.json >/dev/null; then
       log "installing $p runtime dependencies"
-      (cd $p && npm ci --omit=dev --no-fund --no-audit --loglevel=error) || return 1
+      (cd $p && timeout $STEP_TIMEOUT npm ci --omit=dev --no-fund --no-audit --loglevel=error) || return 1
     fi
   done
   return 0
@@ -134,14 +142,15 @@ build_api() {
 RESTART_RUNNER=0
 RESTART_API=0
 RESTART_OPS=0
+FULL=$FORCE # rebuild and restart everything
 build_changed() { # from to; decides what to rebuild and restart
   local from=$1 to=$2
   RESTART_RUNNER=0
   RESTART_API=0
   RESTART_OPS=0
-  if [ $FORCE = 1 ] || changed "$from" "$to" "${RUNNER_PATHS[@]}" || [ ! -f infra/claude-runner/dist/server.js ]; then RESTART_RUNNER=1; fi
-  if [ $FORCE = 1 ] || changed "$from" "$to" "${API_PATHS[@]}"; then RESTART_API=1; fi
-  if [ $FORCE = 1 ] || changed "$from" "$to" "${OPS_PATHS[@]}"; then RESTART_OPS=1; fi
+  if [ $FULL = 1 ] || changed "$from" "$to" "${RUNNER_PATHS[@]}" || [ ! -f infra/claude-runner/dist/server.js ]; then RESTART_RUNNER=1; fi
+  if [ $FULL = 1 ] || changed "$from" "$to" "${API_PATHS[@]}"; then RESTART_API=1; fi
+  if [ $FULL = 1 ] || changed "$from" "$to" "${OPS_PATHS[@]}"; then RESTART_OPS=1; fi
   if [ $RESTART_RUNNER = 1 ]; then build_runner || return 1; fi
   if [ $RESTART_API = 1 ] || [ $RESTART_OPS = 1 ]; then build_api || return 1; fi
   return 0
@@ -222,15 +231,24 @@ select_sha() {
 
 # One deploy of $new. Returns 0 when deployed or nothing to do, 1 on failure.
 deploy_once() {
-  local old manual
-  old="$(git rev-parse HEAD)"
+  local old head deployed manual
+  # The base is the last sha that passed its health check, not HEAD: an
+  # interrupted deploy leaves HEAD on an unproven commit.
+  head="$(git rev-parse HEAD)"
+  deployed="$(cat "$DEPLOYED_FILE" 2>/dev/null || true)"
+  if [[ "$deployed" =~ ^[0-9a-f]{40}$ ]] && git cat-file -e "$deployed^{commit}" 2>/dev/null; then old="$deployed"; else old="$head"; fi
+  FULL=$FORCE
   STARTED_AT="$(now)"
-  if [ "$old" = "$new" ] && [ $FORCE = 0 ]; then
+  if [ "$old" = "$new" ] && [ "$head" = "$new" ] && [ $FORCE = 0 ]; then
     [ "$DEPLOY_SOURCE" = request ] && write_status ok "already deployed" "$(now)"
     return 0
   fi
-  if [ $FORCE = 0 ] && [ "$(cat "$FAILED_FILE" 2>/dev/null)" = "$new" ]; then
-    [ "$DEPLOY_SOURCE" = request ] && write_status failed "skipped: this sha failed before; push a fix or deploy with --force" "$(now)"
+  if [ "$head" != "$old" ]; then
+    log "checkout is at ${head:0:12}, last deployed ${old:0:12}: full rebuild"
+    FULL=1
+  fi
+  # A signed webhook request is an explicit retry of a failed sha.
+  if [ $FORCE = 0 ] && [ "$DEPLOY_SOURCE" != request ] && [ "$(cat "$FAILED_FILE" 2>/dev/null)" = "$new" ]; then
     return 0
   fi
   log "deploying ($DEPLOY_SOURCE) ${old:0:12} -> ${new:0:12}"

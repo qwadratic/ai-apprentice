@@ -11,5 +11,7 @@ Group=apprentice
 # NoNewPrivileges must stay off: deploy.sh restarts the units through sudo.
 EnvironmentFile=/etc/apprentice/env
 ExecStart=/opt/apprentice/bin/apprentice-deploy --request
+# Longer than the 15 min lock wait plus one deploy (each step has a 10 min timeout).
+TimeoutStartSec=30min
 StandardOutput=journal
 StandardError=journal

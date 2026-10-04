@@ -75,24 +75,25 @@ The token goes only into the environment of that one command and into a 0600 hea
 
 1. `release.yml` checks `main`; if green and not frozen it publishes the site (and `deploy.json`) to Pages and then calls the deploy webhook with the same sha, polling `GET /ops/deploy/status` until `ok`, `failed` or `rolled_back`, so the result shows in the Actions UI.
 2. **Webhook** (`infra/ops`, `apprentice-ops.service`, 127.0.0.1:8788; the public API forwards `/ops/*` to it with the raw body):
-   - `POST /ops/deploy` with body `{"sha": "<40 hex>", "ts": <unix seconds>}` and header `X-Deploy-Signature: sha256=<hex HMAC-SHA256(DEPLOY_WEBHOOK_SECRET, raw body)>`. Checks, in order: rate limit 6/min per IP and 30/h overall (429), secret configured (503), body ≤ 1 KiB (413), signature, compared timing-safe (401 `bad_signature`), body shape (400), `ts` not older than 300 s nor more than 60 s ahead (401 `timestamp_out_of_window`), the same signature not seen before (409 `replayed`), sha an ancestor of `origin/main` after a fetch (422 `not_on_main`). Then it writes `/var/lib/apprentice/deploy-request.json` and `deploy-status.json` (`queued`) and answers **202** `{accepted: true, sha}`. Bodies and signatures are never logged.
+   - `POST /ops/deploy` with body `{"sha": "<40 hex>", "ts": <unix seconds>}` and header `X-Deploy-Signature: sha256=<hex HMAC-SHA256(DEPLOY_WEBHOOK_SECRET, raw body)>`. Checks, in order: secret configured (503), body ≤ 1 KiB (413), signature, compared timing-safe (401 `bad_signature`; only failed signatures count against the rate limit of 6/min per IP and 30/h overall, 429, so unsigned noise cannot block real deploys), body shape (400), `ts` not older than 300 s nor more than 60 s ahead (401 `timestamp_out_of_window`), the same signature not seen before (409 `replayed`), sha an ancestor of `origin/main` after a fetch (422 `not_on_main`). Then it writes `/var/lib/apprentice/deploy-request.json` and `deploy-status.json` (`queued`) and answers **202** `{accepted: true, sha}`. Bodies and signatures are never logged.
    - `GET /ops/deploy/status` (public, no secrets) → `{deployed_sha, last: {sha, state: queued|running|ok|failed|rolled_back, source, started_at, finished_at, message}}`.
    - Signing in a workflow (the body string must be sent byte for byte as signed):
      ```bash
      body=$(jq -cn --arg sha "$GITHUB_SHA" --argjson ts "$(date +%s)" '{sha: $sha, ts: $ts}')
      sig=$(BODY="$body" node -e 'process.stdout.write(require("crypto").createHmac("sha256", process.env.DEPLOY_WEBHOOK_SECRET).update(process.env.BODY).digest("hex"))')
-     curl -fsS -X POST https://apprentice.exe.xyz/ops/deploy -H 'Content-Type: application/json' -H "X-Deploy-Signature: sha256=$sig" --data-raw "$body"
+     curl -fsS -X POST https://apprentice.exe.xyz/ops/deploy -H 'Content-Type: application/octet-stream' -H "X-Deploy-Signature: sha256=$sig" --data-raw "$body"
      ```
 3. `apprentice-deploy-request.path` sees the request file change and starts `apprentice-deploy-request.service` (`apprentice-deploy --request`, as `apprentice`, no sudo needed by the webhook). It waits for a running deploy (lock), checks the sha again (40 hex, on `origin/main`), and after finishing looks once more in case a newer request arrived meanwhile.
 4. The deploy:
    - logs changed install-managed paths (`infra/systemd`, `infra/install.sh`, `infra/deploy`) with `run sudo infra/install.sh` and never applies them;
-   - checks the sha out detached and runs `git clean -fdx`. Only `node_modules` at the root and the runner's `node_modules` and `dist` survive, and they are rebuilt when their sources change;
+   - checks the sha out detached and runs `git clean -fdx`, keeping every `node_modules`, the runner's `dist` and `apps/api/dist`; those are rebuilt (dist removed first) when their sources change;
    - rebuilds only what changed: the runner (`npm ci` + `tsc`) when `infra/claude-runner` or `start-runner.sh` changed, and the API side when `apps/`, `packages/`, `infra/placeholder-api`, `start-api.sh` or a root package or lockfile changed. The API side means the root install by lockfile and the `apps/api` build; the placeholder and ops need nothing, since they have no runtime dependencies;
    - restarts only those services (`infra/ops` changes restart `apprentice-ops`);
    - health-checks for 30 s: `/health` must say `ok: true` **and** `/ops/deploy/status` must answer through port 8000, so an API that stops forwarding `/ops/*` is rolled back;
    - records the sha in `/var/lib/apprentice/deployed-sha`.
 5. Progress goes to `deploy-status.json` (`running`, then `ok`, `rolled_back` or `failed`). A request for the deployed sha ends as `ok` / `already deployed`.
-6. On failure it checks the old sha out, rebuilds what differs, restarts, and records the failed sha, which is skipped (status `failed`, `skipped: ...`) until a new sha comes or `--force` is given.
+6. The base for diffs, "already deployed" and rollback is the last sha that passed its health check (`deployed-sha`), not HEAD; if HEAD differs (an interrupted deploy), everything is rebuilt. Every install or build step has a 10 min timeout, git transfers fail when stalled for 30 s, and the deploy services have a 30 min start timeout.
+7. On failure it checks the last deployed sha out, rebuilds what differs, restarts, and records the failed sha. Manual and timer runs skip it until a new sha comes or `--force` is given; a signed webhook request for it is an explicit retry.
 
 Other sources, for manual use: `sudo systemctl start apprentice-deploy.service` deploys from `DEPLOY_SOURCE` (`pages`: the sha in `deploy.json`; `ref`: `origin/$DEPLOY_REF`); the optional minute timer runs that same service. A backlog-only or docs-only release moves the checkout and `deployed_sha` but restarts nothing. `apprentice-api` keeps answering `/health` with `runner:"down"` when the runner is down, so a missing Claude credential does not block deploys.
 
