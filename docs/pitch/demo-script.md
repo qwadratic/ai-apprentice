@@ -73,6 +73,7 @@ The workspace is the proven path, not a limit. On a Mac, the same journey runs o
 ## If something goes wrong
 
 - **No question within 25 s:** make the change again, slower, then stop. If she still says nothing, answer as if asked. The map is built from your words too.
+- **Reflect shows "Demo session (synthetic)" with Lumen's payment terms:** Show built no map, so Reflect fell back to the seeded demo map of the real-apps story (`apps/api/agent/conductor/demo-map.ts`). Go back to Show and redo steps 2–4.
 - **Clipa asks her own follow-ups or talks around her questions:** the ElevenLabs agents still run the older prompts. Ivan updates them on the VM (`node set-prompt.ts --role interviewer`, then `--role tutor`, from `apps/api/agent/elevenlabs/` with `/etc/apprentice/env` loaded; see the script's header). The script backs up the live prompt first; `--dry` shows only sizes.
 - **"Voice is not available, daily call limit":** the limit on the ElevenLabs agent was raised to 1000; end the session and start again.
 - **Page error "Cannot reach apprentice.exe.xyz":** a deploy is restarting the API. Wait about 90 s and reload.
