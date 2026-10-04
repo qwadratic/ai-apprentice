@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@kigulx'
 created_date: '2026-10-04 06:39'
-updated_date: '2026-10-04 07:11'
+updated_date: '2026-10-04 07:21'
 labels:
   - stream-a
   - shared
@@ -56,6 +56,8 @@ Use only available screen evidence or already authorised metadata. Never require
 
 <!-- SECTION:PLAN:BEGIN -->
 1. Implement an independent screen-owned baseline profile module for the three requested workflows, keeping app identity separate from workflow and learned process identity. 2. Require stable observed app identity, suspend context immediately for unknown or ambiguous frames, and test switching and scope isolation. 3. Agree the B-owned integration seam with TASK-3.53 before connecting question and Review context; retain profile/evidence identity without promoting baseline guidance to expert knowledge. 4. Verify focused tests and typecheck, document real Google rehearsal and current in-memory storage limits, and deliver a separate PR.
+
+5. User explicitly reassigned live integration to A after PR59 merged: connect selector and validated baselineContext to conductor questions; clear stale app context, retain profile/evidence provenance in existing Review maps, and verify with Astra medium agents.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -66,4 +68,6 @@ Started the independent profile module while TASK-3.52 integration is pending; t
 Independent baseline catalog/selector implemented with 10 passing focused tests: stable two-observation recognition, exact app names, immediate suspension on unknown/ambiguous/switching frames, immutable bounded evidence and explicitly unlearned workflow context. B merged generic vision as PR #57 at 155c573; A will not duplicate it. User reports B is resolving the overlap, so conductor/LLM/Review integration is held for agreed handoff. README documents the precise seam and live rehearsal. No claim that the module is live or that TASK-2.6 acceptance criteria are complete.
 
 User explicitly clarified that B owns live conductor integration and A should hand off the ready module only. Exports are BaselineProfileSelector, baselinePromptContext and strict parseBaselinePromptContext. Focused module suite is now 13/13 passing; independent review found no blocking issues. A full npm run check passed before the final parser-only addition; final focused tests and root typecheck passed after it. No B-owned files changed. Follow the module README for the exact remaining live/Review seam; keep task In Progress.
+
+User now explicitly requests A to finish live integration instead of B, using Astra medium subagents. Starting from current origin/main efc1c6e after merged PR59, in isolated codex/task-2.6-live-baselines branch. No duplicate catalog or process recognizer.
 <!-- SECTION:NOTES:END -->

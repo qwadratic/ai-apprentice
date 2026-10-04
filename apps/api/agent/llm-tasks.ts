@@ -1,5 +1,7 @@
 // The fixed set of LLM tasks behind POST /api/agent/llm/:task. Prompts, JSON schemas and output validation live
 // here (and in ./prompts), never in the browser: it sends typed input only, so the route is not a free chatbot.
+import type { BaselineAppId, BaselineProfileId, BaselinePromptContext } from '../../../packages/screen/baseline/profiles.ts';
+import { parseBaselinePromptContext } from '../../../packages/screen/baseline/profiles.ts';
 import type { Json } from './config.ts';
 import { isRecord } from './config.ts';
 import { system as answerExtractionSystem } from './prompts/answer-extraction.ts';
@@ -333,7 +335,7 @@ const genericQuestion: LlmTask = {
   maxInputBytes: 32 * 1024,
   fast: true,
   prepare(body) {
-    if (!isRecord(body) || !onlyKeys(body, ['observations', 'transcript', 'asked', 'language'])) return fail('body');
+    if (!isRecord(body) || !onlyKeys(body, ['observations', 'transcript', 'asked', 'language', 'baselineContext'])) return fail('body');
     const observations = parseObservations(body.observations, 'observations', 8); if (!observations.ok) return observations;
     const transcript = parseTranscript(body.transcript ?? [], 'transcript', 16); if (!transcript.ok) return transcript;
     const asked = textList(body.asked ?? [], 'asked', 20, 300); if (!asked.ok) return asked;
@@ -341,7 +343,19 @@ const genericQuestion: LlmTask = {
     const obs = observations.value;
     const obsIds = obs.map((o) => o.id);
     const regionIds = regionIdsOf(obs);
-    const input = { observations: obs, transcript: transcript.value, asked: asked.value, language: lang.value };
+    let baselineContext: BaselinePromptContext | null;
+    try { baselineContext = parseBaselinePromptContext(body.baselineContext); }
+    catch { return fail('baselineContext'); }
+    if (baselineContext && !baselineContext.evidence.observationIds.every((oid) => obsIds.includes(oid))) {
+      return fail('baselineContext.evidence.observationIds');
+    }
+    // Asset references are retained by the server; these observation inputs cannot validate them.
+    const baseline = baselineContext === null ? null : {
+      ...baselineContext,
+      evidence: { observationIds: baselineContext.evidence.observationIds },
+    };
+    const input = { observations: obs, transcript: transcript.value, asked: asked.value, language: lang.value,
+      ...(baseline === null ? {} : { baselineContext: baseline }) };
     const schema: Json = {
       type: 'object', additionalProperties: false, required: ['question', 'topic', 'observationIds', 'regionIds'],
       properties: { question: nullable(STRING), topic: { type: 'string', enum: [...GENERIC_TOPICS] }, observationIds: idEnum(obsIds), regionIds: idEnum(regionIds) },
@@ -372,7 +386,12 @@ export interface GenericProcess { id: string; title: string; summary: string }
 export interface GenericStep { id: string; processId: string | null; kind: 'action' | 'judgment'; goal: string; action: string; decision: GenericDecision | null; evidenceIds: string[] }
 export interface GenericGuardrail { id: string; processId: string | null; condition: string; requiredAction: string; reason: string | null; quote: string | null; quoteAtMs: number | null; escalateTo: string | null; exceptions: string[]; evidenceIds: string[] }
 export interface GenericGap { question: string; targetId: string | null; evidenceIds: string[]; regionIds: string[] }
-export interface MapSynthesisOutput { processes: GenericProcess[]; steps: GenericStep[]; guardrails: GenericGuardrail[]; gaps: GenericGap[]; teachBack: string }
+/** Server-generated provenance, separate from the model's learned process and rule output. */
+export interface BaselineProvenance {
+  observations: Array<{ observationId: string; appId: BaselineAppId | null; profileId: BaselineProfileId | null; evidenceIds: string[] }>;
+  turns: Array<{ atMs: number; appId: BaselineAppId | null; profileId: BaselineProfileId | null; observationIds: string[]; evidenceIds: string[]; questionId: string | null }>;
+}
+export interface MapSynthesisOutput { processes: GenericProcess[]; steps: GenericStep[]; guardrails: GenericGuardrail[]; gaps: GenericGap[]; teachBack: string; baselineProvenance?: BaselineProvenance }
 
 const PROCESS_KEYS = ['id', 'title', 'summary'] as const;
 const STEP_KEYS = ['id', 'processId', 'kind', 'goal', 'action', 'decision', 'evidenceIds'] as const;
