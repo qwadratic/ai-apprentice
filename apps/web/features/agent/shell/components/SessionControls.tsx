@@ -45,6 +45,7 @@ export function SessionControls() {
           <button
             type="button"
             className="as-btn as-btn--primary"
+            data-clipa-target="start"
             disabled={offRecord || busy}
             onClick={() => void controller.start(mode)}
           >

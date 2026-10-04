@@ -58,10 +58,21 @@ const hello = (client: 'web' | 'macos', persona: 'expert' | 'new_hire' = 'expert
   ({ type: 'hello', client, version: '1', persona, language: null, mapFrom });
 const QUESTION = { question: 'You changed the recipient field. Who is it for?', topic: 'scope', observationIds: ['o2'], regionIds: ['r-to'] };
 
-test('web: hello guides the persona to share; capturing points at Start', async () => {
+test('web: hello points at Start; once a stage runs without a shared screen, Clipa asks to share it', async () => {
   const r = rig({});
   await r.send(hello('web'));
   assert.deepEqual(cueOf(r.cues, 'guide').map((g) => g.step), ['welcome']);
+  const welcome = cueOf(r.cues, 'guide')[0];
+  assert.ok(welcome?.target?.kind === 'ui' && welcome.target.name === 'start');
+  await r.send({ type: 'session', mode: 'learn', live: true, reason: null });
+  assert.equal(cueOf(r.cues, 'guide').at(-1)?.step, 'share_now');
+  await r.send({ type: 'share', state: 'capturing', reason: null });
+  assert.equal(cueOf(r.cues, 'guide').at(-1)?.step, 'work');
+});
+
+test('web: sharing before Start points at Start', async () => {
+  const r = rig({});
+  await r.send(hello('web'));
   assert.equal(of(r.cues, 'presence').length, 0, 'presence is for the macOS face only');
   await r.send({ type: 'share', state: 'capturing', reason: null });
   const guide = cueOf(r.cues, 'guide').at(-1);
