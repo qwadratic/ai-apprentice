@@ -17,7 +17,7 @@
     "dev:api": "npm run dev --workspace @apprentice/api",
     "typecheck": "tsc --noEmit -p tsconfig.json && npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present && npm run test:screen",
-    "test:screen": "node --test 'packages/screen/capture/tests/*.test.mjs' 'packages/screen/vision/*.test.mjs' 'apps/api/screen/*.test.mjs'",
+    "test:screen": "node scripts/test-screen.ts",
     "build": "npm run build --workspace @apprentice/contracts && npm run build --workspace @apprentice/api && npm run build --workspace @apprentice/web",
     "check": "npm run typecheck && npm test && npm run build",
     "predev": "npm run build --workspace @apprentice/contracts",
