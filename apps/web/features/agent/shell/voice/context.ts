@@ -1,5 +1,7 @@
 // What the shell says to the voice agent besides the question itself.
 import type { ScreenObservation } from '@apprentice/contracts';
+import { isScreenActivity, screenActivityLine, screenActivitySummary } from '../brain/generic.ts';
+import type { ScreenActivityObservation } from '../brain/generic.ts';
 
 const MAX_QUESTION_CHARS = 400;
 
@@ -33,6 +35,8 @@ export function observationToContext(o: ScreenObservation, synthetic = false): s
 }
 
 function plainContext(o: ScreenObservation): string | null {
+  // Generic mode: the 4th kind (not in the contracts yet), one line per screen moment.
+  if (isScreenActivity(o as { kind: string })) return screenActivityLine((o as unknown as ScreenActivityObservation).facts);
   switch (o.kind) {
     case 'order_view': {
       const f = o.facts;
@@ -57,6 +61,7 @@ function plainContext(o: ScreenObservation): string | null {
 
 /** A short, human line for the observation list. */
 export function summarizeObservation(o: ScreenObservation): string {
+  if (isScreenActivity(o as { kind: string })) return screenActivitySummary((o as unknown as ScreenActivityObservation).facts);
   switch (o.kind) {
     case 'order_view': return `Order ${show(o.facts.orderId, '?')} · ${show(o.facts.customerRef, 'unknown customer')}`;
     case 'email_draft': return `Email to ${show(o.facts.recipientRef, 'unknown')} · ${o.facts.previewState} · ${o.facts.attachments.length} attachment(s)`;
