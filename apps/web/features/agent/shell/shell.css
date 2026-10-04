@@ -67,33 +67,211 @@
   outline-offset: 2px;
 }
 
-/* ---- Header, tabs, status ------------------------------------------------ */
+/* ---- Header: logo, journey rail, tools ---------------------------------------- */
 .apprentice-shell .as-header {
   position: sticky;
   top: 0;
   z-index: 5;
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: "brand rail tools";
   align-items: center;
-  gap: 10px 16px;
-  padding: 10px 16px;
+  gap: 6px 20px;
+  padding: 8px 20px 6px;
   background: var(--as-surface);
   border-bottom: 1px solid var(--as-border);
 }
-.apprentice-shell .as-brand { display: flex; flex-direction: column; min-width: 0; margin-right: auto; }
-.apprentice-shell .as-brand__name { font-weight: 700; font-size: 1.1rem; letter-spacing: 0.01em; }
+.apprentice-shell .as-brand { grid-area: brand; display: flex; align-items: center; min-width: 0; }
 .apprentice-shell .as-logo { display: inline-flex; align-items: center; }
-.apprentice-shell .as-logo svg { display: block; flex: none; }
-.apprentice-shell .as-brand__sub { color: var(--as-muted); font-size: 0.82rem; }
+.apprentice-shell .as-logo svg { display: block; flex: none; height: 64px; width: auto; }
+.apprentice-shell .as-header__tools { grid-area: tools; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
 
-.apprentice-shell .as-tabs {
-  display: inline-flex;
-  padding: 3px;
-  gap: 2px;
-  background: var(--as-surface-2);
+/* Visible to screen readers only. */
+.apprentice-shell .as-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ---- Journey rail: Show, Reflect, Pass it on on one teal wire -------------------------
+   The wire is the material of Clipa and the logo: outline, body, shade and highlight. Each stage draws the wire to
+   the next one (::after, under the nodes); it is lit once the stage is done and flows while the stage runs. Clipa
+   herself (the director's layer) rests on the seat of the selected stage, which carries data-clipa-dock. */
+.apprentice-shell .as-rail {
+  grid-area: rail;
+  justify-self: center;
+  width: min(100%, 760px);
+  min-width: 0;
+  --as-seat: 56px;
+  --as-node: 30px;
+  --wire-outline: #0b5d56;
+  --wire-body: #17b3a3;
+  --wire-shade: #0f9585;
+  --wire-hi: #a3f2e7;
+  --wire-dim-outline: #9fb3ae;
+  --wire-dim-body: #d3dfdc;
+  --wire-dim-hi: #f2f7f6;
+}
+@media (prefers-color-scheme: dark) {
+  .apprentice-shell .as-rail {
+    --wire-dim-outline: #44605c;
+    --wire-dim-body: #2b3d3b;
+    --wire-dim-hi: #3f5552;
+  }
+}
+.apprentice-shell .as-rail__track {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
+}
+.apprentice-shell .as-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  min-width: 0;
+  padding: 0 6px 4px;
+  font: inherit;
+  color: var(--as-text);
+  text-align: center;
+  background: transparent;
+  border: 0;
+  border-radius: 12px;
+  cursor: pointer;
+}
+.apprentice-shell .as-stage:focus-visible { outline: 3px solid var(--as-focus); outline-offset: 2px; }
+/* The wire from this stage's node to the next one's. */
+.apprentice-shell .as-stage[data-wire]::after {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  top: calc(var(--as-seat) / 2 - 3.5px);
+  left: 50%;
+  width: 100%;
+  height: 7px;
+  border-radius: 4px;
+  pointer-events: none;
+  background: linear-gradient(to bottom, var(--wire-dim-hi) 0 2px, var(--wire-dim-body) 2px 7px);
+  box-shadow: 0 0 0 1.5px var(--wire-dim-outline);
+  transition: background 0.3s ease, box-shadow 0.3s ease;
+}
+.apprentice-shell .as-stage[data-wire="lit"]::after {
+  background: linear-gradient(to bottom, var(--wire-hi) 0 2px, var(--wire-body) 2px 5px, var(--wire-shade) 5px 7px);
+  box-shadow: 0 0 0 1.5px var(--wire-outline);
+}
+.apprentice-shell .as-stage[data-wire="live"]::after {
+  background:
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.5) 0 2px, transparent 2px 5px, rgba(0, 0, 0, 0.14) 5px 7px),
+    repeating-linear-gradient(90deg, var(--wire-body) 0 14px, var(--wire-hi) 14px 20px);
+  box-shadow: 0 0 0 1.5px var(--wire-outline);
+  animation: as-wire-flow 1.2s linear infinite;
+}
+@keyframes as-wire-flow { to { background-position: 0 0, 20px 0; } }
+
+.apprentice-shell .as-stage__seat { display: flex; align-items: center; justify-content: center; width: 100%; height: var(--as-seat); }
+.apprentice-shell .as-stage__node {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: var(--as-node);
+  height: var(--as-node);
+  border-radius: 50%;
+  background: var(--as-surface);
+  border: 4px solid var(--wire-dim-body);
+  box-shadow: 0 0 0 1.5px var(--wire-dim-outline), inset 0 0 0 1.5px var(--wire-dim-outline);
+  transition: width 0.25s ease, height 0.25s ease, background-color 0.25s ease;
+}
+.apprentice-shell .as-stage__mark { font-size: 0.78rem; font-weight: 800; line-height: 1; color: var(--as-muted); }
+.apprentice-shell .as-stage[data-status="done"] .as-stage__node,
+.apprentice-shell .as-stage[data-status="active"] .as-stage__node,
+.apprentice-shell .as-stage[data-status="next"] .as-stage__node {
+  border-color: var(--wire-body);
+  box-shadow: 0 0 0 1.5px var(--wire-outline), inset 0 0 0 1.5px var(--wire-outline);
+}
+.apprentice-shell .as-stage[data-status="done"] .as-stage__node { background: var(--wire-body); }
+.apprentice-shell .as-stage[data-status="done"] .as-stage__mark { color: #04201d; }
+.apprentice-shell .as-stage[data-status="next"] .as-stage__node { animation: as-node-invite 2.4s ease-in-out infinite; }
+@keyframes as-node-invite {
+  0%, 100% { box-shadow: 0 0 0 1.5px var(--wire-outline), inset 0 0 0 1.5px var(--wire-outline), 0 0 0 0 rgba(23, 179, 163, 0.45); }
+  50% { box-shadow: 0 0 0 1.5px var(--wire-outline), inset 0 0 0 1.5px var(--wire-outline), 0 0 0 8px rgba(23, 179, 163, 0); }
+}
+/* The selected stage: an empty seat on the wire. Clipa sits here; while she is out, the dashed ring keeps her place. */
+.apprentice-shell .as-stage[aria-selected="true"] .as-stage__node {
+  width: var(--as-seat);
+  height: var(--as-seat);
+  background: radial-gradient(circle, var(--as-accent-soft) 0 58%, transparent 60%);
+  border: 2px dashed var(--wire-body);
+  box-shadow: none;
+  animation: none;
+}
+.apprentice-shell .as-stage[aria-selected="true"] .as-stage__mark { opacity: 0; }
+
+.apprentice-shell .as-stage__name { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; font-size: 1rem; line-height: 1.2; }
+.apprentice-shell .as-stage__hint { max-width: 24ch; color: var(--as-muted); font-size: 0.78rem; line-height: 1.25; }
+.apprentice-shell .as-stage[aria-selected="true"] .as-stage__name { color: var(--as-accent); }
+.apprentice-shell .as-stage:hover .as-stage__name { text-decoration: underline; text-underline-offset: 3px; }
+.apprentice-shell .as-stage__live {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--as-bad);
+  color: #ffffff;
+  font-size: 0.66rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.apprentice-shell .as-rail__caption {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+  margin: 2px 0 0;
+  min-width: 0;
+  color: var(--as-muted);
+  font-size: 0.86rem;
+}
+.apprentice-shell .as-rail__who { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; color: var(--as-text); white-space: nowrap; }
+.apprentice-shell .as-rail__state { font-weight: 400; color: var(--as-muted); }
+.apprentice-shell .as-rail__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--wire-body); flex: none; }
+.apprentice-shell .as-rail__caption[data-clipa-state="warning"] .as-rail__dot { background: var(--as-warn); }
+.apprentice-shell .as-rail__caption[data-clipa-state="off"] .as-rail__dot { background: var(--as-muted); }
+.apprentice-shell .as-rail__line {
+  min-width: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+}
+
+/* ---- Small menu (Clipa's tone) -------------------------------------------- */
+.apprentice-shell .as-menu { position: relative; }
+.apprentice-shell .as-menu__button { list-style: none; display: inline-flex; align-items: center; gap: 4px; }
+.apprentice-shell .as-menu__button::-webkit-details-marker { display: none; }
+.apprentice-shell .as-menu__button::after { content: '\25BE'; font-size: 0.8em; color: var(--as-muted); }
+.apprentice-shell .as-menu__button:focus-visible { outline: 3px solid var(--as-focus); outline-offset: 2px; }
+.apprentice-shell .as-menu__panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 7;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 32px));
+  padding: 10px 12px;
+  background: var(--as-surface);
   border: 1px solid var(--as-border);
   border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.16);
 }
+
+/* ---- Tabs (debug drawer), fields, buttons, status -------------------------- */
 .apprentice-shell .as-tab {
   font: inherit;
   color: var(--as-text);
@@ -106,9 +284,6 @@
 }
 .apprentice-shell .as-tab[aria-selected='true'] { background: var(--as-accent); color: var(--as-accent-text); font-weight: 600; }
 .apprentice-shell .as-tab--small { padding: 4px 10px; min-height: 30px; font-size: 0.9rem; }
-.apprentice-shell .as-tab__live { font-size: 0.7em; vertical-align: middle; }
-
-.apprentice-shell .as-header__tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
 .apprentice-shell .as-field { display: flex; flex-direction: column; gap: 4px; }
 .apprentice-shell .as-field--inline { flex-direction: row; align-items: center; gap: 6px; }
@@ -184,7 +359,7 @@
 .apprentice-shell .as-banner--error { background: var(--as-bad-soft); border-color: var(--as-bad); }
 .apprentice-shell .as-banner--warn { background: var(--as-warn-soft); border-color: var(--as-warn); }
 
-/* ---- Layout --------------------------------------------------------------- */
+/* ---- Stage canvas ------------------------------------------------------------- */
 .apprentice-shell .as-main {
   flex: 1;
   display: grid;
@@ -195,23 +370,31 @@
 }
 .apprentice-shell .as-left,
 .apprentice-shell .as-right { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-.apprentice-shell .as-right { position: sticky; top: 76px; max-height: calc(100vh - 92px); overflow: auto; padding-right: 2px; }
+.apprentice-shell .as-right {
+  position: sticky;
+  top: calc(var(--as-header-h, 120px) + 12px);
+  max-height: calc(100vh - var(--as-header-h, 120px) - 24px);
+  overflow: auto;
+  padding-right: 2px;
+}
 
-/* Each mode has its own layout. Every slot stays mounted (A's screen and workspace roots must survive a switch):
-   modes only hide or reorder. Learn records: screen and workspace lead. Review is a knowledge view: the mode view
-   is wide, Clipa and the session sit beside it, and the screen and workspace are hidden. Teach puts the new hire's
-   case first and the screen preview under it. */
+/* Each stage shapes the canvas around its main object. Every slot stays mounted (A's screen and workspace roots must
+   survive a switch): stages only resize, hide or reorder.
+   Show: the shared screen leads, large; the questions and the session sit in a narrow column beside it.
+   Reflect: the Work Map board takes the width; the session and the replay sit beside it; screen and workspace are hidden.
+   Pass it on: the new hire's case first, then the screen; the tutor's warnings and the session beside them. */
+.apprentice-shell .as-main[data-mode="learn"] { grid-template-columns: minmax(0, 7fr) minmax(280px, 3fr); }
 .apprentice-shell .as-main[data-mode="review"] { grid-template-columns: minmax(0, 1fr); }
 .apprentice-shell .as-main[data-mode="review"] .as-left { display: none; }
 .apprentice-shell .as-main[data-mode="review"] .as-right {
   position: static; max-height: none; overflow: visible; padding-right: 0;
-  display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); align-items: start;
-  grid-template-areas: "mode clipa" "mode session" "mode replay";
+  display: grid; grid-template-columns: minmax(0, 3fr) minmax(260px, 1fr); align-items: start;
+  grid-template-areas: "mode session" "mode replay";
 }
 .apprentice-shell .as-main[data-mode="review"] .as-mode { grid-area: mode; }
-.apprentice-shell .as-main[data-mode="review"] .as-clipa-card { grid-area: clipa; }
 .apprentice-shell .as-main[data-mode="review"] .as-session { grid-area: session; }
 .apprentice-shell .as-main[data-mode="review"] .as-replay { grid-area: replay; }
+.apprentice-shell .as-main[data-mode="teach"] { grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr); }
 .apprentice-shell .as-main[data-mode="teach"] .as-left .as-workspace { order: 1; }
 .apprentice-shell .as-main[data-mode="teach"] .as-left .as-screen { order: 2; }
 
@@ -247,35 +430,6 @@
   border: 1px dashed var(--as-border); border-radius: 6px; padding: 3px 9px; background: var(--as-surface); color: var(--as-text); font-size: 0.85rem;
 }
 .apprentice-shell .as-standin__chip--send { background: var(--as-accent-soft); }
-
-.apprentice-shell .as-clipa-card { padding: 10px 14px; }
-.apprentice-shell .as-clipa { display: flex; flex-direction: row; align-items: center; gap: 14px; }
-.apprentice-shell .as-clipa__side { flex: 1; min-width: 0; }
-.apprentice-shell .as-clipa__state { margin: 0; color: var(--as-muted); font-size: 0.9rem; }
-.apprentice-shell .as-clipa__label { font-weight: 700; color: var(--as-text); }
-.apprentice-shell .as-bubble {
-  position: relative;
-  margin: 6px 0 0;
-  max-width: 100%;
-  padding: 10px 14px;
-  background: var(--as-accent-soft);
-  border: 1px solid var(--as-accent);
-  border-radius: 14px;
-  font-size: 1rem;
-  overflow-wrap: anywhere;
-}
-.apprentice-shell .as-bubble::before {
-  content: '';
-  position: absolute;
-  top: 16px;
-  left: -8px;
-  width: 14px;
-  height: 14px;
-  background: var(--as-accent-soft);
-  border-left: 1px solid var(--as-accent);
-  border-bottom: 1px solid var(--as-accent);
-  transform: rotate(45deg);
-}
 
 .apprentice-shell .as-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0; }
 
@@ -404,17 +558,30 @@
 .apprentice-shell .as-event__end { height: 1px; border: 0; padding: 0; }
 
 /* ---- Narrow screens --------------------------------------------------------- */
+@media (max-width: 1100px) {
+  .apprentice-shell .as-header { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "brand tools" "rail rail"; }
+  .apprentice-shell .as-rail { width: 100%; }
+}
 @media (max-width: 900px) {
-  .apprentice-shell .as-main { grid-template-columns: minmax(0, 1fr); }
-  .apprentice-shell .as-main[data-mode="review"] .as-right { grid-template-columns: minmax(0, 1fr); grid-template-areas: "clipa" "session" "mode" "replay"; }
+  .apprentice-shell .as-main,
+  .apprentice-shell .as-main[data-mode="learn"],
+  .apprentice-shell .as-main[data-mode="teach"] { grid-template-columns: minmax(0, 1fr); }
+  .apprentice-shell .as-main[data-mode="review"] .as-right { grid-template-columns: minmax(0, 1fr); grid-template-areas: "session" "mode" "replay"; }
   .apprentice-shell .as-right { order: -1; position: static; max-height: none; overflow: visible; }
-  .apprentice-shell .as-brand { flex: 1 1 100%; }
+}
+@media (max-width: 640px) {
+  /* The header scrolls away on a phone; Clipa then waits in the corner until the rail is back on screen. */
+  .apprentice-shell .as-header { position: static; padding: 8px 12px 4px; gap: 4px 8px; }
+  .apprentice-shell .as-logo svg { height: 44px; }
+  .apprentice-shell .as-header__tools { gap: 6px; }
+  .apprentice-shell .as-header__tools .as-btn { padding: 6px 10px; font-size: 0.88rem; }
+  .apprentice-shell .as-rail { --as-seat: 46px; --as-node: 26px; }
+  .apprentice-shell .as-stage { padding: 0 2px 2px; }
+  .apprentice-shell .as-stage__name { font-size: 0.92rem; }
+  .apprentice-shell .as-stage__hint { display: none; }
+  .apprentice-shell .as-rail__caption { justify-content: flex-start; font-size: 0.82rem; }
 }
 @media (max-width: 520px) {
-  .apprentice-shell .as-header { padding: 8px 12px; gap: 8px; }
-  .apprentice-shell .as-tabs { width: 100%; }
-  .apprentice-shell .as-tab { flex: 1; padding: 8px 6px; min-height: 40px; }
-  .apprentice-shell .as-header__tools { width: 100%; justify-content: space-between; }
   .apprentice-shell .as-status { padding: 8px 12px 0; }
   .apprentice-shell .as-main { padding: 10px 12px 14px; gap: 12px; }
   .apprentice-shell .as-banner { margin: 8px 12px 0; }
@@ -426,4 +593,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .apprentice-shell * { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+  .apprentice-shell *::before,
+  .apprentice-shell *::after { transition: none !important; animation: none !important; }
 }

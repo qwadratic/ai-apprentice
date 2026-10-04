@@ -75,6 +75,32 @@ export function dockCenter(corner: ClipaDock, vp: Size, size: Size, scale: numbe
   return { x: right ? vp.w - margin - hw : margin + hw, y: bottom ? vp.h - margin - hh : margin + hh };
 }
 
+/** The smallest and largest scale Clipa takes when she rests on an anchor element. */
+export const ANCHOR_MIN_SCALE = 0.3;
+export const ANCHOR_MAX_SCALE = 1;
+
+/** True when enough of the box is inside the viewport for Clipa to rest on it (at least half of it, both ways). */
+export function anchorVisible(anchor: Box, vp: Size): boolean {
+  if (anchor.w <= 0 || anchor.h <= 0) return false;
+  const seen = intersection(anchor, { x: 0, y: 0, w: vp.w, h: vp.h });
+  return seen !== null && seen.w >= anchor.w / 2 && seen.h >= anchor.h / 2;
+}
+
+/**
+ * Clipa resting on an element instead of a corner (the shell's journey rail marks the current stage with data-clipa-dock).
+ * `scale` null: as tall as the anchor, within ANCHOR_MIN_SCALE..ANCHOR_MAX_SCALE. A number: that scale (1 when she stands
+ * up to speak). The centre is the anchor's centre, moved inside the viewport when her box would cross its edge.
+ */
+export function anchorRest(anchor: Box, vp: Size, size: Size, margin: number, scale: number | null = null): { center: Pt; scale: number } {
+  const s = scale ?? clamp(anchor.h / size.h, ANCHOR_MIN_SCALE, ANCHOR_MAX_SCALE);
+  const hw = (size.w * s) / 2;
+  const hh = (size.h * s) / 2;
+  const c = center(anchor);
+  const x = vp.w - margin - hw < margin + hw ? vp.w / 2 : clamp(c.x, margin + hw, vp.w - margin - hw);
+  const y = vp.h - margin - hh < margin + hh ? vp.h / 2 : clamp(c.y, margin + hh, vp.h - margin - hh);
+  return { center: { x, y }, scale: s };
+}
+
 export interface PlaceOptions {
   /** Minimum distance to the viewport edges. Default 12. */
   margin?: number;

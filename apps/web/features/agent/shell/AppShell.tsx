@@ -1,13 +1,13 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import './shell.css';
 import { Banner } from './components/Banner.tsx';
 import { DebugDrawer } from './components/DebugDrawer.tsx';
 import { Header } from './components/Header.tsx';
 import { SessionControls } from './components/SessionControls.tsx';
 import { StatusBar } from './components/StatusBar.tsx';
-import { ClipaAgent } from './clipa/ClipaAgent.tsx';
 import { setClipaFavicon } from './components/ClipaLogo.tsx';
 import { ShellContext, useShellState } from './hooks.ts';
+import { STAGES } from './journey/rail.ts';
 import { createRuntime } from './runtime.ts';
 import { ReplaySlot } from './slots/ReplaySlot.tsx';
 import { ScreenSlot } from './slots/ScreenSlot.tsx';
@@ -23,7 +23,7 @@ function ModePanels() {
   const mode = useShellState((s) => s.mode);
   // All three views stay mounted and only the current one is shown: what is typed into one survives a switch.
   return (
-    <section className="as-card as-mode" aria-label="Mode">
+    <section className="as-card as-mode" aria-label={STAGES[mode].name}>
       {MODES.map((m) => {
         const View = VIEWS[m];
         return (
@@ -36,17 +36,42 @@ function ModePanels() {
   );
 }
 
-/** The main area carries the mode, so each mode gets its own layout (shell.css) while every slot stays mounted. */
+/**
+ * The stage canvas. It carries the mode, so each stage shapes the canvas around its main object (shell.css): Show puts the shared
+ * screen first and large, Reflect gives the Work Map the width, Pass it on puts the new hire's case and the screen first with the
+ * tutor's warnings beside them. Every slot stays mounted in every stage: only the layout changes.
+ */
 function ModeLayout({ children }: { children: ReactNode }) {
   const mode = useShellState((s) => s.mode);
-  return <main className="as-main" data-mode={mode}>{children}</main>;
+  return <main className="as-main" data-mode={mode} data-stage={STAGES[mode].name}>{children}</main>;
 }
 
-/** The product page: mode switcher, status bar, workspace area on the left, Clipa and the mode view on the right. */
+/** Keeps --as-header-h on the shell at the header's height, so the sticky side column starts below it. */
+function useHeaderHeight(shell: RefObject<HTMLDivElement | null>, header: RefObject<HTMLElement | null>): void {
+  useEffect(() => {
+    const root = shell.current;
+    const el = header.current;
+    if (!root || !el || typeof ResizeObserver === 'undefined') return undefined;
+    const update = (): void => root.style.setProperty('--as-header-h', `${Math.round(el.getBoundingClientRect().height)}px`);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [shell, header]);
+}
+
+/**
+ * The product page: the header with the journey rail, the status bar, and the stage canvas (workspace area and the stage's own
+ * column). Clipa is not a card here: the motion director (runtime.ts) keeps her in one layer above the whole page, resting on the
+ * rail at the stage on screen and flying out to what she talks about.
+ */
 export function AppShell() {
   const [runtime] = useState(createRuntime);
   const [debugOpen, setDebugOpen] = useState(false);
   const [screenCollapsed, setScreenCollapsed] = useState(false);
+  const shellRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLElement>(null);
+  useHeaderHeight(shellRef, headerRef);
 
   useEffect(() => {
     const { controller } = runtime;
@@ -66,8 +91,8 @@ export function AppShell() {
 
   return (
     <ShellContext.Provider value={runtime}>
-      <div className="apprentice-shell">
-        <Header debugOpen={debugOpen} onToggleDebug={() => setDebugOpen((v) => !v)} />
+      <div className="apprentice-shell" ref={shellRef}>
+        <Header debugOpen={debugOpen} onToggleDebug={() => setDebugOpen((v) => !v)} headerRef={headerRef} />
         <StatusBar />
         <Banner />
         <ModeLayout>
@@ -76,9 +101,6 @@ export function AppShell() {
             <WorkspaceSlot adapter={runtime.workspace} />
           </div>
           <div className="as-right">
-            <section className="as-card as-clipa-card" aria-label="Clipa">
-              <ClipaAgent />
-            </section>
             <SessionControls />
             <ModePanels />
             <ReplaySlot />
