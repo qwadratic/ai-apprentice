@@ -601,7 +601,7 @@ const PINNED_PROMPT_SHA256: Record<string, string> = {
   'answer-extraction.ts': '28c542eb5bf30514aed951b611649de202107cfa2cde6504e664b76c947e373d',
   'reply-classification.ts': 'd702dcfb366d9879bc0a1c5e3b3c647e06961c71dfdcaadc07ddb27f0c06f7e4',
   'entity-resolution.ts': '711256123da833fb9e95f440d16da7829ce88fc17b08d1ea10d3c560cf2687be',
-  'generic-question.ts': 'bd3ecc5241795398e8cc5212642050b9978d9ce6288b9356144c769e8cee1d81',
+  'generic-question.ts': '6ab2023019f9883c4db30c21d9ee6e45a29586f15a4d5f5c3fcc6d8d96c90073',
   'guardrail-check.ts': '8ace038475b50ba9a14c2924fbdac755efcbc46cebd90e7c08d5f7ee8b985940',
   'map-synthesis.ts': '47a21163c19ba8f9854fb163733f900696f897c622f40e8e2e23013f6a9e1d81',
   'map-edit.ts': '4893d3c9ab30358b6422665f8c47545c27434f7de835271472b69a80ab233d53',
