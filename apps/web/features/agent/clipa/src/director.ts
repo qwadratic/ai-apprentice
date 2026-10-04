@@ -16,12 +16,18 @@
  *
  * The layer is position: fixed over the viewport, so `root` should be an element for which that holds (normally
  * document.body) and targets are rects in viewport coordinates (getBoundingClientRect). It never takes pointer events.
+ *
+ * Home: the dock corner, unless the page offers an anchor (by default the first [data-clipa-dock] element, the
+ * current stage of the shell's journey rail). On a visible anchor she rests on it, as tall as it and fully opaque,
+ * and when the anchor moves (the stage changes) she glides after it.
  */
 import { defineClipaBuddy } from './buddy.ts';
 import type { ClipaBuddyElement } from './buddy.ts';
 import {
   NOTICE_MS,
   RETREAT_MS,
+  anchorRest,
+  anchorVisible,
   bezierPoint,
   boxAt,
   boxFromRect,
@@ -59,6 +65,12 @@ export interface ClipaDirectorOptions {
   root: HTMLElement;
   /** Corner Clipa rests in. Default 'bottom-right'. */
   dock?: ClipaDock;
+  /**
+   * The element Clipa rests on instead of the corner, asked again whenever her home is needed: on a visible anchor she
+   * sits centred on it, as tall as it, and she glides after it when it moves. Default: the first [data-clipa-dock]
+   * element under the document. null: always the corner.
+   */
+  dockAnchor?: (() => RectLike | null) | null;
   /** Viewport rect of the element a target names, or null when it is not on screen. Called again before each flight. */
   resolveTarget(target: ClipaTarget): RectLike | null;
   /** True while the person types (or moves the mouse near the target). Clipa never starts a flight then. */
@@ -138,6 +150,12 @@ interface Pose {
 
 const DOCK_SCALE = 0.7;
 const DOCK_OPACITY = 0.45;
+/** On an anchor (the journey rail) she is the stage marker, so she is not faded. */
+const ANCHOR_OPACITY = 1;
+/** The attribute that marks the default anchor. */
+export const DOCK_ANCHOR_ATTR = 'data-clipa-dock';
+/** A glide after the anchor: never shorter than this. */
+const FOLLOW_MIN_MS = 420;
 const OFF_OPACITY = 0.5;
 const ACK_MS = 900;
 const WAKE_MS = 320;
@@ -261,6 +279,26 @@ export function createClipaDirector(options: ClipaDirectorOptions): ClipaDirecto
     const root = doc.documentElement;
     return { w: root.clientWidth || win.innerWidth, h: root.clientHeight || win.innerHeight };
   };
+  const anchorRect: () => RectLike | null =
+    options.dockAnchor === null
+      ? () => null
+      : options.dockAnchor ??
+        (() => {
+          const el = doc.querySelector(`[${DOCK_ANCHOR_ATTR}]`);
+          return el === null ? null : el.getBoundingClientRect();
+        });
+  /** The anchor as a box when Clipa can rest on it now, or null (then the corner). */
+  const anchorBox = (): Box | null => {
+    let rect: RectLike | null = null;
+    try {
+      rect = anchorRect();
+    } catch {
+      rect = null;
+    }
+    if (rect === null) return null;
+    const box = boxFromRect(rect);
+    return anchorVisible(box, viewport()) ? box : null;
+  };
 
   function emit(event: ClipaEvent): void {
     for (const listener of [...listeners]) listener(event);
@@ -285,11 +323,21 @@ export function createClipaDirector(options: ClipaDirectorOptions): ClipaDirecto
   // ---- pose and flight -------------------------------------------------------------------------------------
 
   const dockPose = (): Pose => {
+    const anchor = anchorBox();
+    if (anchor !== null) {
+      const rest = anchorRest(anchor, viewport(), body, margin);
+      return { cx: rest.center.x, cy: rest.center.y, scale: rest.scale, opacity: machine.state === 'off' ? OFF_OPACITY : ANCHOR_OPACITY };
+    }
     const c = dockCenter(dock, viewport(), body, DOCK_SCALE, margin);
     return { cx: c.x, cy: c.y, scale: DOCK_SCALE, opacity: machine.state === 'off' ? OFF_OPACITY : DOCK_OPACITY };
   };
-  /** Full size, still in the dock corner: she stands up where she is (speak or listen without a target). */
+  /** Full size, still at home (the corner or the anchor): she stands up where she is (speak or listen without a target). */
   const wakePose = (): Pose => {
+    const anchor = anchorBox();
+    if (anchor !== null) {
+      const rest = anchorRest(anchor, viewport(), hit, margin, 1);
+      return { cx: rest.center.x, cy: rest.center.y, scale: 1, opacity: 1 };
+    }
     const c = dockCenter(dock, viewport(), hit, 1, margin);
     return { cx: c.x, cy: c.y, scale: 1, opacity: 1 };
   };
@@ -336,7 +384,7 @@ export function createClipaDirector(options: ClipaDirectorOptions): ClipaDirecto
   });
 
   /** Moves from the current pose to `dest`. Resolves true on arrival, false when another move took over. */
-  function moveTo(dest: Pose, kind: FlightKind, obstacles: readonly Box[]): Promise<boolean> {
+  function moveTo(dest: Pose, kind: FlightKind, obstacles: readonly Box[], durationMs?: number): Promise<boolean> {
     const token = ++moveToken;
     const from = { ...pose };
     const dist = Math.hypot(dest.cx - from.cx, dest.cy - from.cy);
@@ -348,6 +396,7 @@ export function createClipaDirector(options: ClipaDirectorOptions): ClipaDirecto
     else if (homeward) plannedMs = RETREAT_MS;
     else if (kind === 'settle') plannedMs = SETTLE_MS;
     else plannedMs = flightDuration(dist);
+    if (durationMs !== undefined && !inPlace) plannedMs = durationMs;
 
     flying = !inPlace;
     syncBuddy();
@@ -842,11 +891,25 @@ export function createClipaDirector(options: ClipaDirectorOptions): ClipaDirecto
 
   // ---- watchers: typing while out, linger, layout changes, blinking ---------------------------------------------
 
+  /** At home and the anchor moved (the stage changed, the header reflowed): glide after it. */
+  let following = false;
+  function followAnchor(): void {
+    if (following || !settled() || settleQueued) return;
+    const dest = dockPose();
+    const dist = Math.hypot(dest.cx - pose.cx, dest.cy - pose.cy);
+    if (dist < 3 && Math.abs(dest.scale - pose.scale) < 0.02 && Math.abs(dest.opacity - pose.opacity) < 0.02) return;
+    following = true;
+    void moveTo(dest, 'settle', [], Math.max(FOLLOW_MIN_MS, flightDuration(dist))).finally(() => {
+      following = false;
+    });
+  }
+
   function tick(): void {
     if (destroyed) return;
     const s = machine.state;
     if (!isActive(s)) {
       typingSince = 0;
+      followAnchor();
       return;
     }
     // Spec: Listening -> Retreat when the person starts typing; the question is deferred.
@@ -868,10 +931,16 @@ export function createClipaDirector(options: ClipaDirectorOptions): ClipaDirecto
   }
 
   let settleTimer = 0;
+  /** A resize or scroll is being waited out: the anchor is not followed until settle() has run. */
+  let settleQueued = false;
   function scheduleSettle(): void {
     win.clearTimeout(settleTimer);
     timers.delete(settleTimer);
-    settleTimer = later(() => void settle(), 140);
+    settleQueued = true;
+    settleTimer = later(() => {
+      settleQueued = false;
+      void settle();
+    }, 140);
   }
   /** The window resized or scrolled: keep Clipa beside the element, or in the corner if she is docked. */
   async function settle(): Promise<void> {

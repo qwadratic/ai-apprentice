@@ -1,10 +1,11 @@
 ---
 id: TASK-3.47
 title: 'Journey rail and Clipa everywhere: reimagined navigation instead of three tabs'
-status: In Progress
+status: Done
 assignee:
   - '@qwadratic'
 created_date: '2026-10-04 05:02'
+updated_date: '2026-10-04 05:29'
 labels:
   - stream-b
 dependencies: []
@@ -21,9 +22,9 @@ Ivan, 4 Oct 05:05 UTC: Clipa must go through every part of the app, and the Lear
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The tab bar is replaced by the journey rail with stage states (next, active, done)
-- [ ] #2 Clipa is one persistent layer across all stages and moves along the rail
-- [ ] #3 Each stage has its own canvas layout; phone width works
+- [x] #1 The tab bar is replaced by the journey rail with stage states (next, active, done)
+- [x] #2 Clipa is one persistent layer across all stages and moves along the rail
+- [x] #3 Each stage has its own canvas layout; phone width works
 <!-- AC:END -->
 
 ## Definition of Done
@@ -32,3 +33,9 @@ Ivan, 4 Oct 05:05 UTC: Clipa must go through every part of the app, and the Lear
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Merged in PR #51 (f4bb8c6). The Learn/Review/Teach tabs became a journey rail: Show, Reflect and Pass it on on one teal wire, with stage states active, done, next and open. Clipa rests on the rail at the current stage (director dock) and moves along it; her right-column card is gone. The canvas layout is set per stage. The header has a 64 px logo and a Tone menu. Root npm run check is green (web 194/194). Per Ivan's rule there was no browser check by agents: motion and the 1100-1280 px header still need a check by hand.
+<!-- SECTION:FINAL_SUMMARY:END -->

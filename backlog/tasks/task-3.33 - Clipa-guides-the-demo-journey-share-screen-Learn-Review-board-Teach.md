@@ -5,6 +5,7 @@ status: In Progress
 assignee:
   - '@qwadratic'
 created_date: '2026-10-04 02:44'
+updated_date: '2026-10-04 05:25'
 labels:
   - stream-b
   - ux
@@ -35,3 +36,9 @@ Ivan, 4 Oct 02:45 UTC: Clipa moves in the web app too. It invites the user to sh
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+4 Oct 05:15 UTC: PR #37 closed unmerged as superseded. The journey logic moved to the server conductor (PR #49, doc-12 v1.1). Its UI parts (progress strip, target resolver) are reused by TASK-3.47 (journey rail). The branch task-3.33-clipa-journey stays.
+<!-- SECTION:NOTES:END -->
