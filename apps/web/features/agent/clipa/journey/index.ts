@@ -21,7 +21,6 @@ export {
   createJourneyEventBus,
   isJourneyMode,
   matchesEvent,
-  matchesMode,
   modeRank,
 } from './events.ts';
 export type {

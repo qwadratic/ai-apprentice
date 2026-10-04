@@ -3,7 +3,7 @@
  * the Clipa director (fly to the step's target, say the line in the bubble).
  *
  *   const journey = createJourney({ director, events: bus, resolveTarget: createDomTargetResolver(document) });
- *   bus.emit({ type: 'session_started', mode: 'learn' });
+ *   bus.emit({ type: 'app_ready', mode: 'learn' });
  *
  * Rules:
  *   - The journey moves forward only on events. Timers are used for exactly two things: the one gentle re-nudge
@@ -11,15 +11,18 @@
  *   - While the person types or talks, the agent speaks, or the session is off the record, Clipa is quiet at once:
  *     a flight in progress is dropped, she goes home, and the line waits until it is quiet again.
  *   - When the agent asks a live question Clipa leaves the stage to it; the journey speaks again only after the
- *     director is idle.
+ *     director is idle. It never waits on idle() while she is still pointing (that never resolves): it either
+ *     re-points (she is ours) or lets the agent's pose be.
+ *   - Whenever the engine lets go of her while she still points at one of its controls, she goes home.
  *   - Voice is the shell's job: `onSay(line)` fires when the line goes up in the bubble.
- *   - The current step is stored (try/catch around every access), so a reload resumes where the person was.
- *     Steps that need a live capture rewind to the start, because a reload ends the capture.
+ *   - The current step is stored in sessionStorage (try/catch around every access), so a reload of the same tab resumes
+ *     at the Start of the session the person was in (a reload ends the session). A new tab, a finished journey, a
+ *     stale entry or a new Learn session starts at step 1.
  */
 import type { ClipaResult, ClipaState, ClipaTarget, RectLike } from '../src/types.ts';
-import { capturePath, detectCapabilities } from './capabilities.ts';
+import { canShareScreen, canUseCamera, capturePath } from './capabilities.ts';
 import type { CaptureCapabilities, CapturePath } from './capabilities.ts';
-import { isJourneyMode, matchesEvent, matchesMode, modeRank } from './events.ts';
+import { matchesEvent } from './events.ts';
 import type { JourneyEvent, JourneyEventSource, JourneyMode, ShareFailure } from './events.ts';
 import { JOURNEY_STEPS } from './journey.ts';
 import type { JourneyPersona, JourneyPhase, JourneyStep, JourneyStepId, JourneyText, JourneyVariant } from './journey.ts';
@@ -34,7 +37,7 @@ export interface JourneyDirector {
   speak(text: string): Promise<ClipaResult>;
   retreat(): Promise<ClipaResult>;
   setOff(off: boolean): Promise<ClipaResult>;
-  /** Resolves when Clipa is docked (or off), not flying and nothing is queued. */
+  /** Resolves when Clipa is docked (or off), not flying and nothing is queued. It does not resolve while she points. */
   idle(): Promise<void>;
 }
 
@@ -55,14 +58,24 @@ export interface JourneyOptions {
   events: JourneyEventSource;
   /** Viewport rect of the element with this data-clipa-target value, or null when it is not on the page. */
   resolveTarget(target: string): RectLike | null;
-  /** Where the position is kept. Default: localStorage when it works. `null`: nowhere. */
+  /** Where the position is kept. Default: sessionStorage when it works. `null`: nowhere. */
   storage?: JourneyStorage | null;
   storageKey?: string;
   steps?: readonly JourneyStep[];
-  /** What the device can capture. Default: looked up from navigator.mediaDevices. */
+  /**
+   * The shell has a camera source for the capture (stream A's). Default false: until then a device that cannot share a
+   * screen is told so plainly instead of being offered a camera nobody reads. Ignored when `capabilities` is given.
+   */
+  camera?: boolean;
+  /** What the device can capture. Default: screen from navigator.mediaDevices, camera only when `camera` is true. */
   capabilities?: CaptureCapabilities;
-  /** True while a capture is live. After a reload it is false, which sends capture steps back to the start. */
-  isCapturing?(): boolean;
+  /** The shell also captures the screen in Teach: adds the share-teach step. Default false. */
+  captureInTeach?: boolean;
+  /**
+   * True while the observation source is the synthetic sample one, so Clipa does not claim to see the screen. Default:
+   * synthetic when the person never shared a window in Learn.
+   */
+  isSynthetic?(): boolean;
   /** The line went up in the bubble; the shell speaks it (unless off the record). */
   onSay?(line: string, step: JourneyStep): void;
   clock?: JourneyClock;
@@ -70,8 +83,10 @@ export interface JourneyOptions {
   quietSettleMs?: number;
   /** After an agent question, stay out of the way for this long. Default 12000. */
   agentQuietMs?: number;
-  /** A stored position older than this is ignored. Default 6 hours. */
+  /** A stored position older than this is ignored. Default 30 minutes. */
   maxAgeMs?: number;
+  /** A fresh id for a run (a Learn session start). Default: random. */
+  newRunId?(): string;
 }
 
 export type StepOutcome = 'done' | 'skipped';
@@ -80,10 +95,16 @@ export interface JourneySnapshot {
   stepId: JourneyStepId;
   index: number;
   count: number;
+  /** The ids of the steps of this journey, in order (the table without the optional steps that are off). */
+  stepIds: readonly JourneyStepId[];
   phase: JourneyPhase;
   persona: JourneyPersona;
-  mode: JourneyMode;
-  /** The step's mode gate is open (the app has reached the step's mode). */
+  /** The selected tab. */
+  tab: JourneyMode;
+  /** The mode whose session is live, or null. */
+  session: JourneyMode | null;
+  runId: string;
+  /** The page is ready (the first step is announced only after that). */
   active: boolean;
   /** The current step's line has been said (or, for an agent-voiced step, the agent has the floor). */
   delivered: boolean;
@@ -108,18 +129,17 @@ export interface Journey {
   dispatch(event: JourneyEvent): void;
   /** Says a step that is already done once more. Moves nothing. Returns false when it cannot (not done, no target, quiet). */
   replay(id: JourneyStepId): boolean;
-  /** Forgets the stored position and starts over from the first step. */
+  /** Forgets the stored position and starts a new run from the first step. */
   reset(): void;
   destroy(): void;
 }
 
 interface SavedState {
-  v: 1;
+  v: 2;
+  runId: string;
   stepId: JourneyStepId;
-  mode: JourneyMode;
   outcomes: Partial<Record<JourneyStepId, StepOutcome>>;
   nudged: JourneyStepId[];
-  done: boolean;
   savedAt: number;
 }
 
@@ -129,10 +149,13 @@ interface Presentation {
   index: number;
 }
 
-export const JOURNEY_STORAGE_KEY = 'apprentice.journey.v1';
+/** What to do with Clipa when the engine lets go: leave her, send her home, or only if she is at one of our controls. */
+type Release = boolean | 'if-pointing';
+
+export const JOURNEY_STORAGE_KEY = 'apprentice.journey.v2';
 const DEFAULT_QUIET_SETTLE_MS = 1500;
 const DEFAULT_AGENT_QUIET_MS = 12_000;
-const DEFAULT_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+const DEFAULT_MAX_AGE_MS = 30 * 60 * 1000;
 const MAX_RETRIES = 2;
 const RETRY_MS = 4000;
 
@@ -144,22 +167,26 @@ function defaultClock(): JourneyClock {
   };
 }
 
+/** sessionStorage, not localStorage: a reload of this tab resumes, a new tab (the pitch after a rehearsal) starts fresh. */
 function defaultStorage(): JourneyStorage | null {
   try {
-    return (globalThis as { localStorage?: JourneyStorage }).localStorage ?? null;
+    return (globalThis as { sessionStorage?: JourneyStorage }).sessionStorage ?? null;
   } catch {
     return null;
   }
+}
+
+function defaultRunId(): string {
+  return `r-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function isSavedState(value: unknown): value is SavedState {
   if (typeof value !== 'object' || value === null) return false;
   const v = value as Partial<SavedState>;
   return (
-    v.v === 1 &&
+    v.v === 2 &&
+    typeof v.runId === 'string' &&
     typeof v.stepId === 'string' &&
-    isJourneyMode(v.mode) &&
-    typeof v.done === 'boolean' &&
     typeof v.savedAt === 'number' &&
     Array.isArray(v.nudged) &&
     typeof v.outcomes === 'object' &&
@@ -168,7 +195,7 @@ function isSavedState(value: unknown): value is SavedState {
 }
 
 export function createJourney(options: JourneyOptions): Journey {
-  const steps = options.steps ?? JOURNEY_STEPS;
+  const steps = (options.steps ?? JOURNEY_STEPS).filter((step) => !step.optional || options[step.optional] === true);
   if (steps.length === 0) throw new Error('journey: the step table is empty');
   const director = options.director;
   const clock = options.clock ?? defaultClock();
@@ -177,18 +204,24 @@ export function createJourney(options: JourneyOptions): Journey {
   const quietSettleMs = options.quietSettleMs ?? DEFAULT_QUIET_SETTLE_MS;
   const agentQuietMs = options.agentQuietMs ?? DEFAULT_AGENT_QUIET_MS;
   const maxAgeMs = options.maxAgeMs ?? DEFAULT_MAX_AGE_MS;
-  const caps: CaptureCapabilities = { ...(options.capabilities ?? detectCapabilities()) };
-  const isCapturing = options.isCapturing ?? (() => false);
+  const newRunId = options.newRunId ?? defaultRunId;
+  const caps: CaptureCapabilities = options.capabilities
+    ? { ...options.capabilities }
+    : { screen: canShareScreen(), camera: options.camera === true && canUseCamera() };
   const last = steps.length - 1;
+  const stepIds: readonly JourneyStepId[] = steps.map((step) => step.id);
   const at = (i: number): JourneyStep => {
     const step = steps[i];
     if (!step) throw new Error(`journey: no step at ${i}`);
     return step;
   };
+  const indexOfId = (id: JourneyStepId | undefined): number => (id === undefined ? -1 : steps.findIndex((s) => s.id === id));
+  /** The first step of the Learn phase: a Learn session starting at or after it begins a new run. */
+  const learnStart = steps.findIndex((s) => s.phase === 'learn');
 
   // ---- progress (persisted) -------------------------------------------------------------------------------------
   let index = 0;
-  let mode: JourneyMode = 'learn';
+  let runId = newRunId();
   let outcomes: Partial<Record<JourneyStepId, StepOutcome>> = {};
   const nudged = new Set<JourneyStepId>();
   let done = false;
@@ -196,6 +229,8 @@ export function createJourney(options: JourneyOptions): Journey {
   let variant: JourneyVariant | null = null;
 
   // ---- runtime ----------------------------------------------------------------------------------------------------
+  let tab: JourneyMode = 'learn';
+  let liveMode: JourneyMode | null = null;
   const seen = new Set<string>();
   const delivered = new Set<JourneyStepId>();
   let lastLine: string | null = null;
@@ -222,24 +257,36 @@ export function createJourney(options: JourneyOptions): Journey {
 
   const quiet = (): boolean => typing || talkingPerson || talkingAgent || offRecord || clock.now() < agentBusyUntil;
   const waitingForEdge = (): boolean => typing || talkingPerson || talkingAgent || offRecord;
+  const synthetic = (): boolean => (options.isSynthetic ? options.isSynthetic() : outcomes['share'] === 'skipped');
 
   // ---- storage ------------------------------------------------------------------------------------------------------
 
   function save(): void {
     if (!storage) return;
-    const state: SavedState = {
-      v: 1,
-      stepId: at(index).id,
-      mode,
-      outcomes,
-      nudged: [...nudged],
-      done,
-      savedAt: clock.now(),
-    };
     try {
+      if (done) {
+        storage.removeItem(storageKey); // a finished journey leaves nothing behind
+        return;
+      }
+      const state: SavedState = {
+        v: 2,
+        runId,
+        stepId: at(index).id,
+        outcomes,
+        nudged: [...nudged],
+        savedAt: clock.now(),
+      };
       storage.setItem(storageKey, JSON.stringify(state));
     } catch {
       // Storage may be full, blocked or gone (private window): the journey still works for this page load.
+    }
+  }
+
+  function forget(): void {
+    try {
+      storage?.removeItem(storageKey);
+    } catch {
+      // Nothing to clear.
     }
   }
 
@@ -250,22 +297,23 @@ export function createJourney(options: JourneyOptions): Journey {
       if (!raw) return;
       const saved: unknown = JSON.parse(raw);
       if (!isSavedState(saved)) return;
-      if (saved.done || clock.now() - saved.savedAt > maxAgeMs) {
+      if (clock.now() - saved.savedAt > maxAgeMs) {
         storage.removeItem(storageKey);
         return;
       }
-      const found = steps.findIndex((step) => step.id === saved.stepId);
+      const found = indexOfId(saved.stepId);
       if (found < 0) return;
-      index = found;
-      mode = saved.mode;
+      // A reload ends the session, so the journey goes back to where that session is started.
+      const resumeAt = indexOfId(at(found).resume);
+      index = resumeAt >= 0 ? resumeAt : found;
+      runId = saved.runId;
       outcomes = { ...saved.outcomes };
       for (const id of saved.nudged) nudged.add(id);
-      if (at(index).needsCapture && !isCapturing()) {
-        // A reload ends the capture, so the person has to share again before this step makes sense.
-        index = 0;
-        nudged.clear();
-        if (at(0).variants?.resume) variant = 'resume';
+      for (let i = index; i <= last; i += 1) {
+        delete outcomes[at(i).id];
+        nudged.delete(at(i).id);
       }
+      if (at(index).variants?.resume) variant = 'resume';
     } catch {
       // A corrupt or unreadable entry is the same as no entry.
     }
@@ -273,22 +321,23 @@ export function createJourney(options: JourneyOptions): Journey {
 
   // ---- snapshot -------------------------------------------------------------------------------------------------------
 
-  const isActive = (step: JourneyStep): boolean => !step.mode || modeRank(mode) >= modeRank(step.mode);
+  /** Nothing is said before the page is ready (its controls are mounted); a step may add a gate of its own. */
   const gateOpen = (step: JourneyStep): boolean =>
-    !step.enter.on || step.enter.on.length === 0 || step.enter.on.some((m) => seen.has(m.type));
+    seen.has('app_ready') && (!step.enter.on || step.enter.on.length === 0 || step.enter.on.some((m) => seen.has(m.type)));
 
   function build(): JourneySnapshot {
     const step = at(index);
-    // A step the app has not reached yet (summary while still in Teach) leaves the person in the phase before it.
-    const shown = !isActive(step) && index > 0 ? at(index - 1) : step;
     return {
       stepId: step.id,
       index,
       count: steps.length,
-      phase: shown.phase,
-      persona: shown.persona,
-      mode,
-      active: isActive(step) && gateOpen(step),
+      stepIds,
+      phase: step.phase,
+      persona: step.persona,
+      tab,
+      session: liveMode,
+      runId,
+      active: gateOpen(step),
       delivered: delivered.has(step.id),
       done,
       quiet: quiet(),
@@ -323,6 +372,8 @@ export function createJourney(options: JourneyOptions): Journey {
       else if (v === 'denied' && caps.camera) v = 'deniedCamera';
       if (table[v]) return v;
     }
+    if (step.tab && step.tab !== tab && table.wrongTab) return 'wrongTab';
+    if (table.synthetic && synthetic()) return 'synthetic';
     if (path === 'camera' && table.camera) return 'camera';
     return null;
   }
@@ -347,23 +398,32 @@ export function createJourney(options: JourneyOptions): Journey {
     return null;
   }
 
-  // ---- presenting a line ----------------------------------------------------------------------------------------------
+  // ---- giving the stage back --------------------------------------------------------------------------------------------
 
   /**
-   * Gives the stage back. `retreat` true: send her home, whatever she is doing (the person typed or spoke, or the
-   * session went off the record). 'if-pointing': only when she is still at our control (the agent is about to ask
-   * and its approach would otherwise queue behind her). false: just stop owning her, because the agent is working
-   * her pose and bubble right now.
+   * The engine lets go of Clipa. `true`: send her home whatever she is doing (the person typed or spoke, or the session
+   * went off the record). 'if-pointing': send her home only if she is still at one of our controls (the agent speaks, asks
+   * or starts the teach-back, and she must not stay behind at a control, nor make its approach queue behind her).
+   * `false`: only stop owning her (the agent is about to work her pose and bubble).
    */
-  function standDown(retreat: boolean | 'if-pointing'): void {
+  function standDown(release: Release): void {
     const ours = presenting || directing;
     presenting = false;
     directing = false;
-    if (!ours || retreat === false) return;
+    if (!ours || release === false) return;
     const state = director.state;
     if (state === 'dock' || state === 'off') return;
-    if (retreat === 'if-pointing' && state !== 'pointing') return;
+    if (release === 'if-pointing' && state !== 'pointing') return;
     void director.retreat();
+  }
+
+  /** A stale director call finished after the engine moved on: if nobody else took her, she goes home. */
+  function strandedCheck(): void {
+    if (inflight) return; // a newer line is on its way and will move her itself
+    presenting = false;
+    directing = false;
+    const state = director.state;
+    if (state !== 'dock' && state !== 'off') void director.retreat();
   }
 
   /** Drops a presentation in progress; a step's own line (not a nudge or replay) is kept to say later. */
@@ -413,15 +473,16 @@ export function createJourney(options: JourneyOptions): Journey {
     reconcile();
   }
 
-  function fail(reason: string, kind: PresentKind, i: number): void {
-    // 'input-active' and 'cancelled' mean somebody else had the stage: try again a couple of times, later.
-    if ((reason === 'input-active' || reason === 'cancelled') && kind !== 'replay' && retries < MAX_RETRIES) {
-      retries += 1;
-      pending = { kind, index: i };
-      clearSettle();
-      settleTimer = clock.setTimeout(resume, RETRY_MS);
-    }
+  /** Somebody else has the stage: try again a couple of times, later. */
+  function retryLater(kind: PresentKind, i: number): void {
+    if (kind === 'replay' || retries >= MAX_RETRIES) return;
+    retries += 1;
+    pending = { kind, index: i };
+    clearSettle();
+    settleTimer = clock.setTimeout(resume, RETRY_MS);
   }
+
+  // ---- presenting a line ----------------------------------------------------------------------------------------------
 
   async function present(kind: PresentKind, i: number): Promise<void> {
     const step = at(i);
@@ -438,8 +499,15 @@ export function createJourney(options: JourneyOptions): Journey {
     inflight = me;
     const live = (): boolean => mine === token && !destroyed;
 
-    // She may still be pointing at the last step's control; otherwise wait until the agent's turn is over.
-    if (!(presenting && director.state === 'pointing')) {
+    if (director.state === 'pointing') {
+      // idle() never resolves while she points, so never wait for it. Pointing at one of our controls: just move her
+      // to the new one. Pointing for somebody else (the agent's replay of a moment): leave her, try again later.
+      if (!presenting) {
+        inflight = null;
+        retryLater(kind, i);
+        return;
+      }
+    } else {
       await director.idle();
       if (!live()) return;
       if (quiet()) {
@@ -456,20 +524,26 @@ export function createJourney(options: JourneyOptions): Journey {
     let flown = await director.point(name ? journeyClipaTarget(name) : undefined);
     // The control went away between the lookup and the flight: say it in place instead.
     if (live() && name && !flown.ok && flown.reason === 'no-target') flown = await director.point();
-    if (!live()) return;
+    if (!live()) {
+      if (flown.ok) strandedCheck();
+      return;
+    }
     if (!flown.ok) {
       inflight = null;
       directing = false;
-      fail(flown.reason, kind, i);
+      if (flown.reason === 'input-active' || flown.reason === 'cancelled') retryLater(kind, i);
       return;
     }
     presenting = true;
     const said = await director.speak(text.line);
-    if (!live()) return;
+    if (!live()) {
+      if (said.ok) strandedCheck();
+      return;
+    }
     inflight = null;
     directing = false;
     if (!said.ok) {
-      fail(said.reason, kind, i);
+      if (said.reason === 'input-active' || said.reason === 'cancelled') retryLater(kind, i);
       return;
     }
     lastLine = text.line;
@@ -505,7 +579,7 @@ export function createJourney(options: JourneyOptions): Journey {
   function fireNudge(i: number): void {
     if (destroyed || done || i !== index) return;
     const step = at(i);
-    if (nudged.has(step.id) || !isActive(step) || !gateOpen(step)) return;
+    if (nudged.has(step.id) || !gateOpen(step)) return;
     if (quiet()) {
       nudgeDue = true;
       scheduleResume();
@@ -522,17 +596,15 @@ export function createJourney(options: JourneyOptions): Journey {
     if (outcomes[id] !== 'done') outcomes[id] = outcome;
   }
 
-  /** Moves past every step the event (or the mode the app is in) ends. Returns true when the position changed. */
-  function advance(event: JourneyEvent | null): boolean {
+  /** Moves past every step the event ends (done) or makes pointless (skipped). Returns true when the position changed. */
+  function advance(event: JourneyEvent): boolean {
     const from = index;
     while (index < last) {
       const step = at(index);
-      const byEvent = event !== null && step.exit.some((m) => matchesEvent(m, event));
-      // A step of an earlier mode is over once the app has moved on, whatever the person did in it.
-      const passed = step.mode !== undefined && modeRank(mode) > modeRank(step.mode);
-      const byMode = passed || step.exit.some((m) => matchesMode(m, mode));
-      if (!byEvent && !byMode) break;
-      mark(step.id, byEvent ? 'done' : 'skipped');
+      const byExit = step.exit.some((m) => matchesEvent(m, event));
+      const bySkip = !byExit && (step.skip?.some((m) => matchesEvent(m, event)) ?? false);
+      if (!byExit && !bySkip) break;
+      mark(step.id, byExit ? 'done' : 'skipped');
       index += 1;
     }
     return index !== from;
@@ -562,42 +634,41 @@ export function createJourney(options: JourneyOptions): Journey {
   function reconcile(): void {
     if (destroyed || done) return;
     const step = at(index);
-    if (!isActive(step) || !gateOpen(step)) {
-      standDown(true);
-      return;
-    }
+    if (!gateOpen(step)) return;
     if (delivered.has(step.id)) return;
     if (inflight?.index === index || pending?.index === index) return;
     if (step.voice === 'agent') {
-      // The agent has the floor here (teach-back, the checkpoint warning): Clipa stands aside and does not touch
-      // the director, so the agent's own pose and bubble stay as they are.
+      // The agent has the floor here (teach-back, the checkpoint warning): Clipa does not speak. If she is still
+      // pointing at our last control she goes home, so she does not stand there while the agent talks.
       delivered.add(step.id);
-      standDown(false);
+      standDown('if-pointing');
       armNudge();
       return;
     }
     void present('enter', index);
   }
 
-  /** Back to the first step, saying `why` in its wording. Keeps what the person has already done. */
-  function rewind(why: JourneyVariant): void {
+  /** A new run: a Learn session starts after the journey was already past it (a rehearsal, a second demo). */
+  function startNewRun(): void {
     leaveStep();
-    delivered.clear();
+    standDown(true);
+    forget();
+    runId = newRunId();
     index = 0;
-    if (at(0).variants?.[why]) variant = why;
+    outcomes = {};
+    nudged.clear();
+    delivered.clear();
+    done = false;
+    questions = 0;
+    guardrailQuestions = 0;
+    lastLine = null;
   }
 
   function onUnavailable(reason: ShareFailure | undefined): void {
-    if (reason === 'unsupported') {
-      caps.screen = false;
-    }
-    const step = at(index);
-    const inSharePhase = step.phase === at(0).phase;
-    if (inSharePhase) {
-      rewind(reason === 'lost' ? 'lost' : 'denied');
-    } else if (reason === 'lost' && step.needsCapture) {
-      rewind('lost');
-    }
+    if (reason === 'unsupported') caps.screen = false;
+    if (!at(index).capture) return; // only the share step is about the picker
+    variant = reason === 'lost' ? 'lost' : reason === 'unsupported' ? null : 'denied';
+    restartStep();
   }
 
   // ---- events ------------------------------------------------------------------------------------------------------------------
@@ -605,6 +676,7 @@ export function createJourney(options: JourneyOptions): Journey {
   function handle(event: JourneyEvent): void {
     if (destroyed) return;
     seen.add(event.type);
+    const before = variantKey();
     switch (event.type) {
       case 'typing':
         if (typing === event.active) return;
@@ -616,8 +688,8 @@ export function createJourney(options: JourneyOptions): Journey {
         if ((by === 'agent' ? talkingAgent : talkingPerson) === event.active) return;
         if (by === 'agent') talkingAgent = event.active;
         else talkingPerson = event.active;
-        // The agent speaking has its own choreography: Clipa steps aside but does not move her.
-        quietChanged(event.active, by === 'person');
+        // The person talking sends Clipa home. The agent talking only moves her if she still stands at our control.
+        quietChanged(event.active, by === 'person' ? true : 'if-pointing');
         return;
       }
       case 'off_record':
@@ -631,38 +703,75 @@ export function createJourney(options: JourneyOptions): Journey {
         if (event.guardrail) guardrailQuestions += 1;
         agentBusyUntil = clock.now() + agentQuietMs;
         interrupt();
-        standDown('if-pointing'); // the agent has the stage now
-        if (pending) scheduleResume();
-        commit();
-        return;
+        standDown('if-pointing'); // the agent has the stage now; its approach must not queue behind her
+        break;
+      case 'teachback_started':
+        standDown('if-pointing');
+        break;
+      case 'checkpoint_warned':
+        standDown(false); // the WARN decision preempts her pose and flies her to Send itself
+        break;
+      case 'sent':
+        // The new hire fixed the draft and Send went through: the warning (or the replay of the expert's moment) is moot.
+        if (at(index).phase === 'teach' && (director.state === 'warning' || director.state === 'pointing')) {
+          presenting = false;
+          directing = false;
+          void director.retreat();
+        }
+        break;
+      case 'app_ready':
+        if (event.mode) tab = event.mode;
+        break;
+      case 'mode_changed':
+        tab = event.mode;
+        break;
+      case 'session_live':
+        liveMode = event.mode;
+        if (event.mode === 'learn' && learnStart >= 0 && (done || index >= learnStart)) startNewRun();
+        break;
+      case 'session_ended':
+        liveMode = null;
+        // Off the record ends the session too, but the person did not finish it: they start it again.
+        if (offRecord || event.reason === 'off_record') {
+          commit();
+          return;
+        }
+        break;
+      case 'share_requested':
+        if (variant === 'denied' || variant === 'lost') variant = null;
+        break;
       default:
         break;
     }
 
-    if (done) return;
-    // The agent takes the stage at these moments, so Clipa no longer owns the pose she is in.
-    if (event.type === 'checkpoint_warned' || event.type === 'teachback_started') standDown(false);
-    if (event.type === 'session_started' && event.mode) mode = event.mode;
-    if (event.type === 'mode_changed') mode = event.mode;
-
+    if (done) {
+      commit();
+      return;
+    }
     const moved = advance(event);
     if (moved) leaveStep();
     if (event.type === 'screen_unavailable') onUnavailable(event.reason);
-    if (event.type === 'mask_review' && at(index).variants?.maskReview) {
+    if (event.type === 'mask_review' && at(index).capture && at(index).variants?.maskReview) {
       variant = 'maskReview';
       restartStep();
+    } else if (!moved && delivered.has(at(index).id) && variantKey() !== before) {
+      restartStep(); // the tab changed, or the device turned out unable to share: say the step in its new wording
     }
     commit();
     reconcile();
-    // A step that is already said keeps its nudge; a new one arms it when it is said.
+  }
+
+  function variantKey(): string {
+    const step = at(index);
+    return `${step.id}:${chooseVariant(step, true) ?? ''}`;
   }
 
   /** Typing, talking or off-record started (loud) or ended. Loud: Clipa goes quiet at once. */
-  function quietChanged(loud: boolean, retreat: boolean): void {
+  function quietChanged(loud: boolean, release: Release): void {
     if (loud) {
       interrupt();
       clearSettle();
-      standDown(retreat);
+      standDown(release);
     } else {
       scheduleResume();
     }
@@ -685,7 +794,7 @@ export function createJourney(options: JourneyOptions): Journey {
     },
     dispatch: handle,
     replay(id) {
-      const target = steps.findIndex((step) => step.id === id);
+      const target = indexOfId(id);
       if (destroyed || target < 0 || !(done || target < index) || quiet() || inflight || pending) return false;
       const step = at(target);
       if (!resolvable(step, textFor(step, 'replay'))) return false;
@@ -694,21 +803,7 @@ export function createJourney(options: JourneyOptions): Journey {
     },
     reset() {
       if (destroyed) return;
-      leaveStep();
-      standDown(true);
-      index = 0;
-      outcomes = {};
-      nudged.clear();
-      delivered.clear();
-      done = false;
-      questions = 0;
-      guardrailQuestions = 0;
-      lastLine = null;
-      try {
-        storage?.removeItem(storageKey);
-      } catch {
-        // Nothing to clear.
-      }
+      startNewRun();
       commit();
       reconcile();
     },
@@ -723,4 +818,3 @@ export function createJourney(options: JourneyOptions): Journey {
     },
   };
 }
-

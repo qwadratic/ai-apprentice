@@ -143,6 +143,17 @@ button.clipa-strip__btn:focus-visible {
   text-align: center;
 }
 
+.clipa-strip__notice {
+  min-height: 1.3em;
+  margin: 4px 0 0;
+  color: var(--cs-muted);
+  font-size: 12px;
+  text-align: center;
+}
+.clipa-strip__notice:empty {
+  display: none;
+}
+
 /* Visible to screen readers only: the status in words, so colour is never the only cue. */
 .clipa-strip__sr {
   position: absolute;

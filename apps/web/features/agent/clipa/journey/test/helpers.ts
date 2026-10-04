@@ -1,7 +1,7 @@
-// Test doubles for the journey: a recording director, a manual clock, a memory storage and a scriptable page.
+// Test doubles for the journey: a director that behaves like the real one, a manual clock, a memory storage and a scriptable page.
 import type { ClipaFailure, ClipaResult, ClipaState, ClipaTarget, RectLike } from '../../src/types.ts';
 import { createJourneyEventBus } from '../events.ts';
-import type { JourneyEventBus } from '../events.ts';
+import type { JourneyEvent, JourneyEventBus } from '../events.ts';
 import { createJourney } from '../engine.ts';
 import type { Journey, JourneyClock, JourneyDirector, JourneyOptions, JourneyStorage } from '../engine.ts';
 import { journeyTargets } from '../journey.ts';
@@ -9,20 +9,44 @@ import type { CaptureCapabilities } from '../capabilities.ts';
 
 const ok: ClipaResult = { ok: true };
 
+/**
+ * A recording stand-in for the Clipa director with the properties the journey depends on:
+ *   - idle() resolves only when she is docked or off (the real one does not resolve while she points, listens or speaks);
+ *   - retreat() and setOff() cancel a flight in progress, whose point() then reports 'cancelled';
+ *   - pointMode 'flight': point() enters the pointing state at once and arrives when pointGate opens;
+ *   - pointMode 'waitQuiet': she stays at home until pointGate opens (the director holds a flight while input is active).
+ */
 export class FakeDirector implements JourneyDirector {
-  state: ClipaState = 'dock';
   readonly calls: string[] = [];
-  /** While set, idle() does not resolve: Clipa is "busy" with something else. */
-  idleGate: Promise<void> | null = null;
-  failPoint: ClipaFailure | null = null;
-  /** While set, a flight started by point() does not arrive: the state is already 'pointing', as in the real director. */
+  pointMode: 'flight' | 'waitQuiet' = 'flight';
   pointGate: Promise<void> | null = null;
+  failPoint: ClipaFailure | null = null;
+  private current: ClipaState = 'dock';
+  private epoch = 0;
+  private readonly idleWaiters: Array<() => void> = [];
+
+  get state(): ClipaState {
+    return this.current;
+  }
+  /** Moves the pose, as the shell's presenter would for the agent (a question, a warning). */
+  set state(next: ClipaState) {
+    this.current = next;
+    if (next === 'dock' || next === 'off') for (const wake of this.idleWaiters.splice(0)) wake();
+  }
 
   async point(target?: ClipaTarget): Promise<ClipaResult> {
     this.calls.push(`point:${target?.hint ?? '-'}`);
     if (this.failPoint) return { ok: false, reason: this.failPoint };
+    const epoch = this.epoch;
+    if (this.pointMode === 'waitQuiet') {
+      if (this.pointGate) await this.pointGate;
+      if (epoch !== this.epoch) return { ok: false, reason: 'cancelled' };
+      this.state = 'pointing';
+      return ok;
+    }
     this.state = 'pointing';
     if (this.pointGate) await this.pointGate;
+    if (epoch !== this.epoch) return { ok: false, reason: 'cancelled' };
     return ok;
   }
   speak(text: string): Promise<ClipaResult> {
@@ -31,16 +55,21 @@ export class FakeDirector implements JourneyDirector {
   }
   retreat(): Promise<ClipaResult> {
     this.calls.push('retreat');
+    this.epoch += 1;
     this.state = 'dock';
     return Promise.resolve(ok);
   }
   setOff(off: boolean): Promise<ClipaResult> {
     this.calls.push(`off:${off}`);
+    this.epoch += 1;
     this.state = off ? 'off' : 'dock';
     return Promise.resolve(ok);
   }
   idle(): Promise<void> {
-    return this.idleGate ?? Promise.resolve();
+    if (this.current === 'dock' || this.current === 'off') return Promise.resolve();
+    return new Promise((resolve) => {
+      this.idleWaiters.push(resolve);
+    });
   }
 
   /** The lines in the bubble, in order. */
@@ -135,16 +164,20 @@ export interface Rig {
   said: string[];
   /** The data-clipa-target values that exist on the "page". Delete one to remove it. */
   present: Set<string>;
+  /** Emits the events one by one, letting the engine finish each before the next. */
+  play(...events: JourneyEvent[]): Promise<void>;
 }
 
-export function rig(overrides: Partial<JourneyOptions> = {}, parts: Partial<Pick<Rig, 'director' | 'clock' | 'storage' | 'bus' | 'present'>> = {}): Rig {
+type Parts = Partial<Pick<Rig, 'director' | 'clock' | 'storage' | 'bus' | 'present'>>;
+
+export function rig(overrides: Partial<JourneyOptions> = {}, parts: Parts = {}): Rig {
   const bus = parts.bus ?? createJourneyEventBus();
   const director = parts.director ?? new FakeDirector();
   const clock = parts.clock ?? new FakeClock();
   const storage = parts.storage ?? new MemoryStorage();
   const present = parts.present ?? new Set(journeyTargets());
   const said: string[] = [];
-  const capabilities: CaptureCapabilities = { screen: true, camera: true };
+  const capabilities: CaptureCapabilities = { screen: true, camera: false };
   const journey = createJourney({
     director,
     events: bus,
@@ -155,5 +188,19 @@ export function rig(overrides: Partial<JourneyOptions> = {}, parts: Partial<Pick
     onSay: (line) => said.push(line),
     ...overrides,
   });
-  return { bus, director, clock, storage, journey, said, present };
+  return {
+    bus,
+    director,
+    clock,
+    storage,
+    journey,
+    said,
+    present,
+    async play(...events) {
+      for (const event of events) {
+        bus.emit(event);
+        await flush();
+      }
+    },
+  };
 }

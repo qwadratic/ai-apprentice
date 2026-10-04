@@ -1,10 +1,12 @@
 /*
  * The events the journey engine reads. The shell emits them; nothing here touches the DOM, so node tests import it.
  * The list the shell must emit is in README.md; keep the two in step.
+ *
+ * Vocabulary of the shell: a MODE is the tab that is selected (learn, review, teach). A SESSION is what the Start button
+ * makes: one session per mode, live until End (or the 10 minute limit, or off the record). Clipa guides the sessions.
  */
 
-/** The three product modes plus the wrap-up. Order matters: a later mode means the earlier ones are over. */
-export const JOURNEY_MODES = ['learn', 'review', 'teach', 'summary'] as const;
+export const JOURNEY_MODES = ['learn', 'review', 'teach'] as const;
 export type JourneyMode = (typeof JOURNEY_MODES)[number];
 
 export function modeRank(mode: JourneyMode): number {
@@ -18,25 +20,33 @@ export function isJourneyMode(value: unknown): value is JourneyMode {
 export type ShareFailure = 'denied' | 'unsupported' | 'lost' | 'error';
 
 export type JourneyEvent =
-  /** A session id exists and the page is ready (the Share control is mounted). Also sent after a reload. */
-  | { type: 'session_started'; mode?: JourneyMode }
-  /** The person clicked Share screen (or the camera button); the browser picker or permission prompt is opening. */
+  /** The page is ready and the Start control is mounted. Sent on every page load, with the tab that is selected. */
+  | { type: 'app_ready'; mode?: JourneyMode }
+  /** The person selected a tab. Only changes which control Clipa points at for Start. */
+  | { type: 'mode_changed'; mode: JourneyMode }
+  /** Start was pressed and the session of this mode is live (the shell's SESSION_READY). */
+  | { type: 'session_live'; mode: JourneyMode }
+  /** The session of this mode ended: End, the time limit, or off the record (the shell's SESSION_ENDED). */
+  | { type: 'session_ended'; mode: JourneyMode; reason?: 'user' | 'limit' | 'off_record' }
+  /** The person clicked Share screen; the browser picker is opening. */
   | { type: 'share_requested' }
-  /** The picker returned and the person must review the privacy masks before anything is processed. */
+  /** The picker returned and the person must confirm the privacy masks before anything is processed. */
   | { type: 'mask_review' }
   | { type: 'screen_capturing' }
   | { type: 'camera_capturing' }
-  /** Sharing was refused, cancelled, is unsupported, or dropped while the journey was past the share step. */
+  /** Sharing was refused or cancelled (`denied`, `error`), is unsupported (`unsupported`), or dropped (`lost`). */
   | { type: 'screen_unavailable'; reason?: ShareFailure }
-  | { type: 'mode_changed'; mode: JourneyMode }
-  /** The agent asked a live question (Learn). Clipa stays out of its way and the strip counts it. */
+  /** The agent is about to ask a question: every spoken ASK_NOW and PREDICT in any mode, sent before the presenter plays. */
   | { type: 'agent_asked'; guardrail?: boolean }
+  /** The agent speaks the teach-back (not when it is only shown). */
   | { type: 'teachback_started' }
   | { type: 'teachback_confirmed' }
   /** Teach: the checkpoint warned before Send. */
   | { type: 'checkpoint_warned' }
   /** The person pressed Send and it went through (allowed). */
   | { type: 'sent' }
+  /** An explicit Finish in the mastery card, if the shell has one. The end of the Teach session also finishes the journey. */
+  | { type: 'teach_finished' }
   /** The person types (keyboard in the workspace or any field). Edge events: active true, then false. */
   | { type: 'typing'; active: boolean }
   /** Somebody speaks: the person (default) or the agent. */
@@ -46,39 +56,42 @@ export type JourneyEvent =
 export type JourneyEventType = JourneyEvent['type'];
 
 export const JOURNEY_EVENT_TYPES: readonly JourneyEventType[] = [
-  'session_started',
+  'app_ready',
+  'mode_changed',
+  'session_live',
+  'session_ended',
   'share_requested',
   'mask_review',
   'screen_capturing',
   'camera_capturing',
   'screen_unavailable',
-  'mode_changed',
   'agent_asked',
   'teachback_started',
   'teachback_confirmed',
   'checkpoint_warned',
   'sent',
+  'teach_finished',
   'typing',
   'talking',
   'off_record',
 ];
 
-/** What a step waits for. `mode_changed` matches the named mode or any later one. */
+type RankedType = 'session_live' | 'session_ended';
+
+/**
+ * What a step waits for. `session_live` and `session_ended` match the named mode or any later one (a new hire who
+ * starts Teach has, as far as the journey goes, started everything before it); `mode_changed` matches that tab only.
+ */
 export type EventMatcher =
-  | { type: Exclude<JourneyEventType, 'mode_changed'> }
-  | { type: 'mode_changed'; mode: JourneyMode };
+  | { type: Exclude<JourneyEventType, RankedType | 'mode_changed'> }
+  | { type: RankedType | 'mode_changed'; mode: JourneyMode };
 
 export function matchesEvent(matcher: EventMatcher, event: JourneyEvent): boolean {
   if (matcher.type !== event.type) return false;
-  if (matcher.type === 'mode_changed' && event.type === 'mode_changed') {
-    return modeRank(event.mode) >= modeRank(matcher.mode);
+  if ('mode' in matcher && 'mode' in event && event.mode !== undefined) {
+    return matcher.type === 'mode_changed' ? event.mode === matcher.mode : modeRank(event.mode) >= modeRank(matcher.mode);
   }
   return true;
-}
-
-/** True when the mode the app is in already satisfies a `mode_changed` matcher. */
-export function matchesMode(matcher: EventMatcher, mode: JourneyMode): boolean {
-  return matcher.type === 'mode_changed' && modeRank(mode) >= modeRank(matcher.mode);
 }
 
 export interface JourneyEventSource {

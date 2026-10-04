@@ -29,28 +29,13 @@ describe('capability checks', () => {
 });
 
 describe('the phone path', () => {
-  it('offers the camera when the device cannot share a screen', async () => {
-    const { bus, director, journey } = rig({ capabilities: { screen: false, camera: true } });
-    bus.emit({ type: 'session_started' });
-    await flush();
-    assert.deepEqual(director.points, ['use-camera']);
-    assert.match(director.lines[0] ?? '', /point the camera at your screen/);
-    assert.equal(journey.getSnapshot().capture, 'camera');
-    bus.emit({ type: 'share_requested' });
-    await flush();
-    assert.equal(director.points.at(-1), 'use-camera', 'the next step keeps pointing at the camera button');
-    bus.emit({ type: 'camera_capturing' });
-    await flush();
-    assert.equal(journey.getSnapshot().stepId, 'learn');
-  });
-
-  it('says plainly that the device cannot share when there is neither screen nor camera', async () => {
-    const { bus, director, clock, journey } = rig({ capabilities: { screen: false, camera: false } });
-    bus.emit({ type: 'session_started' });
-    await flush();
+  it('says plainly that the device cannot share a screen: the camera is not offered unless the shell has a camera source', async () => {
+    const { play, director, clock, journey } = rig({ capabilities: { screen: false, camera: false } });
+    await play({ type: 'app_ready' });
     assert.deepEqual(director.points, ['-'], 'no control to fly to');
-    assert.match(director.lines[0] ?? '', /can't share a screen or camera/);
+    assert.match(director.lines[0] ?? '', /can't share a screen/);
     assert.match(director.lines[0] ?? '', /laptop/);
+    assert.doesNotMatch(director.lines[0] ?? '', /camera/);
     director.clear();
     clock.advance(10 * 60 * 1000);
     await flush();
@@ -58,39 +43,49 @@ describe('the phone path', () => {
     assert.equal(journey.getSnapshot().capture, 'none');
   });
 
+  it('a phone without the camera opt-in gets the same honest message from the default detection', async () => {
+    // The default capability check: a page without getDisplayMedia, camera not opted in.
+    const { play, director, journey } = rig({ capabilities: undefined, camera: false });
+    const snap = journey.getSnapshot();
+    // In node there is no navigator.mediaDevices, so this is also the "no device support" case.
+    assert.equal(snap.capture, 'none');
+    await play({ type: 'app_ready' });
+    assert.match(director.lines[0] ?? '', /laptop/);
+  });
+
+  it('offers the camera only when the shell says it has a camera source', async () => {
+    const { play, director, journey } = rig({ capabilities: { screen: false, camera: true } });
+    await play({ type: 'app_ready' });
+    assert.match(director.lines[0] ?? '', /point the camera at your screen/);
+    assert.equal(journey.getSnapshot().capture, 'camera');
+    await play({ type: 'session_live', mode: 'learn' });
+    assert.equal(director.points.at(-1), 'use-camera');
+    await play({ type: 'camera_capturing' });
+    assert.equal(journey.getSnapshot().stepId, 'learn');
+  });
+
   it('keeps the desktop wording on a laptop', async () => {
-    const { bus, director } = rig({ capabilities: { screen: true, camera: true } });
-    bus.emit({ type: 'session_started' });
-    await flush();
-    assert.deepEqual(director.points, ['share-screen']);
+    const { play, director } = rig({ capabilities: { screen: true, camera: false } });
+    await play({ type: 'app_ready' });
+    assert.deepEqual(director.points, ['session-start']);
     assert.match(director.lines[0] ?? '', /share the window you work in/);
   });
 
-  it('offers the camera after a refused picker when a camera exists, and only a retry otherwise', async () => {
+  it('offers the camera after a refused picker only when a camera exists, and only a retry otherwise', async () => {
     const withCamera = rig({ capabilities: { screen: true, camera: true } });
-    withCamera.bus.emit({ type: 'session_started' });
-    withCamera.bus.emit({ type: 'share_requested' });
-    await flush();
-    withCamera.bus.emit({ type: 'screen_unavailable', reason: 'denied' });
-    await flush();
+    await withCamera.play({ type: 'app_ready' }, { type: 'session_live', mode: 'learn' }, { type: 'screen_unavailable', reason: 'denied' });
     assert.match(withCamera.director.lines.at(-1) ?? '', /or use the camera/);
 
     const screenOnly = rig({ capabilities: { screen: true, camera: false } });
-    screenOnly.bus.emit({ type: 'session_started' });
-    screenOnly.bus.emit({ type: 'share_requested' });
-    await flush();
-    screenOnly.bus.emit({ type: 'screen_unavailable', reason: 'denied' });
-    await flush();
+    await screenOnly.play({ type: 'app_ready' }, { type: 'session_live', mode: 'learn' }, { type: 'screen_unavailable', reason: 'denied' });
     assert.doesNotMatch(screenOnly.director.lines.at(-1) ?? '', /camera/);
   });
 
-  it('switches to the camera wording when the shell finds out screen sharing is unsupported', async () => {
-    const { bus, director, journey } = rig({ capabilities: { screen: true, camera: true } });
-    bus.emit({ type: 'session_started' });
-    await flush();
-    bus.emit({ type: 'screen_unavailable', reason: 'unsupported' });
-    await flush();
-    assert.equal(journey.getSnapshot().capture, 'camera');
-    assert.equal(director.points.at(-1), 'use-camera');
+  it('switches to the plain wording when the shell finds out screen sharing is unsupported', async () => {
+    const { play, director, journey } = rig({ capabilities: { screen: true, camera: false } });
+    await play({ type: 'app_ready' });
+    await play({ type: 'screen_unavailable', reason: 'unsupported' });
+    assert.equal(journey.getSnapshot().capture, 'none');
+    assert.match(director.lines.at(-1) ?? '', /laptop/);
   });
 });

@@ -12,8 +12,8 @@ export interface StripItem {
   phase: JourneyPhase;
   label: string;
   status: PhaseStatus;
-  /** The first step of the phase: what "show me again" replays. */
-  firstStep: JourneyStepId;
+  /** The step "show me again" replays: the one that points at the phase's own control. */
+  replayStep: JourneyStepId;
   /** A short extra, for example "2 of 3 questions" while Learn is current. */
   detail: string | null;
 }
@@ -21,10 +21,18 @@ export interface StripItem {
 /** How many live questions the Learn phase asks for (doc-10: at least three). */
 export const LEARN_QUESTION_GOAL = 3;
 
-export function buildStrip(snapshot: JourneySnapshot, steps: readonly JourneyStep[] = JOURNEY_STEPS): StripItem[] {
+const REPLAY_STEP: Readonly<Record<JourneyPhase, JourneyStepId>> = {
+  share: 'share',
+  learn: 'learn',
+  review: 'review-board',
+  teach: 'teach',
+  summary: 'summary',
+};
+
+export function buildStrip(snapshot: JourneySnapshot, table: readonly JourneyStep[] = JOURNEY_STEPS): StripItem[] {
+  const known = new Set<JourneyStepId>(snapshot.stepIds);
   return JOURNEY_PHASES.map((phase): StripItem => {
-    const own = steps.filter((step) => step.phase === phase);
-    const first = own[0];
+    const own = table.filter((step) => step.phase === phase && known.has(step.id));
     const outcomes = own.map((step) => snapshot.outcomes[step.id]);
     let status: PhaseStatus;
     if (snapshot.done) status = 'done';
@@ -37,7 +45,7 @@ export function buildStrip(snapshot: JourneySnapshot, steps: readonly JourneySte
     if (phase === 'learn' && status === 'current' && snapshot.questions > 0) {
       detail = `${Math.min(snapshot.questions, LEARN_QUESTION_GOAL)} of ${LEARN_QUESTION_GOAL} questions`;
     }
-    return { phase, label: PHASE_LABELS[phase], status, firstStep: first ? first.id : steps[0]!.id, detail };
+    return { phase, label: PHASE_LABELS[phase], status, replayStep: REPLAY_STEP[phase], detail };
   });
 }
 

@@ -9,45 +9,44 @@ import { flush, rig } from './helpers.ts';
 const statuses = (items: StripItem[]): string => items.map((i) => `${i.label}:${i.status}`).join(' ');
 
 describe('the progress strip model', () => {
-  it('shows Share, Learn, Review, Teach, Summary', async () => {
+  it('shows Share, Learn, Review, Teach, Summary', () => {
     const { journey } = rig();
     assert.deepEqual(buildStrip(journey.getSnapshot()).map((i) => i.label), ['Share', 'Learn', 'Review', 'Teach', 'Summary']);
   });
 
   it('highlights the current phase and marks earlier ones done', async () => {
-    const { bus, journey } = rig();
-    assert.equal(statuses(buildStrip(journey.getSnapshot())), 'Share:current Learn:upcoming Review:upcoming Teach:upcoming Summary:upcoming');
-    bus.emit({ type: 'session_started', mode: 'learn' });
-    bus.emit({ type: 'screen_capturing' });
-    await flush();
-    assert.equal(statuses(buildStrip(journey.getSnapshot())), 'Share:done Learn:current Review:upcoming Teach:upcoming Summary:upcoming');
-    bus.emit({ type: 'mode_changed', mode: 'review' });
-    bus.emit({ type: 'teachback_confirmed' });
-    assert.equal(statuses(buildStrip(journey.getSnapshot())), 'Share:done Learn:done Review:current Teach:upcoming Summary:upcoming');
-    bus.emit({ type: 'mode_changed', mode: 'teach' });
-    bus.emit({ type: 'sent' });
-    assert.equal(
-      statuses(buildStrip(journey.getSnapshot())),
-      'Share:done Learn:done Review:done Teach:current Summary:upcoming',
-      'Teach stays current until the app reaches the summary',
-    );
-    bus.emit({ type: 'mode_changed', mode: 'summary' });
-    await flush();
-    assert.equal(statuses(buildStrip(journey.getSnapshot())), 'Share:done Learn:done Review:done Teach:done Summary:done');
+    const { play, journey } = rig({ agentQuietMs: 0, quietSettleMs: 0 });
+    const strip = () => statuses(buildStrip(journey.getSnapshot()));
+    assert.equal(strip(), 'Share:current Learn:upcoming Review:upcoming Teach:upcoming Summary:upcoming');
+    await play({ type: 'app_ready', mode: 'learn' }, { type: 'session_live', mode: 'learn' }, { type: 'screen_capturing' });
+    assert.equal(strip(), 'Share:done Learn:current Review:upcoming Teach:upcoming Summary:upcoming');
+    await play({ type: 'session_ended', mode: 'learn' });
+    assert.equal(strip(), 'Share:done Learn:done Review:current Teach:upcoming Summary:upcoming');
+    await play({ type: 'session_live', mode: 'review' }, { type: 'teachback_confirmed' }, { type: 'session_ended', mode: 'review' });
+    assert.equal(strip(), 'Share:done Learn:done Review:current Teach:upcoming Summary:upcoming', 'the hand-over is still Review');
+    await play({ type: 'mode_changed', mode: 'teach' }, { type: 'session_live', mode: 'teach' }, { type: 'sent' });
+    assert.equal(strip(), 'Share:done Learn:done Review:done Teach:current Summary:upcoming');
+    await play({ type: 'session_ended', mode: 'teach' });
+    assert.equal(strip(), 'Share:done Learn:done Review:done Teach:done Summary:done');
   });
 
   it('marks the phases a new hire never went through as skipped', async () => {
-    const { bus, journey } = rig();
-    bus.emit({ type: 'session_started', mode: 'teach' });
-    bus.emit({ type: 'screen_capturing' });
-    await flush();
-    assert.equal(statuses(buildStrip(journey.getSnapshot())), 'Share:done Learn:skipped Review:skipped Teach:current Summary:upcoming');
+    const { play, journey } = rig();
+    await play({ type: 'app_ready', mode: 'teach' }, { type: 'session_live', mode: 'teach' });
+    assert.equal(statuses(buildStrip(journey.getSnapshot())), 'Share:skipped Learn:skipped Review:skipped Teach:current Summary:upcoming');
+  });
+
+  it('leaves out the optional Teach share step when the shell does not capture there', async () => {
+    const { play, journey } = rig({ agentQuietMs: 0, quietSettleMs: 0 });
+    await play({ type: 'app_ready', mode: 'teach' }, { type: 'session_live', mode: 'teach' }, { type: 'sent' });
+    assert.equal(buildStrip(journey.getSnapshot())[3]?.status, 'current');
+    await play({ type: 'session_ended', mode: 'teach' });
+    assert.equal(buildStrip(journey.getSnapshot())[3]?.status, 'done', 'the step that is off does not hold the phase back');
   });
 
   it('counts live questions while Learn is current, up to the goal of three', async () => {
-    const { bus, journey } = rig();
-    bus.emit({ type: 'session_started', mode: 'learn' });
-    bus.emit({ type: 'screen_capturing' });
+    const { play, bus, journey } = rig();
+    await play({ type: 'app_ready', mode: 'learn' }, { type: 'session_live', mode: 'learn' }, { type: 'screen_capturing' });
     bus.emit({ type: 'agent_asked' });
     bus.emit({ type: 'agent_asked' });
     assert.equal(buildStrip(journey.getSnapshot())[1]?.detail, '2 of 3 questions');
@@ -55,19 +54,17 @@ describe('the progress strip model', () => {
     assert.equal(buildStrip(journey.getSnapshot())[1]?.detail, '3 of 3 questions');
   });
 
-  it('points "show me again" at the first step of the phase', async () => {
+  it('points "show me again" at the step that points at the phase own control', () => {
     const { journey } = rig();
     const items = buildStrip(journey.getSnapshot());
-    assert.deepEqual(items.map((i) => i.firstStep), ['open', 'learn', 'review-board', 'teach', 'summary']);
+    assert.deepEqual(items.map((i) => i.replayStep), ['share', 'learn', 'review-board', 'teach', 'summary']);
   });
 
   it('is not destructive: replaying a done step leaves the journey where it was', async () => {
-    const { bus, journey } = rig();
-    bus.emit({ type: 'session_started', mode: 'learn' });
-    bus.emit({ type: 'screen_capturing' });
-    await flush();
+    const { play, journey } = rig();
+    await play({ type: 'app_ready' }, { type: 'session_live', mode: 'learn' }, { type: 'screen_capturing' });
     const before = journey.getSnapshot();
-    journey.replay('open');
+    journey.replay('share');
     await flush();
     const after = journey.getSnapshot();
     assert.equal(after.stepId, before.stepId);

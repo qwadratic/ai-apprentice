@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import { JOURNEY_EVENT_TYPES } from '../events.ts';
-import { JOURNEY_PHASES, JOURNEY_STEPS, MAX_LINE_WORDS, journeyTargets, wordCount } from '../journey.ts';
+import { JOURNEY_PHASES, JOURNEY_STEPS, MAX_LINE_WORDS, journeyTargets, stepIndex, wordCount } from '../journey.ts';
 import type { JourneyStep } from '../journey.ts';
 
 const allLines = (step: JourneyStep): string[] => [
@@ -11,12 +11,36 @@ const allLines = (step: JourneyStep): string[] => [
   ...Object.values(step.variants ?? {}).flatMap((v) => (v ? [v.line] : [])),
 ];
 
-describe('the journey table (doc-10)', () => {
-  it('has the doc-10 steps in order', () => {
+describe('the journey table (doc-10, written against the shell Start and End)', () => {
+  it('walks Start and End explicitly, in order', () => {
     assert.deepEqual(
       JOURNEY_STEPS.map((s) => s.id),
-      ['open', 'share', 'learn', 'review-board', 'teach-back', 'handoff', 'teach', 'teach-fix', 'summary'],
+      [
+        'open',
+        'share',
+        'learn',
+        'start-review',
+        'review-board',
+        'teach-back',
+        'end-review',
+        'handoff',
+        'start-teach',
+        'share-teach',
+        'teach',
+        'teach-fix',
+        'end-teach',
+        'summary',
+      ],
     );
+  });
+
+  it('puts Share after Start Learn, and the hand-over after the Review session has ended', () => {
+    const exits = (id: Parameters<typeof stepIndex>[0]) => JOURNEY_STEPS[stepIndex(id)]?.exit.map((m) => `${m.type}:${'mode' in m ? m.mode : ''}`);
+    assert.deepEqual(exits('open'), ['session_live:learn']);
+    assert.ok(stepIndex('share') > stepIndex('open'));
+    assert.deepEqual(exits('end-review'), ['session_ended:review']);
+    assert.ok(stepIndex('handoff') === stepIndex('end-review') + 1, 'the hand-over directly follows the end of Review');
+    assert.deepEqual(exits('end-teach'), ['session_ended:teach', 'teach_finished:']);
   });
 
   it('covers every phase of the strip, in order', () => {
@@ -44,11 +68,22 @@ describe('the journey table (doc-10)', () => {
     }
   });
 
+  it('promises nothing the product does not have (no export of the map)', () => {
+    for (const step of JOURNEY_STEPS) for (const line of allLines(step)) assert.doesNotMatch(line, /export/i, `${step.id}: ${line}`);
+  });
+
   it('only waits for events the shell is told to emit', () => {
     for (const step of JOURNEY_STEPS) {
-      for (const matcher of [...step.exit, ...(step.enter.on ?? [])]) {
+      for (const matcher of [...step.exit, ...(step.skip ?? []), ...(step.enter.on ?? [])]) {
         assert.ok(JOURNEY_EVENT_TYPES.includes(matcher.type), `${step.id} waits for unknown event ${matcher.type}`);
       }
+    }
+  });
+
+  it('points every resume at a step of the table, and every Start step has a wrong-tab wording', () => {
+    for (const step of JOURNEY_STEPS) {
+      if (step.resume) assert.ok(stepIndex(step.resume) >= 0, `${step.id} resumes at ${step.resume}`);
+      if (step.tab) assert.ok(step.variants?.wrongTab, `${step.id} needs a wrongTab wording`);
     }
   });
 
@@ -56,6 +91,8 @@ describe('the journey table (doc-10)', () => {
     const persona = Object.fromEntries(JOURNEY_STEPS.map((s) => [s.id, s.persona]));
     assert.equal(persona['learn'], 'expert');
     assert.equal(persona['review-board'], 'expert');
+    assert.equal(persona['handoff'], 'expert');
+    assert.equal(persona['start-teach'], 'newHire');
     assert.equal(persona['teach'], 'newHire');
     assert.equal(persona['open'], 'any');
   });
@@ -65,11 +102,14 @@ describe('the journey table (doc-10)', () => {
       'board-gap',
       'mask-confirm',
       'mastery-summary',
+      'mode-learn',
       'mode-review',
       'mode-teach',
       'review-board',
       'screen-preview',
       'send',
+      'session-end',
+      'session-start',
       'share-screen',
       'teachback',
       'use-camera',

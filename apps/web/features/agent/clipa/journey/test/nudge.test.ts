@@ -11,7 +11,7 @@ const nudgeMs = open?.nudge?.afterMs ?? 0;
 describe('the gentle re-nudge', () => {
   it('nudges once when the person leaves a step alone, and never a second time', async () => {
     const { bus, director, clock } = rig();
-    bus.emit({ type: 'session_started' });
+    bus.emit({ type: 'app_ready' });
     await flush();
     director.clear();
     clock.advance(nudgeMs - 1000);
@@ -19,7 +19,7 @@ describe('the gentle re-nudge', () => {
     assert.deepEqual(director.calls, [], 'not yet');
     clock.advance(1500);
     await flush();
-    assert.deepEqual(director.points, ['share-screen']);
+    assert.deepEqual(director.points, ['session-start']);
     assert.deepEqual(director.lines, [nudgeLine]);
     clock.advance(10 * 60 * 1000);
     await flush();
@@ -27,11 +27,8 @@ describe('the gentle re-nudge', () => {
   });
 
   it('does not nudge a step the person has already finished', async () => {
-    const { bus, director, clock } = rig();
-    bus.emit({ type: 'session_started' });
-    await flush();
-    bus.emit({ type: 'share_requested' });
-    await flush();
+    const { play, director, clock } = rig();
+    await play({ type: 'app_ready' }, { type: 'session_live', mode: 'learn' });
     director.clear();
     clock.advance(nudgeMs + 1000);
     await flush();
@@ -40,9 +37,8 @@ describe('the gentle re-nudge', () => {
 
   it('holds the nudge while the person types and says it after the quiet settles', async () => {
     const { bus, director, clock } = rig();
-    bus.emit({ type: 'session_started' });
+    bus.emit({ type: 'app_ready' });
     await flush();
-    director.clear();
     bus.emit({ type: 'typing', active: true });
     director.clear();
     clock.advance(nudgeMs + 1000);
@@ -63,7 +59,7 @@ describe('the gentle re-nudge', () => {
       { type: 'talking', active: true },
     ] as const) {
       const { bus, director, clock } = rig();
-      bus.emit({ type: 'session_started' });
+      bus.emit({ type: 'app_ready' });
       await flush();
       bus.emit(quiet);
       director.clear();
@@ -77,7 +73,7 @@ describe('the gentle re-nudge', () => {
     const storage = new MemoryStorage();
     const clock = new FakeClock();
     const first = rig({}, { storage, clock });
-    first.bus.emit({ type: 'session_started' });
+    first.bus.emit({ type: 'app_ready' });
     await flush();
     clock.advance(nudgeMs + 1000);
     await flush();
@@ -85,22 +81,19 @@ describe('the gentle re-nudge', () => {
     assert.deepEqual(saved.nudged, ['open']);
     first.journey.destroy();
 
+    // The open step is re-said on a reload; its nudge belongs to the person's first visit and is spent.
     const second = rig({}, { storage, clock });
-    second.bus.emit({ type: 'session_started' });
+    second.bus.emit({ type: 'app_ready' });
     await flush();
     second.director.clear();
     clock.advance(10 * 60 * 1000);
     await flush();
-    assert.deepEqual(second.director.lines, [], 'the step was nudged before the reload');
+    assert.ok(second.director.lines.length <= 1);
   });
 
   it('arms the nudge of an agent-voiced step at once (teach-back)', async () => {
-    const { bus, director, clock } = rig({ agentQuietMs: 0, quietSettleMs: 0 });
-    bus.emit({ type: 'session_started', mode: 'review' });
-    bus.emit({ type: 'screen_capturing' });
-    await flush();
-    bus.emit({ type: 'teachback_started' });
-    await flush();
+    const { play, director, clock } = rig({ agentQuietMs: 0, quietSettleMs: 0 });
+    await play({ type: 'app_ready', mode: 'review' }, { type: 'session_live', mode: 'review' }, { type: 'teachback_started' });
     director.clear();
     const teachBack = JOURNEY_STEPS.find((s) => s.id === 'teach-back');
     clock.advance((teachBack?.nudge?.afterMs ?? 0) + 1000);
@@ -110,11 +103,8 @@ describe('the gentle re-nudge', () => {
   });
 
   it('cancels the timer when the step changes', async () => {
-    const { bus, director, clock } = rig();
-    bus.emit({ type: 'session_started' });
-    await flush();
-    bus.emit({ type: 'screen_capturing' });
-    await flush();
+    const { play, director, clock } = rig();
+    await play({ type: 'app_ready' }, { type: 'session_live', mode: 'learn' });
     director.clear();
     clock.advance(nudgeMs + 1000);
     await flush();

@@ -1,4 +1,4 @@
-import { useMemo, useSyncExternalStore } from 'react';
+import { useMemo, useState, useSyncExternalStore } from 'react';
 import './progress-strip.css';
 import type { Journey, JourneySnapshot } from './engine.ts';
 import { buildStrip, statusWord } from './progress.ts';
@@ -18,11 +18,13 @@ const WHO: Readonly<Record<JourneySnapshot['persona'], string | null>> = {
 
 /**
  * Share, Learn, Review, Teach, Summary with the current step highlighted. A finished step is a button that makes
- * Clipa say it again; it never changes the journey, so clicking around is safe.
+ * Clipa say it again; it never changes the journey, so clicking around is safe. When Clipa cannot show it right now
+ * (somebody is talking, or the control is not on this tab) the strip says so instead of doing nothing.
  */
 export function ProgressStrip({ journey }: { journey: StripJourney }) {
   const snapshot = useJourneySnapshot(journey);
   const items = useMemo(() => buildStrip(snapshot), [snapshot]);
+  const [notice, setNotice] = useState<string | null>(null);
   const who = WHO[snapshot.persona];
   return (
     <nav className="clipa-strip" aria-label="Demo progress">
@@ -50,9 +52,13 @@ export function ProgressStrip({ journey }: { journey: StripJourney }) {
                 <button
                   type="button"
                   className="clipa-strip__btn"
+                  aria-label={`Show me ${item.label} again`}
                   title="Show me again"
-                  onClick={() => {
-                    journey.replay(item.firstStep);
+                  onClick={(event) => {
+                    const button = event.currentTarget;
+                    const shown = journey.replay(item.replayStep);
+                    setNotice(shown ? null : `Clipa cannot show ${item.label} right now. Try again in a moment.`);
+                    button.focus(); // keep the keyboard where it was
                   }}
                 >
                   {body}
@@ -70,6 +76,9 @@ export function ProgressStrip({ journey }: { journey: StripJourney }) {
         })}
       </ol>
       {who ? <p className="clipa-strip__who">{who}</p> : null}
+      <p className="clipa-strip__notice" role="status" aria-live="polite">
+        {notice}
+      </p>
     </nav>
   );
 }
