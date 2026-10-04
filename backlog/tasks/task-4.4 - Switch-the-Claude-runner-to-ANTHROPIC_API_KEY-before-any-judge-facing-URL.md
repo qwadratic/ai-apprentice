@@ -1,9 +1,10 @@
 ---
 id: TASK-4.4
 title: Switch the Claude runner to ANTHROPIC_API_KEY before any judge-facing URL
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-10-03 22:54'
+updated_date: '2026-10-04 01:58'
 labels:
   - shared
   - infra
@@ -34,3 +35,9 @@ Anthropic's Agent SDK terms require API-key auth for anything third parties use;
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Not needed: Ivan decided on 4 Oct 02:00 that the hackathon demo is not production, so the Claude runner stays on the team's OAuth subscription token. No ANTHROPIC_API_KEY switch.
+<!-- SECTION:FINAL_SUMMARY:END -->
