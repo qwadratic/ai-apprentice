@@ -1,16 +1,23 @@
 import { EvidenceLinks, NotWired } from '../components/Parts.tsx';
-import { ConductorLine, ConductorSaid } from '../conductor/ConductorLine.tsx';
 import { useConductorLeads } from '../conductor/hooks.ts';
+import { ClipaNow } from '../feed/ClipaNow.tsx';
+import { LiveFeed } from '../feed/LiveFeed.tsx';
 import { useShell, useShellState } from '../hooks.ts';
 import { TEACH_CASES, isTeachCaseId } from '../screen/sample-scenarios.ts';
 
-const RESULT_TEXT = {
-  clear: 'Clear: this matches what the expert did.',
-  warn: 'Warning: stop before you send.',
-  unknown: 'Unknown: the tutor cannot judge this, so it does not guess.',
+const RESULT_TITLE = {
+  clear: 'Clear to send',
+  warn: 'Stop before you send',
+  unknown: 'Not sure: ask before you send',
 } as const;
 
-/** Teach: the checkpoint result before Send, and the mastery summary at the end. */
+const RESULT_HINT = {
+  clear: 'This matches what the expert did.',
+  warn: 'One of the expert’s rules covers this step.',
+  unknown: 'The tutor cannot judge this case, so it does not guess.',
+} as const;
+
+/** Pass it on: the new hire's case, the warning card before Send, the live feed and, at the end, what is mastered. */
 export function TeachView() {
   const { controller } = useShell();
   const brain = useShellState((s) => s.brain);
@@ -20,33 +27,43 @@ export function TeachView() {
   const sampleCase = useShellState((s) => s.teach.sampleCase);
   const sampleOn = useShellState((s) => s.screen.sampleOn);
   const busy = useShellState((s) => s.phase === 'starting' || s.phase === 'ending');
+  const running = useShellState((s) => s.phase === 'live' && s.session?.mode === 'teach');
   const offRecord = useShellState((s) => s.offRecord);
   const leads = useConductorLeads();
 
+  const idle = running
+    ? 'Work on the new case. I speak up before a step one of the expert’s rules covers.'
+    : 'Press Start Pass it on, share your screen and work on a case the expert never showed.';
+
   return (
     <div className="as-view" data-testid="view-teach">
-      <ConductorLine />
-      {leads && (
-        <p className="as-note" data-testid="teach-conductor-hint">
-          Press Start Pass it on, share your screen and work on your case in any app. Clipa reads the expert&apos;s confirmed map and speaks up
-          before a step that one of the expert&apos;s rules covers. She warns; she never blocks another app.
-        </p>
-      )}
-      {leads && <ConductorSaid title="What Clipa said" />}
+      <ClipaNow idle={idle} />
       {!leads && !brain.wired && (
-        <NotWired>
-          the tutor ({brain.name}): it cannot explain steps, predict decisions or judge a checkpoint. Until then every
-          checkpoint is answered &quot;unknown&quot;, never &quot;clear&quot;.
-        </NotWired>
+        <NotWired>the tutor ({brain.name}): every checkpoint is answered &quot;unknown&quot;, never &quot;clear&quot;.</NotWired>
       )}
-      <p className="as-note" data-testid="teach-honesty">
-        The checkpoint works in our demo workspace only; it does not block clicks in other apps. In the demo workspace a warning or an
-        unknown answer still needs your explicit acknowledgement before Send: the decision stays with you.
-      </p>
+
+      {checkpoint !== null && (
+        <section
+          className={`as-alert as-alert--${checkpoint.status}`}
+          role="status"
+          aria-live="polite"
+          aria-labelledby="as-cp-title"
+          data-testid="checkpoint-card"
+          data-status={checkpoint.status}
+        >
+          <h3 className="as-alert__title" id="as-cp-title">{RESULT_TITLE[checkpoint.status]}</h3>
+          <p className="as-alert__message">{checkpoint.message}</p>
+          <p className="as-alert__hint">
+            {RESULT_HINT[checkpoint.status]}
+            {checkpoint.evidenceIds.length > 0 && <> See the expert&apos;s moment: <EvidenceLinks ids={checkpoint.evidenceIds} /></>}
+          </p>
+          {checkpoint.deliveryError && <p className="as-error" role="alert">The workspace did not take the reply: {checkpoint.deliveryError}</p>}
+        </section>
+      )}
 
       {sampleOn && (
-        <section aria-labelledby="as-case-title">
-          <h3 className="as-h3" id="as-case-title">Sample case <span className="as-tag as-tag--warn">synthetic</span></h3>
+        <section className="as-case" aria-labelledby="as-case-title">
+          <h3 className="as-h3" id="as-case-title">Sample case <span className="as-tag as-tag--warn">Synthetic data</span></h3>
           <div className="as-row">
             <select
               className="as-select"
@@ -57,48 +74,26 @@ export function TeachView() {
               {TEACH_CASES.map((c) => <option key={c.id} value={c.id}>{c.id.toUpperCase()} · {c.title}</option>)}
             </select>
             <button type="button" className="as-btn" disabled={offRecord || busy} onClick={() => void controller.runSampleCase(sampleCase)}>
-              Run this case (new session)
+              Run this case
             </button>
+            {canRaise && <button type="button" className="as-btn as-btn--quiet" onClick={() => controller.raiseSampleCheckpoint()}>Raise a checkpoint</button>}
           </div>
-          <p className="as-note">Each case is a new session. The tutor reads the confirmed Work Map from Review; without one it answers unknown.</p>
         </section>
       )}
 
-      <section aria-labelledby="as-cp-title">
-        <h3 className="as-h3" id="as-cp-title">Checkpoint before Send</h3>
-        {checkpoint === null ? (
-          <p className="as-empty">No checkpoint yet. The workspace raises one at Preview; the answer appears here before anything is sent.</p>
-        ) : (
-          <div className={`as-checkpoint as-checkpoint--${checkpoint.status}`} role="status" aria-live="polite" data-testid="checkpoint-card" data-status={checkpoint.status}>
-            <p className="as-checkpoint__status">{RESULT_TEXT[checkpoint.status]}</p>
-            <p className="as-checkpoint__message">{checkpoint.message}</p>
-            {checkpoint.evidenceIds.length > 0 && <p className="as-note">The expert&apos;s screen moment:</p>}
-            <EvidenceLinks ids={checkpoint.evidenceIds} />
-            {checkpoint.evidenceIds.length === 0 && <p className="as-note">No expert moment is linked to this answer.</p>}
-            {checkpoint.deliveryError && <p className="as-error" role="alert">The workspace did not accept the reply: {checkpoint.deliveryError}</p>}
-          </div>
-        )}
-        {canRaise && (
-          <div className="as-row">
-            <button type="button" className="as-btn" onClick={() => controller.raiseSampleCheckpoint()}>Raise sample checkpoint</button>
-            <span className="as-tag as-tag--warn">synthetic</span>
-          </div>
-        )}
-      </section>
+      <LiveFeed empty={running ? 'Watching the new case. Warnings and checks appear here.' : 'Nothing yet: start Pass it on and share your screen.'} />
 
-      <section aria-labelledby="as-mastery-title" data-clipa-target="summary">
-        <h3 className="as-h3" id="as-mastery-title">What is mastered</h3>
-        {mastery === null ? (
-          <p className="as-empty">Not available yet: it appears after the first checkpoint of a sample case.</p>
-        ) : (
+      {mastery !== null && (
+        <section className="as-mastery-card" aria-labelledby="as-mastery-title" data-clipa-target="summary">
+          <h3 className="as-h3" id="as-mastery-title">What is mastered</h3>
           <div className="as-mastery">
             <div>
               <h4 className="as-h4">Mastered</h4>
-              <ul>{mastery.mastered.map((m) => <li key={m}>{m}</li>)}</ul>
+              {mastery.mastered.length === 0 ? <p className="as-empty">Nothing yet.</p> : <ul>{mastery.mastered.map((m) => <li key={m}>{m}</li>)}</ul>}
             </div>
             <div>
               <h4 className="as-h4">To practise</h4>
-              <ul>{mastery.practise.map((m) => <li key={m}>{m}</li>)}</ul>
+              {mastery.practise.length === 0 ? <p className="as-empty">Nothing left.</p> : <ul>{mastery.practise.map((m) => <li key={m}>{m}</li>)}</ul>}
             </div>
             {(mastery.notJudged?.length ?? 0) > 0 && (
               <div data-testid="not-judged">
@@ -107,8 +102,12 @@ export function TeachView() {
               </div>
             )}
           </div>
-        )}
-      </section>
+        </section>
+      )}
+
+      <p className="as-footnote" data-testid="teach-honesty">
+        Clipa warns before Send in our demo workspace and leaves the decision to you; she never blocks clicks in other apps.
+      </p>
     </div>
   );
 }

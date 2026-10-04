@@ -3,11 +3,11 @@ id: TASK-3.36
 title: >-
   Generic mode on the API: LLM tasks for any screen (question, map, guardrail
   check)
-status: In Progress
+status: Done
 assignee:
   - '@qwadratic'
 created_date: '2026-10-04 04:06'
-updated_date: '2026-10-04 04:18'
+updated_date: '2026-10-04 06:07'
 labels:
   - stream-b
 dependencies: []
@@ -42,3 +42,9 @@ The live demo runs outside our demo workspace on workflows nobody knows in advan
 <!-- SECTION:NOTES:BEGIN -->
 4 Oct 04:25 UTC: Ivan raised the runner's per-call budget for text tasks (RUNNER_COMPLETE_MAX_BUDGET_USD on the VM) from 0.10 to 0.50 USD. map_synthesis takes up to 96 KiB of input; at 0.10 it risked error_max_budget_usd (502 sdk_error). Vision calls already had 0.50 (MAX_BUDGET_USD).
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Merged in PR #43: generic_question, map_synthesis and guardrail_check; later map_edit (PR #49). Deployed.
+<!-- SECTION:FINAL_SUMMARY:END -->

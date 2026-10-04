@@ -4,13 +4,13 @@ title: With vs without expert baseline for T1-T6 (cuttable)
 status: To Do
 assignee: []
 created_date: '2026-10-03 21:11'
+updated_date: '2026-10-04 06:07'
 labels:
   - stream-b
   - tutor
   - demo
 milestone: m-1
 dependencies:
-  - TASK-3.12
   - TASK-4.2
 parent_task_id: TASK-3
 priority: low
@@ -39,3 +39,9 @@ Estimate: about 1.5 h of agent time. Card key: B-baseline-eval.
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Archived 4 Oct 06:30 UTC in the backlog clean-up: cut (marked cuttable); no time before submission.
+<!-- SECTION:NOTES:END -->

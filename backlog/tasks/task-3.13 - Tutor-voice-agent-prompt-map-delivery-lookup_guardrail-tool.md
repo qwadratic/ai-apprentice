@@ -1,20 +1,18 @@
 ---
 id: TASK-3.13
 title: 'Tutor voice agent: prompt, map delivery, lookup_guardrail tool'
-status: In Progress
+status: Done
 assignee:
   - '@qwadratic'
 created_date: '2026-10-03 21:11'
-updated_date: '2026-10-04 03:19'
+updated_date: '2026-10-04 06:07'
 labels:
   - stream-b
   - tutor
   - voice
 milestone: m-0
 dependencies:
-  - TASK-3.12
   - TASK-3.2
-  - TASK-3.3
 parent_task_id: TASK-3
 priority: high
 ordinal: 19000
@@ -53,3 +51,9 @@ created: 2026-10-03 22:17
 Coordinator decision: provisioning of the tutor agent (apprentice-tutor-dev) moved here from TASK-3.2. Reuse apps/api/agent/elevenlabs/provision.mjs (idempotent by name). Note from the spike: MCP is disabled at workspace level (can_use_mcp_servers=false), so lookup_guardrail should be a client tool or a webhook tool.
 ---
 <!-- COMMENTS:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Tutor agent live with its own voice and prompt; Teach connects with signed-url?role=tutor (PR #38); warnings come from the conductor's guardrail_check. The lookup_guardrail tool was not built: the conductor sends the rules instead.
+<!-- SECTION:FINAL_SUMMARY:END -->

@@ -3,10 +3,11 @@ id: TASK-3.32
 title: >-
   Synthetic expert and new hire drive the real stack: simulated screen share and
   synthetic voice
-status: In Progress
+status: Done
 assignee:
   - '@qwadratic'
 created_date: '2026-10-04 02:23'
+updated_date: '2026-10-04 06:07'
 labels:
   - stream-b
   - demo
@@ -37,3 +38,9 @@ Ivan, 4 Oct 02:20 UTC: two synthetic people, one per side: an expert for Learn a
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Sim kit merged in PR #39 (synthetic expert and new hire, simulated screen share and voice, headed e2e harness). Agent browser runs are paused by Ivan's rule (4 Oct 04:20 UTC).
+<!-- SECTION:FINAL_SUMMARY:END -->

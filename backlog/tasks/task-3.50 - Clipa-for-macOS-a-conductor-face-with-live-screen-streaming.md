@@ -5,6 +5,7 @@ status: In Progress
 assignee:
   - '@qwadratic'
 created_date: '2026-10-04 06:01'
+updated_date: '2026-10-04 06:33'
 labels:
   - stream-b
 dependencies: []
@@ -33,3 +34,9 @@ Ivan, 4 Oct 06:00 UTC: the macOS app has no windows at all. It is only Clipa, li
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+4 Oct 06:32 UTC: builder finished. Branch task-3.50-macos-clipa, head ccf6ccc, macos-build CI green (run 37182996880), artifact Clipa-macos. CI smoke on a macOS runner against the live API: session, cues, one frame accepted, voice live, open_web on End. Not yet run on a real Mac; no masks on macOS frames. Next: Ivan tests the artifact, then PR and merge.
+<!-- SECTION:NOTES:END -->

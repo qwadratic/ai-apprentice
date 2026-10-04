@@ -7,7 +7,7 @@ status: In Progress
 assignee:
   - '@qwadratic'
 created_date: '2026-10-04 04:06'
-updated_date: '2026-10-04 04:15'
+updated_date: '2026-10-04 06:07'
 labels:
   - stream-b
 dependencies: []
@@ -53,4 +53,6 @@ Not done:
 5. Replace the local type once stream A adds screen_activity (TASK-3.41).
 Note: typing in another app (a mail client) cannot be seen from our page, so pauses must come from voice silence and screen changes.
 Container tips: Chromium needs --disable-http2 --disable-quic, and API calls went through curl (coordinator scratchpad net.mjs).
+
+Archived 4 Oct 06:30 UTC in the backlog clean-up: superseded by the web conductor client (TASK-3.46); WIP branch task-3.37-generic-shell kept for reference.
 <!-- SECTION:NOTES:END -->

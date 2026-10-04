@@ -1,11 +1,11 @@
 ---
 id: TASK-3.8
 title: 'App shell, Clipa agent face, Learn mode view'
-status: In Progress
+status: Done
 assignee:
   - '@qwadratic'
 created_date: '2026-10-03 21:10'
-updated_date: '2026-10-04 01:54'
+updated_date: '2026-10-04 06:06'
 labels:
   - stream-b
   - ux
@@ -46,3 +46,9 @@ Estimate: about 2 h of agent time. Card key: B-app-shell.
 <!-- SECTION:NOTES:BEGIN -->
 PR #22 merged (0e4172a): shell, modes, status, Off the record, persona picker, debug drawer, session with token, voice (ported from the lab), Clipa presenter, A's ScreenPanel slot, Brain seam with NullBrain. Remaining for the ACs: wire the TASK-3.29 brain + TASK-3.30 LLM route + TASK-3.28 director (next task).
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+The app shell is merged and live (PR #36 and follow-ups #41, #44, #51, #52): Clipa face, modes as the Show / Reflect / Pass it on journey rail, conductor client.
+<!-- SECTION:FINAL_SUMMARY:END -->

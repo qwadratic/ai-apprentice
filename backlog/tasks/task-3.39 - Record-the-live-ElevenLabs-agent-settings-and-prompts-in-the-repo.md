@@ -4,6 +4,7 @@ title: Record the live ElevenLabs agent settings and prompts in the repo
 status: To Do
 assignee: []
 created_date: '2026-10-04 04:15'
+updated_date: '2026-10-04 06:07'
 labels:
   - stream-b
 dependencies: []
@@ -30,3 +31,9 @@ apps/api/agent/elevenlabs/agents.config.json is out of sync with the live agents
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+4 Oct 06:15 UTC: prompts changed again (demo pace: the app asks, Clipa replies in one sentence; greetings 'Hi, I am Clipa.' and 'Hi, I am Clipa. Go ahead with your case.'). Copy from the live agents.
+<!-- SECTION:NOTES:END -->

@@ -4,6 +4,7 @@ title: 'Review mode: debrief follow-ups, teach-back, confirm or correct'
 status: To Do
 assignee: []
 created_date: '2026-10-03 21:10'
+updated_date: '2026-10-04 06:07'
 labels:
   - stream-b
   - workmap
@@ -11,8 +12,6 @@ labels:
   - voice
 milestone: m-0
 dependencies:
-  - TASK-3.6
-  - TASK-3.4
   - TASK-3.8
 parent_task_id: TASK-3
 priority: high
@@ -42,3 +41,9 @@ Estimate: about 2 h of agent time. Card key: B-review.
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Archived 4 Oct 06:30 UTC in the backlog clean-up: superseded by the conductor's Reflect flow: gaps, teach-back, voice edits, confirm.
+<!-- SECTION:NOTES:END -->

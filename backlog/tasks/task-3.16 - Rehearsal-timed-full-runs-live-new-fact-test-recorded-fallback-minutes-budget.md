@@ -6,13 +6,13 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-10-03 21:11'
+updated_date: '2026-10-04 06:07'
 labels:
   - stream-b
   - demo
   - voice
 milestone: m-0
-dependencies:
-  - TASK-3.15
+dependencies: []
 parent_task_id: TASK-3
 priority: high
 ordinal: 22000

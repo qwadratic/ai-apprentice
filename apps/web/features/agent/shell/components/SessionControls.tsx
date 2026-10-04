@@ -2,12 +2,15 @@ import { useShell, useShellState } from '../hooks.ts';
 import { MODE_LABELS } from '../state/types.ts';
 
 const START_HINT = {
-  learn: 'The expert works; Clipa listens and asks a few questions at natural pauses.',
-  review: 'A spoken debrief: open questions, then a teach-back to confirm or correct.',
-  teach: 'The tutor watches a new case and speaks up before a guardrail is broken.',
+  learn: 'Do the task and talk as you work. Clipa asks a few questions at natural pauses.',
+  review: 'A spoken debrief: open questions, then a teach-back you confirm or correct.',
+  teach: 'A new hire works on a new case. Clipa speaks up before an expert’s rule is broken.',
 } as const;
 
-/** Start / End of a mode, the sample-observations switch and the disclosure. Start of a mode makes the session. */
+/**
+ * Start or End of the stage on screen (Start makes the session), and what recording means. One main button; the sample
+ * observations (invented data) and the limits sit under Options. The session id and the raw state are in Debug.
+ */
 export function SessionControls() {
   const { controller } = useShell();
   const mode = useShellState((s) => s.mode);
@@ -18,78 +21,70 @@ export function SessionControls() {
   const label = MODE_LABELS[mode];
   const running = phase === 'live';
   const busy = phase === 'starting' || phase === 'ending';
+  const elsewhere = running && session !== null && session.mode !== mode;
 
   return (
-    <section className="as-card as-session" aria-labelledby="as-controls-title">
-      <h2 className="as-card__title" id="as-controls-title">Session</h2>
-
+    <section className="as-card as-session" aria-label="Session" data-running={running ? 'true' : 'false'}>
       {offRecord && (
         <p className="as-notwired as-notwired--off" role="status">
-          You are off the record: nothing is captured, spoken or sent. Press Back on record to start again.
+          Off the record: nothing is captured, spoken or sent. Press Back on record to go on.
         </p>
       )}
 
-      <div className="as-row">
+      <div className="as-session__main">
         {running ? (
-          <>
-            <button type="button" className="as-btn as-btn--primary" onClick={() => void controller.end('Session ended.')}>
-              End session
+          elsewhere ? (
+            <button type="button" className="as-btn as-btn--primary as-btn--big" data-testid="switch-session" disabled={offRecord} onClick={() => void controller.switchSession(mode)}>
+              Start {label}
             </button>
-            {session && session.mode !== mode && (
-              <button type="button" className="as-btn" data-testid="switch-session" disabled={offRecord} onClick={() => void controller.switchSession(mode)}>
-                End {MODE_LABELS[session.mode]} and start {label}
-              </button>
-            )}
-          </>
+          ) : (
+            <button type="button" className="as-btn as-btn--big as-btn--end" onClick={() => void controller.end('Session ended.')}>
+              <span className="as-session__rec" aria-hidden="true" /> End {label}
+            </button>
+          )
         ) : (
           <button
             type="button"
-            className="as-btn as-btn--primary"
+            className="as-btn as-btn--primary as-btn--big"
             data-clipa-target="start"
             disabled={offRecord || busy}
             onClick={() => void controller.start(mode)}
           >
-            {phase === 'starting' ? 'Starting...' : phase === 'ending' ? 'Ending...' : `Start ${label}`}
+            {phase === 'starting' ? 'Starting…' : phase === 'ending' ? 'Ending…' : `Start ${label}`}
           </button>
+        )}
+        {!offRecord && (
+          <p className="as-session__hint">
+            {elsewhere
+              ? `${MODE_LABELS[session.mode]} is still running; this ends it and starts ${label}.`
+              : running ? 'Recording. End it when the task is done.' : START_HINT[mode]}
+          </p>
         )}
       </div>
 
-      {running && session && session.mode !== mode && (
-        <p className="as-note" role="status">A {MODE_LABELS[session.mode]} session is running. Switching tabs does not end it; its data stays here while you look at {label}.</p>
-      )}
-      {!running && !offRecord && <p className="as-note">{START_HINT[mode]}</p>}
-      {session && (
-        <p className="as-note" data-testid="session-line">
-          Session <code>{session.id.length > 12 ? `${session.id.slice(0, 8)}...` : session.id}</code> · {MODE_LABELS[session.mode]}
-          {phase === 'ended' ? ' · ended' : ''}
-        </p>
-      )}
-
-      <label className={`as-switch${mode === 'review' ? ' is-disabled' : ''}`}>
-        <input
-          type="checkbox"
-          checked={sampleOn}
-          onChange={(e) => void controller.setSampleObservations(e.target.checked)}
-          disabled={offRecord}
-        />
-        <span>
-          <strong>Use sample observations</strong> <span className="as-tag as-tag--warn">synthetic</span>
-          <span className="as-switch__hint">
-            Invented screen events instead of your screen: the fallback that runs until you share a window in the Screen panel.
-            {mode === 'review' ? ' Review does not use the screen.' : ''}
-          </span>
-        </span>
-      </label>
-
       <p className="as-disclosure">
-        Starting a mode stores the session events, the voice transcript and an audio recording on our server, and opens the microphone.
-        <strong> Off the record</strong> stops both channels; it does not delete or recall what was already sent.
+        Start records the session&apos;s events, transcript and audio on our server and opens the microphone. <strong>Off the record</strong> stops
+        both channels; it does not recall what was already sent.
       </p>
       <details className="as-details">
-        <summary className="as-details__summary">Limits and what masks do not cover</summary>
+        <summary className="as-details__summary">Options and limits</summary>
+        <label className={`as-switch${mode === 'review' ? ' is-disabled' : ''}`}>
+          <input
+            type="checkbox"
+            checked={sampleOn}
+            onChange={(e) => void controller.setSampleObservations(e.target.checked)}
+            disabled={offRecord}
+          />
+          <span>
+            <strong>Use sample observations</strong> <span className="as-tag as-tag--warn">Synthetic data</span>
+            <span className="as-switch__hint">
+              Invented screen events instead of your screen, until you share one.{mode === 'review' ? ' Reflect does not use the screen.' : ''}
+            </span>
+          </span>
+        </label>
         <p className="as-note">
-          The session ends by itself after 10 minutes, or after 2 minutes with this tab hidden. Screen masks hide pixels, not speech:
-          do not say anything you want to keep private.
+          A session ends by itself after 10 minutes, or after 2 minutes with this tab hidden. Screen masks hide pixels, not speech: do not
+          say anything you want to keep private.
         </p>
       </details>
     </section>
