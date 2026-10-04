@@ -7,6 +7,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import http from 'node:http';
 import type { AgentOptions } from '../agent/index.ts';
 import { ORIGIN, bearer, issue, start } from './agent-helpers.ts';
+import type { MapSynthesisOutput } from '../agent/llm-tasks.ts';
 
 const RUNNER_TOKEN = 'runner-' + 'r'.repeat(40);
 
@@ -393,11 +394,111 @@ test('a failed runner call releases the in-flight slot', async (t) => {
   assert.equal((await post(s.base, 'entity_resolution', s.token, input)).status, 200);
 });
 
+// ---- generic mode: any screen, any workflow -----------------------------------------------------------------------
+const OBS = [
+  { id: 'obs-1', atMs: 1000, app: 'Notes', surface: 'editor', summary: 'A note titled Plan is open.', change: null, pendingAction: null, regions: [{ id: 'r1', label: 'title field' }] },
+  { id: 'obs-2', atMs: 4000, app: 'Notes', surface: 'editor', summary: 'The second line now says Budget 300.', change: 'The budget line changed from 500 to 300.', pendingAction: 'Save', regions: [{ id: 'r2', label: 'budget line' }, { id: 'r3', label: 'Save button' }] },
+];
+const TURNS = [
+  { role: 'agent', text: 'What made you lower it?', atMs: 5000 },
+  { role: 'expert', text: 'Anything above three hundred needs the lead to sign off, so I keep it at 300.', atMs: 7000 },
+];
+const QUESTION_INPUT = { observations: OBS, transcript: TURNS, asked: ['Why this title?'], language: 'de' };
+const MAP_INPUT = { observations: OBS, transcript: TURNS, correction: null, previousTeachBack: null };
+const CHECK_INPUT = { guardrails: [{ id: 'g1', condition: 'budget above 300', requiredAction: 'ask the lead first', reason: 'needs sign-off', quote: null }], observations: OBS, transcript: [], language: null };
+
+test('generic_question: ids only from the input, repeats become null, the newest observation is the default', async (t) => {
+  let reply: unknown = { question: 'You lowered the budget to 300. Is there a limit?', topic: 'limit', observationIds: ['obs-2', 'obs-9', 'obs-2'], regionIds: ['r2', 'zz'] };
+  const s = await setup(t, () => ok(reply), HIGH);
+  let r = await post(s.base, 'generic_question', s.token, QUESTION_INPUT);
+  assert.equal(r.status, 200);
+  assert.deepEqual((await bodyOf(r)).output, { question: 'You lowered the budget to 300. Is there a limit?', topic: 'limit', observationIds: ['obs-2'], regionIds: ['r2'] });
+  const schema = s.calls[0]?.body.schema as { properties: { regionIds: { items: { enum: string[] } } } };
+  assert.deepEqual(schema.properties.regionIds.items.enum, ['r1', 'r2', 'r3']);
+  assert.match(s.calls[0]?.body.prompt ?? '', /"language":"de"/);
+  reply = { question: 'why this title?', topic: 'reason', observationIds: [], regionIds: [] };
+  r = await post(s.base, 'generic_question', s.token, QUESTION_INPUT);
+  assert.equal(((await bodyOf(r)).output as { question: unknown }).question, null, 'a repeat is no question');
+  reply = { question: 'Is 300 a hard limit?', topic: 'limit', observationIds: [], regionIds: [] };
+  r = await post(s.base, 'generic_question', s.token, QUESTION_INPUT);
+  assert.deepEqual(((await bodyOf(r)).output as { observationIds: unknown }).observationIds, ['obs-2']);
+  reply = { question: 'x'.repeat(241), topic: 'limit', observationIds: [], regionIds: [] };
+  assert.equal((await post(s.base, 'generic_question', s.token, QUESTION_INPUT)).status, 502);
+  reply = { question: 'Why?', topic: 'gossip', observationIds: [], regionIds: [] };
+  assert.equal((await post(s.base, 'generic_question', s.token, QUESTION_INPUT)).status, 502);
+});
+
+test('generic inputs are typed: observations need ids, a surface and a summary; languages are short codes', async (t) => {
+  const s = await setup(t, () => ok({}), HIGH);
+  const field = async (task: string, body: unknown): Promise<unknown> => {
+    const r = await post(s.base, task, s.token, body);
+    assert.equal(r.status, 400);
+    return (await bodyOf(r)).field;
+  };
+  assert.equal(await field('generic_question', { ...QUESTION_INPUT, observations: [] }), 'observations');
+  assert.equal(await field('generic_question', { ...QUESTION_INPUT, observations: [{ ...OBS[0], id: 'has space' }] }), 'observations.0.id');
+  assert.equal(await field('generic_question', { ...QUESTION_INPUT, observations: [OBS[0], OBS[0]] }), 'observations.1.id');
+  assert.equal(await field('generic_question', { ...QUESTION_INPUT, observations: [{ ...OBS[0], summary: '' }] }), 'observations.0.summary');
+  assert.equal(await field('generic_question', { ...QUESTION_INPUT, observations: [{ ...OBS[0], extra: 1 }] }), 'observations.0');
+  assert.equal(await field('generic_question', { ...QUESTION_INPUT, language: 'Deutsch bitte' }), 'language');
+  assert.equal(await field('generic_question', { ...QUESTION_INPUT, transcript: [{ role: 'system', text: 'x', atMs: 0 }] }), 'transcript.0.role');
+  assert.equal(await field('guardrail_check', { ...CHECK_INPUT, guardrails: [] }), 'guardrails');
+  assert.equal(await field('map_synthesis', { ...MAP_INPUT, prompt: 'free text' }), 'body');
+  assert.equal(s.calls.length, 0);
+  // map_synthesis takes a whole session: well above the 16 KiB default.
+  const many = Array.from({ length: 40 }, (_, i) => ({ ...OBS[1], id: `obs-${i}`, summary: 's'.repeat(390) }));
+  const r = await post(s.base, 'map_synthesis', s.token, { ...MAP_INPUT, observations: many });
+  assert.notEqual(r.status, 413);
+});
+
+test('map_synthesis: a reason stands only with the expert\'s own words; ids are renumbered and evidence filtered', async (t) => {
+  const s = await setup(t, () => ok({
+    steps: [
+      { id: 'a', kind: 'action', goal: 'Open the plan', action: 'Opened the note', decision: null, evidenceIds: ['obs-1'] },
+      { id: 'b', kind: 'judgment', goal: 'Keep the budget in bounds', action: 'Lowered the budget to 300', evidenceIds: ['obs-2', 'obs-404'],
+        decision: { summary: 'Keep it at 300', reason: 'Above 300 the lead signs off', quote: 'anything above three hundred needs the lead to sign off' } },
+      { id: 'c', kind: 'judgment', goal: 'Pick a title', action: 'Kept the title', evidenceIds: [],
+        decision: { summary: 'Kept the title', reason: 'The team likes it', quote: 'the team likes it' } },
+    ],
+    guardrails: [{ id: 'rule-x', condition: 'budget above 300', requiredAction: 'ask the lead', reason: 'sign-off', quote: 'needs the lead to sign off', escalateTo: 'the lead', exceptions: [], evidenceIds: ['obs-2'] }],
+    gaps: [{ question: 'Who is the lead?', targetId: 'rule-x', evidenceIds: ['obs-2'], regionIds: ['r3', 'nope'] }, { question: 'Why this title?', targetId: 'c', evidenceIds: [], regionIds: [] }],
+    teachBack: 'You open the plan and keep the budget at 300. Is this right?',
+  }), HIGH);
+  const r = await post(s.base, 'map_synthesis', s.token, MAP_INPUT);
+  assert.equal(r.status, 200);
+  const map = (await bodyOf(r)).output as MapSynthesisOutput;
+  assert.deepEqual(map.steps.map((x) => x.id), ['s1', 's2', 's3']);
+  assert.deepEqual(map.steps[1]?.evidenceIds, ['obs-2']);
+  assert.deepEqual(map.steps[1]?.decision, { summary: 'Keep it at 300', reason: 'Above 300 the lead signs off', quote: 'Anything above three hundred needs the lead to sign off', quoteAtMs: 7000 });
+  assert.deepEqual(map.steps[2]?.decision, { summary: 'Kept the title', reason: null, quote: null, quoteAtMs: null }, 'words the expert never said are dropped with their reason');
+  assert.equal(map.guardrails[0]?.id, 'g1');
+  assert.equal(map.guardrails[0]?.quote, 'needs the lead to sign off');
+  assert.deepEqual(map.gaps.map((g) => [g.targetId, g.regionIds]), [['g1', ['r3']], ['s3', []]]);
+});
+
+test('guardrail_check: a warning names a rule and says something, else it is unknown; rules come only from the input', async (t) => {
+  let reply: unknown = { status: 'warn', guardrailId: 'g1', message: 'Your lead would stop here. Why do you think?', regionIds: ['r3', 'r1'] };
+  const s = await setup(t, () => ok(reply), HIGH);
+  let r = await post(s.base, 'guardrail_check', s.token, CHECK_INPUT);
+  assert.deepEqual((await bodyOf(r)).output, { status: 'warn', guardrailId: 'g1', message: 'Your lead would stop here. Why do you think?', regionIds: ['r3'] });
+  reply = { status: 'warn', guardrailId: 'g1', message: null, regionIds: [] };
+  r = await post(s.base, 'guardrail_check', s.token, CHECK_INPUT);
+  assert.equal(((await bodyOf(r)).output as { status: string }).status, 'unknown');
+  reply = { status: 'clear', guardrailId: null, message: 'fine', regionIds: ['r3'] };
+  r = await post(s.base, 'guardrail_check', s.token, CHECK_INPUT);
+  assert.deepEqual((await bodyOf(r)).output, { status: 'clear', guardrailId: null, message: null, regionIds: [] });
+  reply = { status: 'warn', guardrailId: 'g9', message: 'Stop.', regionIds: [] };
+  assert.equal((await post(s.base, 'guardrail_check', s.token, CHECK_INPUT)).status, 502, 'an invented rule is invalid output');
+});
+
 // ---- honesty: what the runner actually receives must be generic -----------------------------------------------------
 const PINNED_PROMPT_SHA256: Record<string, string> = {
   'answer-extraction.ts': '28c542eb5bf30514aed951b611649de202107cfa2cde6504e664b76c947e373d',
   'reply-classification.ts': 'd702dcfb366d9879bc0a1c5e3b3c647e06961c71dfdcaadc07ddb27f0c06f7e4',
   'entity-resolution.ts': '711256123da833fb9e95f440d16da7829ce88fc17b08d1ea10d3c560cf2687be',
+  'generic-question.ts': 'ab03cbf95efa711481bf96f2917891b145bb7cbbd90f05326c66c5832044a548',
+  'guardrail-check.ts': '215ae8386c99ee8cdcb6c2adfeab02db8b3c7e284040040869ba22dec22a09d8',
+  'map-synthesis.ts': 'a99c1ec479416449defc0ed3279b60626088935354ae415701e61954503eb5f8',
 };
 const sha256 = (v: string): string => createHash('sha256').update(v).digest('hex');
 // Scenario content of any kind, including paraphrases: the prompts and schemas must not know the demo case.
@@ -407,12 +508,18 @@ test('what the runner receives is generic: system prompts and schemas carry no s
   const s = await setup(t, (call) => {
     if (call.body.prompt.includes('"teachBack"')) return ok({ verdict: 'confirm', correction: null });
     if (call.body.prompt.includes('"knownRefs"')) return ok({ ref: null });
+    if (call.body.prompt.includes('"asked"')) return ok({ question: null, topic: 'reason', observationIds: [], regionIds: [] });
+    if (call.body.prompt.includes('"previousTeachBack"')) return ok({ steps: [], guardrails: [], gaps: [], teachBack: 'Is this right?' });
+    if (call.body.prompt.includes('"guardrails"')) return ok({ status: 'clear', guardrailId: null, message: null, regionIds: [] });
     return ok(EXTRACTION_OUTPUT);
   }, { limits: { llmPerSessionPerMinute: 100, llmPerIpPerMinute: 100 } });
   await post(s.base, 'answer_extraction', s.token, EXTRACTION_INPUT);
   await post(s.base, 'reply_classification', s.token, { teachBack: 'one', reply: 'two' });
   await post(s.base, 'entity_resolution', s.token, { spoken: 'one', knownRefs: ['partner_a'] });
-  assert.equal(s.calls.length, 3);
+  await post(s.base, 'generic_question', s.token, QUESTION_INPUT);
+  await post(s.base, 'map_synthesis', s.token, MAP_INPUT);
+  await post(s.base, 'guardrail_check', s.token, CHECK_INPUT);
+  assert.equal(s.calls.length, 6);
   for (const call of s.calls) {
     for (const [what, value] of [['system prompt', call.body.system], ['schema', JSON.stringify(call.body.schema)]] as const) {
       const hit = SCENARIO_TERMS.exec(value);
@@ -431,6 +538,9 @@ test('prompt sources are self-contained and pinned: any change to a system promp
     'answer-extraction.ts': await import('../agent/prompts/answer-extraction.ts') as { system: string },
     'reply-classification.ts': await import('../agent/prompts/reply-classification.ts') as { system: string },
     'entity-resolution.ts': await import('../agent/prompts/entity-resolution.ts') as { system: string },
+    'generic-question.ts': await import('../agent/prompts/generic-question.ts') as { system: string },
+    'guardrail-check.ts': await import('../agent/prompts/guardrail-check.ts') as { system: string },
+    'map-synthesis.ts': await import('../agent/prompts/map-synthesis.ts') as { system: string },
   };
   for (const name of names) {
     const source = await readFile(new URL(name, dir), 'utf8');

@@ -25,11 +25,11 @@ async function boundedText(r: globalThis.Response, max: number): Promise<string 
   return Buffer.concat(chunks).toString('utf8');
 }
 
-async function callRunner(config: AgentConfig, request: RunnerRequest, signal: AbortSignal): Promise<RunnerResult> {
+async function callRunner(config: AgentConfig, request: RunnerRequest, signal: AbortSignal, timeoutMs: number): Promise<RunnerResult> {
   if (!config.runnerToken || !config.runnerUrl) return { ok: false, status: 503, error: 'llm_not_configured' };
   let url: URL;
   try { url = new URL('/v1/complete', config.runnerUrl); } catch { return { ok: false, status: 503, error: 'llm_not_configured' }; }
-  const timeout = AbortSignal.timeout(config.timing.llmTimeoutMs);
+  const timeout = AbortSignal.timeout(timeoutMs);
   try {
     const r = await config.fetch(url, {
       method: 'POST',
@@ -72,7 +72,7 @@ export function registerLlmRoutes(app: Express, rt: AgentRuntime): void {
     const name = String(req.params.task);
     const task = Object.hasOwn(LLM_TASKS, name) ? LLM_TASKS[name] : undefined;
     if (!task) { reply(res, 404, { ok: false, error: 'unknown_task' }); return; }
-    const raw = await readBody(req, limits.llmInputBytes);
+    const raw = await readBody(req, task.maxInputBytes ?? limits.llmInputBytes);
     if (!raw.ok) { reply(res, raw.status, { ok: false, error: raw.error, max_bytes: raw.maxBytes }); return; }
     const prepared = task.prepare(raw.body);
     if (!prepared.ok) { reply(res, 400, { ok: false, error: 'invalid_input', field: prepared.field }); return; }
@@ -89,7 +89,7 @@ export function registerLlmRoutes(app: Express, rt: AgentRuntime): void {
     try {
       const aborted = new AbortController();
       res.on('close', () => { if (!res.writableEnded) aborted.abort(); });
-      const result = await callRunner(config, prepared.request, aborted.signal);
+      const result = await callRunner(config, prepared.request, aborted.signal, Math.max(config.timing.llmTimeoutMs, task.timeoutMs ?? 0));
       if (aborted.signal.aborted) return; // the client went away
       if (!result.ok) {
         config.log({ level: 'warn', msg: 'llm call failed', task: name, status: result.status, error: result.error });
