@@ -30,6 +30,11 @@ export const RULES = {
   reviewMaxGaps: 2,
   /** A recognised process needs this confidence before Clipa follows its strategy. */
   processConfidence: 0.6,
+  // Switches for the live demo: false turns the feature off and nothing else changes.
+  /** Recognise a learned process on screen (process_match), say so and follow its strategy. */
+  recognizeProcesses: true,
+  /** Build the map in the background as soon as Show ends; false: Reflect builds it when it opens, as before. */
+  mapAfterShow: true,
   /** A quiet cue with the same reason is not repeated sooner than this. */
   quietRepeatMs: 20_000,
   keepCues: 300,
@@ -377,6 +382,8 @@ export class Conductor {
       this.recognized = null;
       this.recognizedFor = null;
       this.pendingSay = null;
+      // A new Show supersedes the map still being built from the last one (its end builds a map of everything again).
+      if (mode === 'learn' && this.mapPrefetch) this.inflight?.abort();
       // On the web the screen is shared after Start: until it is, the next step is to share it.
       if ((mode === 'learn' || mode === 'teach') && !this.sharing && this.has('web')) this.guide('share_now', 'web');
       if (mode === 'learn') { this.pose('listen'); this.presence('dot'); if (this.sharing || !this.has('web')) this.guideOnce('work'); }
@@ -392,7 +399,7 @@ export class Conductor {
     this.pendingSay = null;
     this.cancelActive();
     if (reason === 'off_record') return;
-    if (mode === 'learn' && this.persona === 'expert') { this.handOver('review', 'review'); this.prefetchMap(); }
+    if (mode === 'learn' && this.persona === 'expert') { this.handOver('review', 'review'); if (RULES.mapAfterShow) this.prefetchMap(); }
     if (mode === 'teach') this.handOver('summary', 'summary');
     this.pose('idle');
   }
@@ -519,6 +526,7 @@ export class Conductor {
   // ---- strategy: which learned process is this? ----------------------------
   /** Recognise once the screen shows something, and again when the person moves to another app or surface. */
   private shouldRecognize(now: number): boolean {
+    if (!RULES.recognizeProcesses) return false;
     const latest = [...this.observations].reverse().find((o) => o.kind !== 'input_activity');
     if (!latest || now - this.lastChangeAt < RULES.settleMs) return false;
     const where = `${latest.app ?? ''}|${latest.surface}`;
