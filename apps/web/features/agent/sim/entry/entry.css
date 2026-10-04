@@ -1,0 +1,59 @@
+/* The harness page around the simulated desktop. Light and dark follow the system; the desktop itself keeps its own look. */
+:root {
+  --h-bg: #f4f7f7;
+  --h-panel: #ffffff;
+  --h-ink: #12302d;
+  --h-muted: #4f6a67;
+  --h-line: #d3e0de;
+  --h-accent: #0b7f78;
+  --h-accent-ink: #ffffff;
+  --h-flag-bg: #fff3c9;
+  --h-flag-ink: #5a4500;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --h-bg: #0f1b1a;
+    --h-panel: #15262a;
+    --h-ink: #e2f0ee;
+    --h-muted: #9bb6b2;
+    --h-line: #2a4247;
+    --h-accent: #3bc5bb;
+    --h-accent-ink: #062a27;
+    --h-flag-bg: #3a2c00;
+    --h-flag-ink: #ffe9a6;
+  }
+}
+:root[data-theme='dark'] {
+  --h-bg: #0f1b1a;
+  --h-panel: #15262a;
+  --h-ink: #e2f0ee;
+  --h-muted: #9bb6b2;
+  --h-line: #2a4247;
+  --h-accent: #3bc5bb;
+  --h-accent-ink: #062a27;
+  --h-flag-bg: #3a2c00;
+  --h-flag-ink: #ffe9a6;
+}
+body { margin: 0; background: var(--h-bg); color: var(--h-ink); font: 15px/1.45 system-ui, -apple-system, 'Segoe UI', sans-serif; }
+#sim-root { padding: 12px 16px; }
+.sim-h1 { margin: 0 0 6px; font-size: 18px; }
+.sim-p { max-width: 60ch; }
+.sim-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 14px; align-items: start; }
+.sim-stage { height: calc(100vh - 24px); min-height: 640px; }
+.sim-side { display: grid; gap: 10px; background: var(--h-panel); border: 1px solid var(--h-line); border-radius: 10px; padding: 12px; max-height: calc(100vh - 24px); overflow: auto; }
+.sim-who { margin: 0; color: var(--h-muted); }
+.sim-stub { margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--h-flag-bg); color: var(--h-flag-ink); font-size: 13.5px; }
+.sim-start-button { padding: 10px 14px; border: 0; border-radius: 8px; background: var(--h-accent); color: var(--h-accent-ink); font: 600 15px/1.2 inherit; cursor: pointer; }
+.sim-start-button:disabled { opacity: 0.5; cursor: default; }
+.sim-status { margin: 0; font-weight: 600; }
+.sim-log { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; font-size: 13px; }
+.sim-log li { padding: 4px 8px; border-left: 3px solid var(--h-line); background: var(--h-bg); border-radius: 4px; overflow-wrap: anywhere; }
+.sim-log-src { font-weight: 700; text-transform: uppercase; font-size: 11px; letter-spacing: 0.04em; color: var(--h-muted); }
+.sim-log-persona { border-left-color: #c28a1d; }
+.sim-log-agent { border-left-color: var(--h-accent); }
+.sim-log-mic { border-left-color: #6a4fb3; }
+.sim-log-error { border-left-color: #b24747; }
+@media (max-width: 1000px) {
+  .sim-layout { grid-template-columns: minmax(0, 1fr); }
+  .sim-stage { height: 80vh; }
+}
