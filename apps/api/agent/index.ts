@@ -12,6 +12,7 @@ import type { AgentRuntime } from './routes.ts';
 import { createMaintenance } from './rotation.ts';
 import { createSessionFiles } from './sessions.ts';
 import { createConductorHub, registerConductorRoutes } from './conductor/routes.ts';
+import { registerVoiceoverRoutes } from './voiceover.ts';
 
 export type { AgentOptions, FetchFn } from './config.ts';
 export type { SessionStore, IssuedSession } from './auth.ts';
@@ -39,7 +40,7 @@ export function createAgent(options: AgentOptions = {}): Agent {
   const runtime: AgentRuntime = { config, store, files, eleven: createElevenLabsClient(config, files), maintenance, background: new Set() };
   const conductors = createConductorHub(runtime);
   return {
-    module: { name: 'agent', mount: (app) => { registerAgentRoutes(app, runtime); registerLlmRoutes(app, runtime); registerConductorRoutes(app, runtime, conductors); registerAdminRoutes(app, runtime); maintenance.start(); } },
+    module: { name: 'agent', mount: (app) => { registerAgentRoutes(app, runtime); registerLlmRoutes(app, runtime); registerConductorRoutes(app, runtime, conductors); registerAdminRoutes(app, runtime); registerVoiceoverRoutes(app, config); maintenance.start(); } },
     maintain: () => maintenance.run(),
     close: () => { maintenance.stop(); conductors.close(); },
     observeScreen: (sessionId, observation) => conductors.observe(sessionId, observation),
