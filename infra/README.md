@@ -1,21 +1,37 @@
 # infra/ — VM backend on exe.dev (TASK-4)
 
-Owner: TASK-4 (@qwadratic, delegated to the agent on the exe.dev VM). Nothing here is imported by `apps/` or `packages/`; streams A and B talk to it over HTTP only.
+Owner: TASK-4 (@qwadratic, delegated to the agent on the exe.dev VM). Nothing here is imported by `apps/` or `packages/`; streams A and B talk to it over HTTP only. The one piece of infra code that lives in `apps/api` is the `ops` module (`apps/api/ops/index.ts`, infra-owned), which puts the deploy webhook behind port 8000.
 
 ```
 infra/
   claude-runner/      Claude runner (TypeScript, Agent SDK), 127.0.0.1:8787, own package-lock.json
-  placeholder-api/    public API placeholder, 0.0.0.0:8000 (TypeScript, no runtime deps, `node server.ts`)
-  ops/                deploy webhook, 127.0.0.1:8788, reached through the API's /ops/* (TypeScript, no runtime deps)
+  placeholder-api/    fallback public API, 0.0.0.0:8000 (TypeScript, no runtime deps, `node server.ts`); runs only while apps/api cannot start
+  ops/                deploy webhook, 127.0.0.1:8788, reached through apps/api's ops module at /ops/* (TypeScript, no runtime deps)
   start-runner.sh     starts the runner from the deployed checkout
-  start-api.sh        starts apps/api/dist/server.js if it exists, else the placeholder
+  start-api.sh        starts apps/api (`node server.ts`) when its sources and the root node_modules/express exist, else the placeholder
   systemd/            runner, api, ops units; deploy services, request path unit, optional timer; sudoers rule
   deploy/deploy.sh    deploy the published sha: build what changed, restart, health check, roll back
   install.sh          idempotent installer for the root-owned parts (sudo)
-  check.sh            doc-5 acceptance checks (local or through the public URL)
+  check.sh            acceptance checks for apps/api on :8000 (local or through the public URL)
 ```
 
-All code under `infra/` is TypeScript with `strict`, `noUncheckedIndexedAccess`, `verbatimModuleSyntax` and `erasableSyntaxOnly`, and no `any` (`unknown` plus validators at the boundaries). The runner is built with `tsc`; the placeholder runs through Node's built-in type stripping (**Node ≥ 22.18**; the VM has Node 24), so it needs no build step and no runtime dependencies (`typescript` and `@types/node` are dev-only, for `tsc --noEmit`).
+All code under `infra/` is TypeScript with `strict`, `noUncheckedIndexedAccess`, `verbatimModuleSyntax` and `erasableSyntaxOnly`, and no `any` (`unknown` plus validators at the boundaries). The runner is built with `tsc`; the placeholder, ops and `apps/api` run through Node's built-in type stripping (**Node ≥ 22.18**; the VM has Node 24), so they need no build step (`typescript` and `@types/node` are dev-only, for `tsc --noEmit`). `apps/api` has runtime dependencies (Express) that come from the root `npm ci`.
+
+## The public API: apps/api (since TASK-4.5)
+
+Port 8000 is served by `apps/api` (Express 5, started by `start-api.sh` as `cd apps/api && node server.ts`), not by the placeholder any more. It mounts, in `apps/api/src/modules.ts`:
+
+| Module | Owner | Routes |
+|---|---|---|
+| `agent` | stream B (`apps/api/agent`) | `/api/agent/sessions` (+ `/:id/events`, `/:id/finish`), `/api/agent/elevenlabs/signed-url`, admin `/agent/sessions` and `/api/agent/sessions` (list, read, delete; bearer `API_TOKEN`) |
+| `ops` | infra (`apps/api/ops`) | every `/ops/*` request, forwarded raw to the deploy webhook; `GET /ops/vm-health` |
+| `screen` | stream A | registered by A when its dependencies exist |
+
+- `GET /health` is A's: `{ok: true, service, modules}`. The runner state and the shas that the placeholder put into `/health` are now at **`GET /ops/vm-health`** → `{ok, runner: "up"|"down", git_sha, deployed_sha}`: `runner` is a 2 s `GET RUNNER_URL/health`, `git_sha` the commit this process was started from (`GIT_SHA`, set by `start-api.sh`), `deployed_sha` the content of `DEPLOYED_SHA_FILE` (default `/var/lib/apprentice/deployed-sha`, written by deploy.sh; it can be newer than `git_sha` after a deploy that did not restart the API).
+- **The ops module** (`apps/api/ops/index.ts`) forwards each `/ops/*` request to `OPS_URL` (default `http://127.0.0.1:8788`) with the method, path and query, the raw request bytes, `Content-Type` and `X-Deploy-Signature`, and `X-Forwarded-For` set to the client IP (the last `X-Forwarded-For` entry from the exe.dev proxy, else the socket address). The webhook checks an HMAC over the raw body, so the module reads the request stream itself: body limit 4 KiB (413), 60 s timeout, `502 {ok:false, error:"ops_unreachable"}` when the webhook is down. `createApi` installs `express.json` for every route; a JSON content type would be parsed before the module sees it and could not be forwarded byte for byte, so such a request is refused with **415** (never re-serialised). The signed deploy request must therefore be sent as `Content-Type: application/octet-stream`, which is what `release.yml` does. The global CORS rule of `createApi` applies in front: a browser `Origin` that is not in `ALLOWED_ORIGINS` gets 403.
+- **Retired lab routes.** The placeholder's `GET /agent/elevenlabs/signed-url` and `POST /agent/sessions/:id/events|finish` (browser routes without a session token) are gone: the lab is retired and the agent module's token-protected `/api/agent/*` routes replace them. Both now answer 404. The admin routes `GET /agent/sessions`, `GET|DELETE /agent/sessions/:id` remain (bearer `API_TOKEN`, same shapes as before; `check.sh` uses them).
+- **Also gone with the placeholder:** `POST /runner/v1/*` (the public test proxy for the runner) and `GET /debug/sse`. The runner is reached only by server code through `RUNNER_URL` + `RUNNER_TOKEN`; test it on the VM with `curl -s localhost:8787/health` and, with `Authorization: Bearer $RUNNER_TOKEN`, `POST localhost:8787/v1/complete`.
+- **Fallback.** `start-api.sh` runs the placeholder only when `apps/api/src/modules.ts` or the root `node_modules/express` is missing (for example a checkout from before the switch, which a rollback restores). The placeholder keeps its own `/health`, `/ops/*` and lab routes; it is not served in normal operation.
 
 `infra/` uses **npm**, not the root package manager, and must never match a root workspace glob (keep `pnpm-workspace.yaml` / `workspaces` to `apps/*` and `packages/*`).
 
@@ -38,7 +54,7 @@ All code under `infra/` is TypeScript with `strict`, `noUncheckedIndexedAccess`,
    ssh exe.dev share port apprentice 8000     # only if the public port is not already 8000
    ```
    Without `set-public` every public request is redirected to the exe.dev login.
-2. Fill the secrets on the VM: `sudoedit /etc/apprentice/env` — `ELEVENLABS_API_KEY`, exactly **one** of `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY`, and `ALLOWED_ORIGINS`. Then `sudo systemctl restart apprentice-runner apprentice-api`.
+2. Fill the secrets on the VM: `sudoedit /etc/apprentice/env` — `ELEVENLABS_API_KEY`, `ELEVENLABS_AGENT_ID_INTERVIEWER`, exactly **one** of `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY`, and `ALLOWED_ORIGINS` (it must contain the exact origin of the web app, for example `https://qwadratic.github.io`; apps/api answers 403 to any other browser origin). Then `sudo systemctl restart apprentice-runner apprentice-api`.
 3. **Before any judge-facing URL is shared:** switch to API-key auth (Agent SDK terms): set `ANTHROPIC_API_KEY`, delete the `CLAUDE_CODE_OAUTH_TOKEN` value, restart, and confirm `mode` is `apikey`:
    `curl -s localhost:8787/health | jq .mode`.
 4. Deploys are pushed by GitHub Actions (`release.yml` signs a request to `POST /ops/deploy`, see below); the secret `DEPLOY_WEBHOOK_SECRET` is in `/etc/apprentice/env` and in the repository's Actions secrets. To rotate it: generate a new one into the env file (`sudoedit`), `sudo systemctl restart apprentice-ops`, and set the same value with `gh secret set DEPLOY_WEBHOOK_SECRET -R qwadratic/ai-apprentice` (it reads stdin). The minute timer (`DEPLOY_SOURCE=pages`) is an optional fallback: `sudo systemctl enable --now apprentice-deploy.timer`. To freeze before the pitch, set `DEPLOY_FREEZE=1` in the repository so `release.yml` neither publishes nor calls the webhook.
@@ -64,17 +80,17 @@ systemctl list-timers apprentice-deploy.timer
 ### Running the checks from a Mac (through the public proxy)
 
 ```bash
-brew install jq imagemagick          # once; curl, perl and base64 ship with macOS
+brew install jq                      # once; curl ships with macOS
 T=$(ssh apprentice.exe.xyz "sudo grep ^API_TOKEN= /etc/apprentice/env | cut -d= -f2") \
   BASE=https://apprentice.exe.xyz bash <(ssh apprentice.exe.xyz cat work/ai-apprentice/infra/check.sh)
 ```
 
-The token goes only into the environment of that one command and into a 0600 header file for curl, so it is never printed and never visible in `ps`; the check session it creates is deleted at the end. About a minute: 11 model calls plus 6–11.9 MB uploads. Without ImageMagick the script stops with "ImageMagick not found".
+The token goes only into the environment of that one command and into a 0600 header file for curl, so it is never printed and never visible in `ps`; the check session it creates is deleted at the end (its token expires on its own after 12 h). A few seconds, no model calls. It checks: `/health` (ok, agent and ops modules); CORS preflight for an allowed and a foreign origin; `/ops/deploy/status` and `/ops/vm-health` through port 8000; `POST /api/agent/sessions` from the allowed origin (201 with a token, 403 from a foreign one); events with that token (200), without it (401), with another session's token (403), over the size limits (413); the signed-URL route; the retired lab routes (404); the admin routes with `API_TOKEN`; and the deploy webhook (JSON content type 415, unsigned or wrongly signed 401, over 4 KiB 413 and, when `DEPLOY_WEBHOOK_SECRET` is set, a signed redeploy of the deployed sha and its replay 409).
 
 ### How a commit reaches the VM
 
 1. `release.yml` checks `main`; if green and not frozen it publishes the site (and `deploy.json`) to Pages and then calls the deploy webhook with the same sha, polling `GET /ops/deploy/status` until `ok`, `failed` or `rolled_back`, so the result shows in the Actions UI.
-2. **Webhook** (`infra/ops`, `apprentice-ops.service`, 127.0.0.1:8788; the public API forwards `/ops/*` to it with the raw body):
+2. **Webhook** (`infra/ops`, `apprentice-ops.service`, 127.0.0.1:8788; the ops module of apps/api forwards `/ops/*` to it with the raw body):
    - `POST /ops/deploy` with body `{"sha": "<40 hex>", "ts": <unix seconds>}` and header `X-Deploy-Signature: sha256=<hex HMAC-SHA256(DEPLOY_WEBHOOK_SECRET, raw body)>`. Checks, in order: secret configured (503), body ≤ 1 KiB (413), signature, compared timing-safe (401 `bad_signature`; only failed signatures count against the rate limit of 6/min per IP and 30/h overall, 429, so unsigned noise cannot block real deploys), body shape (400), `ts` not older than 300 s nor more than 60 s ahead (401 `timestamp_out_of_window`), the same signature not seen before (409 `replayed`), sha an ancestor of `origin/main` after a fetch (422 `not_on_main`). Then it writes `/var/lib/apprentice/deploy-request.json` and `deploy-status.json` (`queued`) and answers **202** `{accepted: true, sha}`. Bodies and signatures are never logged.
    - `GET /ops/deploy/status` (public, no secrets) → `{deployed_sha, last: {sha, state: queued|running|ok|failed|rolled_back, source, started_at, finished_at, message}}`.
    - Signing in a workflow (the body string must be sent byte for byte as signed):
@@ -87,15 +103,17 @@ The token goes only into the environment of that one command and into a 0600 hea
 4. The deploy:
    - logs changed install-managed paths (`infra/systemd`, `infra/install.sh`, `infra/deploy`) with `run sudo infra/install.sh` and never applies them;
    - checks the sha out detached and runs `git clean -fdx`, keeping every `node_modules`, the runner's `dist` and `apps/api/dist`; those are rebuilt (dist removed first) when their sources change;
-   - rebuilds only what changed: the runner (`npm ci` + `tsc`) when `infra/claude-runner` or `start-runner.sh` changed, and the API side when `apps/`, `packages/`, `infra/placeholder-api`, `start-api.sh` or a root package or lockfile changed. The API side means the root install by lockfile and the `apps/api` build; the placeholder and ops need nothing, since they have no runtime dependencies;
+   - rebuilds only what changed: the runner (`npm ci` + `tsc`) when `infra/claude-runner` or `start-runner.sh` changed, and the API side when `apps/`, `packages/`, `infra/placeholder-api`, `start-api.sh` or a root package or lockfile changed. The API side means the root `npm ci` (this puts `node_modules/express` where `start-api.sh` looks for it) and `npm run build` in `apps/api`, which is a strict no-emit type check because apps/api runs from source; the placeholder and ops need nothing, since they have no runtime dependencies. So a change under `apps/` or `packages/` always means: root install, type check, restart of `apprentice-api`;
    - restarts only those services (`infra/ops` changes restart `apprentice-ops`);
-   - health-checks for 30 s: `/health` must say `ok: true` **and** `/ops/deploy/status` must answer through port 8000, so an API that stops forwarding `/ops/*` is rolled back;
+   - health-checks for 30 s: `/health` must say `ok: true` (apps/api: `{ok, service, modules}`) **and** `/ops/deploy/status` must answer through port 8000, so an API that crashes, fails to start or stops forwarding `/ops/*` is rolled back;
    - records the sha in `/var/lib/apprentice/deployed-sha`.
 5. Progress goes to `deploy-status.json` (`running`, then `ok`, `rolled_back` or `failed`). A request for the deployed sha ends as `ok` / `already deployed`.
 6. The base for diffs, "already deployed" and rollback is the last sha that passed its health check (`deployed-sha`), not HEAD; if HEAD differs (an interrupted deploy), everything is rebuilt. Every install or build step has a 10 min timeout, git transfers fail when stalled for 30 s, and the deploy services have a 30 min start timeout.
 7. On failure it checks the last deployed sha out, rebuilds what differs, restarts, and records the failed sha. Manual and timer runs skip it until a new sha comes or `--force` is given; a signed webhook request for it is an explicit retry.
 
-Other sources, for manual use: `sudo systemctl start apprentice-deploy.service` deploys from `DEPLOY_SOURCE` (`pages`: the sha in `deploy.json`; `ref`: `origin/$DEPLOY_REF`); the optional minute timer runs that same service. A backlog-only or docs-only release moves the checkout and `deployed_sha` but restarts nothing. `apprentice-api` keeps answering `/health` with `runner:"down"` when the runner is down, so a missing Claude credential does not block deploys.
+The deploy that switched port 8000 from the placeholder to apps/api (TASK-4.5) is an ordinary deploy of its commit: `apps/` and `infra/start-api.sh` changed, so it runs the root `npm ci`, type-checks `apps/api`, restarts `apprentice-api`, and rolls back to the previous commit (and so to the placeholder) if `/health` or `/ops/deploy/status` do not answer within 30 s. `deploy.sh`, the units and `install.sh` are not applied by a deploy (`sudo infra/install.sh`); this change touches none of them.
+
+Other sources, for manual use: `sudo systemctl start apprentice-deploy.service` deploys from `DEPLOY_SOURCE` (`pages`: the sha in `deploy.json`; `ref`: `origin/$DEPLOY_REF`); the optional minute timer runs that same service. A backlog-only or docs-only release moves the checkout and `deployed_sha` but restarts nothing. `apprentice-api` keeps answering `/health` when the runner is down (`GET /ops/vm-health` then says `runner: "down"`), so a missing Claude credential does not block deploys.
 
 **Security notes on deploy:**
 - `pnpm install` / `npm ci` run the dependencies' install lifecycle scripts as `apprentice`, the same user the services run as. deploy.sh unsets the secrets in its own environment, but a malicious dependency could still read the service processes' environment or `/var/lib/apprentice` data. Review new dependencies before they land on `main`.
@@ -106,14 +124,16 @@ Other sources, for manual use: `sudo systemctl start apprentice-deploy.service` 
 
 | Variable | Used by | Notes |
 |---|---|---|
-| `ELEVENLABS_API_KEY` | real API (B), placeholder signed-URL route | never sent to the browser |
-| `ELEVENLABS_AGENT_ID_INTERVIEWER` | placeholder signed-URL and finish routes | interviewer agent id from stream B's ElevenLabs spike; empty → 503 |
-| `ELEVENLABS_AGENT_ID_TUTOR` | placeholder finish route | optional; the tutor agent's conversations may be stored too |
+| `ELEVENLABS_API_KEY` | agent module | never sent to the browser |
+| `ELEVENLABS_AGENT_ID_INTERVIEWER` | agent module (signed URL, finish) | interviewer agent id from stream B's ElevenLabs spike; empty → 503 |
+| `ELEVENLABS_AGENT_ID_TUTOR` | agent module (finish) | optional; the tutor agent's conversations may be stored too |
 | `CLAUDE_CODE_OAUTH_TOKEN` | runner | private development only (`claude setup-token`) |
 | `ANTHROPIC_API_KEY` | runner | required for anything judges can reach; exactly one of the two |
 | `RUNNER_TOKEN` | runner, API | `openssl rand -hex 32` |
-| `API_TOKEN` | placeholder `/runner/*` test proxy | test aid; the browser never holds it |
-| `ALLOWED_ORIGINS` | API | exact origins, comma-separated |
+| `API_TOKEN` | agent module admin routes (`/agent/sessions`), `check.sh` | at least 32 characters, else the admin routes are off; the browser never holds it |
+| `ALLOWED_ORIGINS` | API | exact origins, comma-separated; a browser request from any other `Origin` gets 403 |
+| `OPS_URL` | ops module | the deploy webhook, default `http://127.0.0.1:8788` |
+| `DEPLOYED_SHA_FILE` | ops module (`/ops/vm-health`) | default `/var/lib/apprentice/deployed-sha` |
 | `DATABASE_PATH` | real API | `/var/lib/apprentice/db/apprentice.sqlite` |
 | `MEDIA_DIR` | real API | `/var/lib/apprentice/media` |
 | `RUNNER_MODEL` | runner | default `claude-sonnet-5-5` |
@@ -123,19 +143,21 @@ Other sources, for manual use: `sudo systemctl start apprentice-deploy.service` 
 | `DEPLOY_SOURCE` | deploy | `pages` (default): the sha in `deploy.json`; `ref`: `origin/$DEPLOY_REF` |
 | `DEPLOY_REF` | deploy | default `main`; used with `DEPLOY_SOURCE=ref` |
 | `DEPLOY_JSON_URL` | deploy | default `https://qwadratic.github.io/ai-apprentice/deploy.json` |
-| `DEBUG_ENDPOINTS` | placeholder | `1` enables `GET /debug/sse` |
-| `SESSIONS_DIR` | placeholder | default `/var/lib/apprentice/sessions` (not in the env file; set in the unit if needed) |
+| `SESSIONS_DIR` | agent module | default `/var/lib/apprentice/sessions` (not in the env file; set in the unit if needed) |
+| `SIGNED_URL_REQUIRE_SESSION`, `AGENT_*`, `SIGNED_URL_*`, `EVENTS_BYTES_PER_HOUR`, `SESSIONS_WARN_BYTES`, `SESSIONS_ROTATE_BYTES` | agent module | session-token requirement for the signed URL, rate limits and disk thresholds, all optional; see `apps/api/agent/config.ts` |
+| `DEBUG_ENDPOINTS` | placeholder only | `1` enables `GET /debug/sse`; ignored by apps/api |
 
 ## Contract for streams A and B: the real API (`apps/api`)
 
-`start-api.sh` runs `node /opt/apprentice/repo/apps/api/dist/server.js` (cwd `apps/api`) as soon as that file exists after a deploy; otherwise the placeholder (`node server.ts`). The real server must:
+`start-api.sh` runs `cd /opt/apprentice/repo/apps/api && node server.ts` (type stripping, no build output) when `apps/api/src/modules.ts` and the root `node_modules/express` exist; otherwise the placeholder. `apps/api` must:
 
 - listen on `HOST` (`0.0.0.0`) and `PORT` (`8000`);
 - read `DATABASE_PATH`, `MEDIA_DIR`, `RUNNER_URL` (`http://127.0.0.1:8787`), `RUNNER_TOKEN`, `ALLOWED_ORIGINS`, `ELEVENLABS_API_KEY` from the environment (systemd provides them; `GIT_SHA` is set too);
-- serve `GET /health` → 200 with `{"ok": true, ...}` (deploy rolls back otherwise);
-- handle its own CORS (exact match on `ALLOWED_ORIGINS`, `Vary: Origin`, answer `OPTIONS`);
-- forward `/ops/*` unchanged to `OPS_URL` (`http://127.0.0.1:8788`): method, path, raw body, `Content-Type` and `X-Deploy-Signature`, plus the client IP as `X-Forwarded-For` (copy `opsRequest` from the placeholder). Deploy's health check requires `/ops/deploy/status` through port 8000, so an API without this is rolled back;
-- write only under `/var/lib/apprentice/{db,media}`; log metadata, never prompts, images, transcripts or keys.
+- serve `GET /health` → 200 with `{"ok": true, ...}` (deploy rolls back otherwise) and keep the `ops` module registered: deploy's health check requires `/ops/deploy/status` through port 8000, so an API that loses it is rolled back;
+- handle its own CORS (`createApi`: exact match on `ALLOWED_ORIGINS`, 403 for other origins, answers `OPTIONS`);
+- write only under `/var/lib/apprentice/{db,media,sessions}`; log metadata, never prompts, images, transcripts or keys.
+
+A module that needs the raw request bytes (a signature over the body, like the ops module) cannot rely on `express.json`, which `createApi` installs for every route: it only skips other content types.
 
 ## Runner API (`RUNNER_URL`, bearer `RUNNER_TOKEN`)
 
@@ -166,63 +188,21 @@ Success: `200 {ok: true, json, ms}` when `schema` was given (the SDK's `structur
 
 Every call: `tools: []`, `permissionMode: "dontAsk"`, `settingSources: []`, `persistSession: false`, `cwd: /var/lib/apprentice/runner-cwd`, `maxTurns: 3`, `maxBudgetUsd: 0.5`, a short custom system prompt (the request's `system` is appended), `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`. The subprocess environment excludes `RUNNER_TOKEN`, `API_TOKEN` and `ELEVENLABS_API_KEY`. The runner refuses to start unless exactly one Claude credential is set and logs its mode at start. At boot it spawns and discards one warm subprocess (`startup()`), because per-request options differ. A queued request whose client disconnected is dropped before it runs (logged as 499). `x-request-id` is used for logs only if it matches `[A-Za-z0-9._-]{1,64}`. The unit runs with `ProtectSystem=strict` (writable: the runner cwd and `/home/apprentice`) and `MemoryMax=2560M`.
 
-The placeholder exposes the runner publicly as `POST /runner/v1/*` behind `Authorization: Bearer $API_TOKEN` for testing only.
+The placeholder used to expose the runner publicly as `POST /runner/v1/*` for testing; apps/api does not. On the VM: `curl -s localhost:8787/health`, and `curl -s -X POST localhost:8787/v1/complete -H "Authorization: Bearer $RUNNER_TOKEN" -H "Content-Type: application/json" -d '{"prompt":"ping"}'` (take the token from `/etc/apprentice/env` without printing it).
 
-## ElevenLabs signed URL (placeholder, for stream B's web page)
+## Agent module storage (stream B, `apps/api/agent`)
 
-`GET /agent/elevenlabs/signed-url` → `200 {"signed_url": "wss://..."}`. The server calls `GET https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=$ELEVENLABS_AGENT_ID_INTERVIEWER` with `xi-api-key: $ELEVENLABS_API_KEY`; the key never reaches the browser. No token: the browser cannot hold one.
+The routes, their status codes and rate limits are in `apps/api/agent` (`routes.ts`, `admin.ts`, `config.ts`, tests in `apps/api/test/agent-*.test.ts`); they are not repeated here. What matters for operations:
 
-| Status | Body | Meaning |
-|---|---|---|
-| 403 | `{ok:false, error:"origin_not_allowed"}` | `Origin` missing or not in `ALLOWED_ORIGINS` |
-| 503 | `{ok:false, error:"elevenlabs_not_configured", missing:[...]}` | agent id or key empty in `/etc/apprentice/env` |
-| 429 | `{ok:false, error:"rate_limited"}` + `Retry-After: 60` | over 6/min per client IP (last `X-Forwarded-For` entry, set by exe.dev) or 60/hour overall |
-| 502 | `{ok:false, error:"elevenlabs_error", upstream_status}` / `"elevenlabs_unreachable"` | ElevenLabs refused or timed out (10 s) |
-
-Logs carry status, duration and the upstream status only, never the URL or the key. The limits are in memory and reset when the service restarts. When `apps/api` replaces the placeholder, it must serve the same route itself.
-
-
-## Session logs (placeholder, TASK-3.22, for stream B's lab page)
-
-Files in `/var/lib/apprentice/sessions` (apprentice, 750): `{sessionId}.jsonl` (events), `{sessionId}.conv` (the conversationId the session is bound to), `{sessionId}.elevenlabs.json` (conversation from ElevenLabs), `{sessionId}.{mp3,wav,ogg,webm,m4a,aac}` (audio, extension from the content type). `sessionId` must match `^[A-Za-z0-9-]{8,64}$`, `conversationId` `^[A-Za-z0-9_-]{1,128}$`. A session is bound to the first conversationId it reports (in events or finish); another one gets 409 `conversation_mismatch`.
-
-**Browser routes** (no token; `Origin` must be in `ALLOWED_ORIGINS`, else 403; CORS as above):
-
-- `POST /agent/sessions/{sessionId}/events` with `{conversationId?, events: [{t: ms epoch, dir: "sent"|"recv"|"sys"|"err", type, text}]}` → `200 {ok: true, stored: n}`. Appends one JSON line per event plus `conversationId` and `receivedAt`.
-
-  | Status | Error | Limit |
-  |---|---|---|
-  | 400 | `invalid_json` / `invalid_body` + `field` | bad shape |
-  | 409 | `conversation_mismatch` | the session is bound to another conversationId |
-  | 413 | `body_too_large` | body over 512 KiB |
-  | 429 | `rate_limited` | over 120 requests/min per IP |
-  | 429 | `hourly_byte_cap` | over 50 MiB/hour across all sessions (`EVENTS_BYTES_PER_HOUR`) |
-  | 507 | `session_full` | this session's `.jsonl` would exceed 5 MiB |
-
-- `POST /agent/sessions/{sessionId}/finish` with `{conversationId}` (6/min per IP, body ≤ 4 KiB). Polls `GET /v1/convai/conversations/{conversationId}` every 3 s for at most ~18 s, so it answers within ~20 s (the lab page aborts at 30 s):
-  - **200** `{ok: true, transcriptStored: true, partial, conversationStatus, audioStored: false, audioPending: true}`. The transcript is stored at once; `partial: true` means ElevenLabs was still processing. In the background the server then keeps polling for up to 5 min, replaces a partial transcript with the finished one, and fetches the audio (≤ 50 MiB). The audio is never overwritten, and a finished transcript is never overwritten. The outcome is logged as `finish background done` with statuses only.
-  - **200** `{..., already: true}` when the finished transcript and the audio are already stored.
-  - **422** `agent_not_allowed` when the conversation's `agent_id` is neither `ELEVENLABS_AGENT_ID_INTERVIEWER` nor `ELEVENLABS_AGENT_ID_TUTOR`; nothing is stored.
-  - **409** `conversation_mismatch` or `finish_in_progress`.
-  - **502** `conversation_unavailable` with `transcriptStatus` when ElevenLabs gave no conversation.
-  - **503** `elevenlabs_not_configured`.
-
-**Reading and deleting** (`Authorization: Bearer $API_TOKEN`, else 401):
-
-- `GET /agent/sessions` → `{ok, total_bytes, warn, sessions: [{id, size, mtime, hasEvents, hasTranscript, hasAudio}]}`, newest first.
-- `GET /agent/sessions/{sessionId}` → `{ok, id, conversationId, events: [...], transcript: {...}|null, audio: {ext, bytes}|null}`; 404 if nothing is stored.
-- `DELETE /agent/sessions/{sessionId}` → removes all of the session's files (`check.sh` uses it to clean up).
-
-**Disk:** checked at most once a minute after a write.
-- Orphaned `*.tmp` files older than 10 min are removed and counted in the log.
-- Above 1 GiB the API logs `sessions dir over warn threshold` and listings show `warn: true`.
-- Above 2 GiB it deletes the oldest sessions down to 1.5 GiB and logs `sessions rotated`. Sessions newer than 24 h are never deleted; if they alone are over the cap it only logs a warning.
-
-Logs never contain bodies, transcripts, audio, keys or signed URLs. Check usage with `sudo du -sh /var/lib/apprentice/sessions` or `sudo journalctl -u apprentice-api | grep -E 'warn threshold|rotated|over cap'`.
+- **Files** in `/var/lib/apprentice/sessions` (apprentice, 750), the same layout the placeholder used: `{sessionId}.jsonl` (events), `{sessionId}.conv` (the conversationId the session is bound to), `{sessionId}.elevenlabs.json` (conversation from ElevenLabs), `{sessionId}.{mp3,wav,ogg,webm,m4a,aac}` (audio), and `agent-sessions.json` (0600: the session tokens, stored as hashes; live sessions survive a restart).
+- **Disk:** checked after a write and every 10 minutes. Orphaned `*.tmp` files older than 10 min are removed; above 1 GiB the API logs `sessions dir over warn threshold` and the admin listing shows `warn: true`; above 2 GiB it deletes the oldest sessions down to 1.5 GiB (`sessions rotated`), never sessions newer than 24 h. Check usage with `sudo du -sh /var/lib/apprentice/sessions` or `sudo journalctl -u apprentice-api | grep -E 'warn threshold|rotated|over cap'`.
+- **Admin routes** (`Authorization: Bearer $API_TOKEN`, else 401): `GET /agent/sessions` (`{ok, total_bytes, warn, sessions: [{id, size, mtime, hasEvents, hasTranscript, hasAudio}]}`, newest first), `GET /agent/sessions/{id}` (events, transcript, audio info), `DELETE /agent/sessions/{id}`; the same under `/api/agent/sessions`.
+- **Browser routes need a session token:** `POST /api/agent/sessions` (an allowed `Origin`) issues `{sessionId, token, ...}`; `/api/agent/sessions/{id}/events` and `/finish` take `Authorization: Bearer <token>` for that session. The placeholder's tokenless lab routes (`/agent/elevenlabs/signed-url`, `/agent/sessions/{id}/events`, `/agent/sessions/{id}/finish`) no longer exist.
+- Logs never contain bodies, transcripts, audio, tokens, keys or signed URLs.
 
 ## Measurements
 
-Measured 3 Oct 2026 (oauth mode, `claude-sonnet-5-5`, concurrency 2, 2 vCPU / 7 GiB).
+Measured 3 Oct 2026 (oauth mode, `claude-sonnet-5-5`, concurrency 2, 2 vCPU / 7 GiB), when the placeholder served port 8000 (its `/runner/*` test proxy and `check.sh` of that time; neither exists after TASK-4.5).
 
 - Proxy (exe.dev, `check.sh` from a Mac against `https://apprentice.exe.xyz`): authenticated POSTs of 6, 8, 10 and **11.9 MB pass** (1.4–1.9 s upload), 13 MB gets 413 from our cap; SSE events arrive at +0.28, 1.23, 2.26, 3.23, 4.24 s (not buffered); preflight 204 with the origin echoed over HTTP/2, foreign origin gets no CORS header; `https://apprentice.exe.xyz:8787/health` → 307 to the exe.dev login (runner is loopback-only anyway). Recommended upload chunk for A's recording: **≤ 5 MB**.
 - Public `/v1/complete` p50 2.9 s (3023 / 2620 / 2943 ms from Vienna); 5 parallel calls → 5 × 200.
@@ -238,8 +218,11 @@ Measured 3 Oct 2026 (oauth mode, `claude-sonnet-5-5`, concurrency 2, 2 vCPU / 7 
 ## Fast checks
 
 ```bash
+npm ci && npm run check                                        # repo root: apps/api (incl. the ops module tests), web, packages
 (cd infra/claude-runner && npm ci --include=optional && npm run typecheck)
 (cd infra/placeholder-api && npm ci && npm run typecheck)      # tsc --noEmit
 (cd infra/ops && npm ci && npm run typecheck)                  # tsc --noEmit
 bash -n infra/*.sh infra/deploy/deploy.sh
 ```
+
+The ops module's tests (`apps/api/test/ops.test.ts`) use a fake webhook and a fake runner. The release job's signing snippet can be tried against a local pair of processes: `infra/ops/server.ts` (`OPS_PORT`, `DEPLOY_WEBHOOK_SECRET`, `DEPLOY_REPO` = a clone whose `origin/main` contains the sha, `DEPLOY_STATE_DIR` = a temp dir) and `node server.ts` in `apps/api` with `PORT`, `OPS_URL` pointing at that webhook: a signed `POST /ops/deploy` as `application/octet-stream` answers 202, the same request again 409, and `GET /ops/deploy/status` 200.

@@ -1,6 +1,8 @@
 import type { ApiModule } from './app.ts';
 import {agentModule, authorize} from '../agent/index.ts';
+import {opsModule} from '../ops/index.ts';
 import {createScreenModule} from './screen-module.ts';
 
 const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? '').split(',').map(value => value.trim()).filter(Boolean);
-export const modules: ApiModule[] = [agentModule, createScreenModule({authorize, allowedOrigins, env: process.env})];
+// Preserve the raw signed deploy route before feature module registration.
+export const modules: ApiModule[] = [opsModule, agentModule, createScreenModule({authorize, allowedOrigins, env: process.env})];

@@ -3,10 +3,11 @@ id: TASK-3.28
 title: >-
   Clipa motion and lifecycle: dock, notice, approach, speak, listen, think, ack,
   retreat, warn, point, off
-status: In Progress
+status: Done
 assignee:
   - '@qwadratic'
 created_date: '2026-10-04 01:07'
+updated_date: '2026-10-04 01:45'
 labels:
   - stream-b
   - ux
@@ -23,9 +24,9 @@ Ivan, 4 Oct 03:10: use Clipa's existing design (origin/feat/clipa: web/clipa/cli
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 All 11 states and their transitions run in the demo page with the timings from the spec, smooth (no jumps), and the director refuses to move while input is active
-- [ ] #2 Approach targets a side of a given element's rect, stays inside the viewport and never covers the element; retreat returns to the dock corner
-- [ ] #3 prefers-reduced-motion replaces flights with fades; a video of the demo is recorded
+- [x] #1 All 11 states and their transitions run in the demo page with the timings from the spec, smooth (no jumps), and the director refuses to move while input is active
+- [x] #2 Approach targets a side of a given element's rect, stays inside the viewport and never covers the element; retreat returns to the dock corner
+- [x] #3 prefers-reduced-motion replaces flights with fades; a video of the demo is recorded
 <!-- AC:END -->
 
 ## Definition of Done
@@ -34,3 +35,9 @@ Ivan, 4 Oct 03:10: use Clipa's existing design (origin/feat/clipa: web/clipa/cli
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+PR #23 merged (71bc9bf): apps/web/features/agent/clipa director + buddy, 11 states, input guard, reduced motion; 58 unit tests, 87 e2e checks, video shared; CI step added. Not yet wired into the shell.
+<!-- SECTION:FINAL_SUMMARY:END -->
