@@ -1,0 +1,96 @@
+{
+  "video": "apps/web/public/videos/clipa-tech.mp4",
+  "lines": [
+    {
+      "id": "t01",
+      "voice": "narrator",
+      "text": "Two faces, web and Mac, share one server and one voice.",
+      "atSec": 0.3,
+      "maxSec": 4.5
+    },
+    {
+      "id": "t02",
+      "voice": "narrator",
+      "text": "Vision turns frames into observations; the Conductor streams cues back.",
+      "atSec": 4.8,
+      "maxSec": 4
+    },
+    {
+      "id": "t03",
+      "voice": "narrator",
+      "text": "Frames are masked in the browser; each change becomes one typed observation.",
+      "atSec": 8.8,
+      "maxSec": 6
+    },
+    {
+      "id": "t04",
+      "voice": "narrator",
+      "text": "She never interrupts typing or talking; she prepares early and asks at the pause.",
+      "atSec": 14.8,
+      "maxSec": 6
+    },
+    {
+      "id": "t05",
+      "voice": "narrator",
+      "text": "Live, on the real product: Show.",
+      "atSec": 20.8,
+      "maxSec": 2.62
+    },
+    {
+      "id": "t06",
+      "voice": "clipa",
+      "text": "What determines whether you put customer_07’s delivery address and time window in the email text or leave them in the attachment?",
+      "atSec": 23.42,
+      "maxSec": 7.38
+    },
+    {
+      "id": "t07",
+      "voice": "narrator",
+      "text": "Reflect: when Show ends, the Work Map is built from the session.",
+      "atSec": 30.8,
+      "maxSec": 5.5
+    },
+    {
+      "id": "t08",
+      "voice": "narrator",
+      "text": "After one spoken correction, the expert confirms the map.",
+      "atSec": 36.3,
+      "maxSec": 5
+    },
+    {
+      "id": "t09",
+      "voice": "narrator",
+      "text": "Pass it on, a new case.",
+      "atSec": 41.3,
+      "maxSec": 2.78
+    },
+    {
+      "id": "t10",
+      "voice": "clipa",
+      "text": "The expert would stop here before sending and ask: why do you think this draft is ready to send?",
+      "atSec": 44.08,
+      "maxSec": 5.52
+    },
+    {
+      "id": "t11",
+      "voice": "narrator",
+      "text": "The new hire fixes it. Clipa warns; she never clicks.",
+      "atSec": 49.6,
+      "maxSec": 4.2
+    },
+    {
+      "id": "t12",
+      "voice": "narrator",
+      "text": "Honest limits: synthetic data, inputs posted as text, and slow vision on Codex.",
+      "atSec": 53.8,
+      "maxSec": 5.5
+    },
+    {
+      "id": "t13",
+      "voice": "narrator",
+      "text": "Next: a company memory that asks only about what changed.",
+      "atSec": 59.3,
+      "maxSec": 4.2
+    }
+  ]
+}

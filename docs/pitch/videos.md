@@ -6,14 +6,14 @@ Two videos for the submission (TASK-3.19). The web app header links to both ("De
 | --- | --- | --- |
 | `apps/web/public/videos/clipa-story.mp4` | The story in 52 s: the problem, Meet Clipa, Show → Reflect → Pass it on on the customer_07 case, the closing line. Illustrated, synthetic data, AI voice; made by the team outside this toolkit | — |
 | `apps/web/public/videos/clipa-demo.mp4` | The product: the problem, then the whole journey Show → Reflect → Pass it on in the live web app | [video-demo.md](video-demo.md) |
-| `apps/web/public/videos/clipa-tech.mp4` | How it is built: architecture, the screen contract, the Conductor, the Work Map, the tutor check, how we built it, honest limits | [video-tech.md](video-tech.md) |
+| `apps/web/public/videos/clipa-tech.mp4` | How it is built, in about a minute: the architecture, the screen contract, the Conductor's when-to-speak rules, then live cuts of the product (Show asks at the pause; Reflect's Work Map and Confirm; Pass it on's warning before Send and the fix), honest limits and the closing line | [video-tech.md](video-tech.md) |
 
 Both are 1920x1080, H.264 with an AAC track, rendered with the Remotion toolkit in [`video/`](../../video/README.md). They have **captions and no voice-over**: the ElevenLabs key in the build environment was not valid, so the audio track is silent. A voice-over can be added later, recorded by Ivan or generated with ElevenLabs TTS on the VM, and muxed onto the same files (see "Replace a file").
 
 ## How they were made
 
 1. **Product capture.** `video/recorder/journey.ts` drives the live web app (https://qwadratic.github.io/clipa/) in headless Chromium against the live API (https://apprentice.exe.xyz) and films it through Chrome's screencast, in one take: Start Show, the expert's typing in the demo workspace, End Show, Reflect with its Work Map, the open point, the teach-back, a correction and Confirm, then Pass it on with a new case, the fix, the allow case and Off the record. The rail clip comes from `video/recorder/walkthroughs/ui-tour.json`, recorded earlier the same morning, before the header moved Off the record into its More menu.
-2. **Storyboards.** `video/capture/build-storyboards.mjs` writes `video/scripts/demo.json` and sets the clip times in `video/scripts/tech.json` from the take's markers (`assets/recordings/journey.json`). Every Clipa line quoted in a caption is copied from the cues the API sent during the take (`journey.cues.json`).
+2. **Storyboards.** `video/capture/build-storyboards.mjs` writes `video/scripts/demo.json` from the take's markers (`assets/recordings/journey.json`), and `video/capture/build-tech.mjs` writes `video/scripts/tech.json` (the 63.5 s tech cut) and its voice-over script `video/scripts/tech-voiceover.json` (one line per id, with `atSec` and `maxSec`; Clipa's lines are her words from the take). Every Clipa line quoted in a caption is copied from the cues the API sent during the take (`journey.cues.json`).
 3. **Render.** `npm run render -- Sample --script scripts/demo.json --out out/clipa-demo.mp4`, the same for `tech.json`.
 4. **Web-ready file.** `bash capture/finalize.sh out/clipa-demo.mp4 ../apps/web/public/videos/clipa-demo.mp4` re-encodes to H.264 with faststart and adds a silent AAC track. The committed files went through `capture/splice-outro.sh` instead, which does the same and swaps in a re-rendered closing card (`npm run render -- ClipaOutro --script …`) without rendering the whole video again.
 
@@ -22,7 +22,7 @@ Both are 1920x1080, H.264 with an AAC track, rendered with the Remotion toolkit 
 Real:
 
 - The web app and its UI, its sessions on the live API, the Conductor's timing decisions and every Clipa line in the product clips: the questions in Show, the Work Map and its versions, the open point, the teach-back and the confirmation in Reflect, the warning before Send and the silence in the allow case in Pass it on. The live API and its model runner (the Codex CLI) produced them during the take; none of them was written by us.
-- The architecture, the timing rules, the test counts (from `npm run check` on this branch) and the deployment facts in the tech video, taken from `docs/pitch/video-tech.md`, `backlog/docs/doc-11` and doc-12.
+- The architecture, the screen contract and the Conductor's timing rules in the tech video, taken from `docs/pitch/video-tech.md`, `backlog/docs/doc-11` and doc-12.
 
 Simulated, and labelled on screen ("Simulated input: screen events and answers posted as text · synthetic data"):
 

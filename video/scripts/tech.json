@@ -2,18 +2,9 @@
   "transitionSec": 0.5,
   "scenes": [
     {
-      "type": "title",
-      "durationSec": 5,
-      "kicker": "Technical walkthrough",
-      "title": "How Clipa is built",
-      "subtitle": "Screen and voice in, a confirmed Work Map out, then coaching",
-      "footer": "Hack-Nation 7 · Challenge 01 · All data in this video is synthetic",
-      "showClipa": true
-    },
-    {
       "type": "architecture",
-      "durationSec": 24,
-      "kicker": "Architecture",
+      "durationSec": 9,
+      "kicker": "How Clipa is built",
       "title": "Two faces, one server, one voice",
       "groups": [
         {
@@ -22,7 +13,7 @@
           "w": 370,
           "h": 530,
           "label": "Faces",
-          "atSec": 0.3
+          "atSec": 0.11
         },
         {
           "x": 560,
@@ -30,7 +21,7 @@
           "w": 1320,
           "h": 530,
           "label": "exe.dev VM",
-          "atSec": 2.5
+          "atSec": 0.95
         }
       ],
       "nodes": [
@@ -41,7 +32,7 @@
           "h": 180,
           "title": "Web app",
           "sub": "React + Vite on GitHub Pages · getDisplayMedia · masks in the browser",
-          "atSec": 0.6
+          "atSec": 0.23
         },
         {
           "x": 60,
@@ -50,7 +41,7 @@
           "h": 180,
           "title": "macOS app",
           "sub": "Swift menu bar + overlay · ScreenCaptureKit, changed frames only",
-          "atSec": 1.4
+          "atSec": 0.53
         },
         {
           "x": 600,
@@ -59,7 +50,7 @@
           "h": 180,
           "title": "API",
           "sub": "Node 22 + TypeScript · screen, agent, recording, ops",
-          "atSec": 3
+          "atSec": 1.14
         },
         {
           "x": 1010,
@@ -68,7 +59,7 @@
           "h": 180,
           "title": "Vision queue",
           "sub": "one job per surface, latest wins",
-          "atSec": 6.5
+          "atSec": 2.47
         },
         {
           "x": 1010,
@@ -77,7 +68,7 @@
           "h": 180,
           "title": "Model runner",
           "sub": "Claude Agent SDK or Codex CLI",
-          "atSec": 7.5
+          "atSec": 2.85
         },
         {
           "x": 1430,
@@ -86,7 +77,7 @@
           "h": 180,
           "title": "Clipa Conductor",
           "sub": "events in, cues out (SSE)",
-          "atSec": 12.5,
+          "atSec": 4.75,
           "tone": "teal"
         },
         {
@@ -96,7 +87,7 @@
           "h": 180,
           "title": "LLM tasks",
           "sub": "question · map · map edit · teach-back · guardrail check · process match",
-          "atSec": 13.5
+          "atSec": 5.13
         },
         {
           "x": 60,
@@ -105,7 +96,7 @@
           "h": 130,
           "title": "ElevenLabs Agents",
           "sub": "interviewer and tutor voice",
-          "atSec": 18.5,
+          "atSec": 7.03,
           "tone": "amber"
         }
       ],
@@ -124,7 +115,7 @@
             495,
             300
           ],
-          "atSec": 4
+          "atSec": 1.52
         },
         {
           "from": [
@@ -135,7 +126,7 @@
             600,
             410
           ],
-          "atSec": 4.6
+          "atSec": 1.75
         },
         {
           "from": [
@@ -146,7 +137,7 @@
             1010,
             340
           ],
-          "atSec": 6.8
+          "atSec": 2.58
         },
         {
           "from": [
@@ -162,7 +153,7 @@
             1105,
             480
           ],
-          "atSec": 8
+          "atSec": 3.04
         },
         {
           "from": [
@@ -178,7 +169,7 @@
             1395,
             480
           ],
-          "atSec": 9.5
+          "atSec": 3.61
         },
         {
           "from": [
@@ -190,7 +181,7 @@
             530
           ],
           "both": true,
-          "atSec": 14
+          "atSec": 5.32
         },
         {
           "from": [
@@ -201,7 +192,7 @@
             1320,
             620
           ],
-          "atSec": 14.5
+          "atSec": 5.51
         },
         {
           "from": [
@@ -227,7 +218,7 @@
             940,
             150
           ],
-          "atSec": 15.5,
+          "atSec": 5.89,
           "tone": "teal"
         },
         {
@@ -245,231 +236,233 @@
             305,
             755
           ],
-          "atSec": 19,
+          "atSec": 7.22,
           "tone": "amber"
         }
       ],
       "captions": [
         {
-          "fromSec": 0.5,
-          "toSec": 6,
-          "text": "Two faces, the web app and a macOS app, and one server on a VM."
+          "fromSec": 0.4,
+          "toSec": 4.5,
+          "text": "Two faces, web and macOS, and one server on a VM."
         },
         {
-          "fromSec": 6.2,
-          "toSec": 12.2,
-          "text": "Every changed frame becomes one typed observation."
-        },
-        {
-          "fromSec": 12.4,
-          "toSec": 18.2,
-          "text": "The Conductor decides when Clipa speaks and streams cues back."
-        },
-        {
-          "fromSec": 18.4,
-          "toSec": 23.8,
-          "text": "Voice: ElevenLabs Agents. The key stays on the server."
+          "fromSec": 4.7,
+          "toSec": 8.8,
+          "text": "Typed observations in, cues out. Voice: ElevenLabs Agents."
         }
       ]
     },
     {
       "type": "facts",
-      "durationSec": 16,
-      "kicker": "ScreenBridge v1",
+      "durationSec": 6.5,
+      "kicker": "ScreenBridge v1 · vision",
       "title": "One contract for any app",
       "items": [
         {
-          "text": "Frames are masked in the browser before they leave it",
-          "atSec": 0.5
+          "text": "Frames are masked in the browser before upload",
+          "atSec": 0.3
         },
         {
-          "text": "Each changed frame becomes one typed observation",
-          "atSec": 3
+          "text": "Vision turns each changed frame into one typed observation",
+          "atSec": 1.3
         },
         {
-          "text": "Kinds: order_view, email_draft, ticket, and a generic screen_activity",
-          "atSec": 5.5
-        },
-        {
-          "text": "Region boxes [x, y, w, h], normalised 0..1, so Clipa can point",
-          "atSec": 8
+          "text": "Region boxes [x, y, w, h], 0..1, so Clipa can point",
+          "atSec": 2.3
         }
       ],
       "code": {
         "title": "screen_activity · its shape (synthetic example)",
-        "atSec": 1.5,
+        "atSec": 0.8,
         "text": "{\n  \"kind\": \"screen_activity\",\n  \"facts\": {\n    \"app\": \"Demo workspace\",\n    \"surface\": \"Order → email → ticket\",\n    \"summary\": \"The draft to customer_07 has the\n      delivery address and time in the text\n      and the delivery image attached.\",\n    \"change\": \"Address and time copied from\n      the order into the email text.\",\n    \"pendingAction\": \"Send demo email\",\n    \"regions\": [{ \"label\": \"Message\",\n                  \"box\": [0.31, 0.52, 0.42, 0.18] }]\n  }\n}"
-      },
-      "captions": [
+      }
+    },
+    {
+      "type": "facts",
+      "durationSec": 6.5,
+      "kicker": "The Conductor",
+      "title": "When Clipa speaks",
+      "items": [
         {
-          "fromSec": 11,
-          "toSec": 15.8,
-          "text": "Masks protect the screen, not speech."
+          "text": "Never while you type or talk",
+          "atSec": 0.3
+        },
+        {
+          "text": "A pause: 1.8 s without typing, talking or a screen change",
+          "atSec": 1.2
+        },
+        {
+          "text": "The question is prepared as the screen settles, asked at the pause",
+          "atSec": 2.1
+        },
+        {
+          "text": "At least 15 s between questions",
+          "atSec": 3
         }
       ]
     },
     {
       "type": "clip",
-      "durationSec": 16,
+      "durationSec": 10.5,
       "src": "recordings/journey.mp4",
-      "startFromSec": 11.93,
+      "startFromSec": 24,
+      "playbackRate": 1.718,
       "layout": "framed",
-      "heading": "The Conductor · live API",
+      "heading": "1 · Show · live API",
       "badge": "Simulated input: screen events and answers posted as text · synthetic data",
       "captions": [
         {
           "fromSec": 0.3,
-          "toSec": 5,
-          "text": "One server loop decides when Clipa speaks, for web and Mac alike."
+          "toSec": 2.77,
+          "text": "The expert has changed the email. Clipa waits for the pause."
         },
         {
-          "fromSec": 5.2,
-          "toSec": 10.4,
-          "text": "It never speaks while you type or talk."
+          "fromSec": 2.92,
+          "toSec": 7.44,
+          "text": "Clipa: “What determines whether you put customer_07’s delivery address and time window in the email text or leave them in the attachment?”"
         },
         {
-          "fromSec": 10.6,
-          "toSec": 15.8,
-          "text": "It prepares the question as the screen settles, and asks at the pause."
+          "fromSec": 7.59,
+          "toSec": 10.3,
+          "text": "The expert’s answer, posted as text."
         }
       ],
-      "playbackRate": 1.2
-    },
-    {
-      "type": "facts",
-      "durationSec": 11,
-      "kicker": "Conductor rules",
-      "title": "Ask less, and later",
-      "items": [
+      "zoom": [
         {
-          "text": "A pause: 1.8 s without typing, talking or a screen change",
-          "atSec": 0.4
-        },
-        {
-          "text": "The screen settles 0.5 s after a change; the question is prepared then",
-          "atSec": 2.2
-        },
-        {
-          "text": "At least 15 s between questions",
-          "atSec": 4
-        },
-        {
-          "text": "Reflect: at most 2 open points, a teach-back of about 60 words",
-          "atSec": 5.8
-        },
-        {
-          "text": "A reworded description of the same screen is not a change",
-          "atSec": 7.6
+          "fromSec": 3.21,
+          "toSec": 11.5,
+          "x": 1,
+          "y": 0.47,
+          "scale": 1.45
         }
       ]
     },
     {
       "type": "clip",
-      "durationSec": 14,
+      "durationSec": 6,
       "src": "recordings/journey.mp4",
-      "startFromSec": 89.31,
+      "startFromSec": 91.81,
+      "playbackRate": 1.2,
       "layout": "framed",
-      "heading": "Reflect · live API",
-      "badge": "Simulated input: answers posted as text · synthetic data",
+      "heading": "2 · Reflect · live API",
+      "badge": "Simulated input: screen events and answers posted as text · synthetic data",
       "captions": [
         {
           "fromSec": 0.3,
-          "toSec": 6.8,
-          "text": "When Show ends, the Work Map is built from the session."
-        },
+          "toSec": 5.8,
+          "text": "The Work Map, built when Show ended: steps, a judgment call, a guardrail, an open point."
+        }
+      ],
+      "zoom": [
         {
-          "fromSec": 7,
-          "toSec": 13.8,
-          "text": "Steps, judgment calls and guardrails, each rule in the expert’s words."
+          "fromSec": 1.08,
+          "toSec": 7,
+          "x": 0,
+          "y": 0.62,
+          "scale": 1.35
         }
       ]
     },
     {
       "type": "clip",
-      "durationSec": 14,
+      "durationSec": 5.5,
       "src": "recordings/journey.mp4",
-      "startFromSec": 193,
+      "startFromSec": 155.48,
+      "playbackRate": 1.182,
       "layout": "framed",
-      "heading": "Pass it on · live API",
-      "badge": "Simulated input: screen events posted as text · synthetic data",
+      "heading": "2 · Reflect · live API",
+      "badge": "Simulated input: screen events and answers posted as text · synthetic data",
       "captions": [
         {
           "fromSec": 0.3,
-          "toSec": 6.8,
-          "text": "Every pending action is checked against confirmed rules only."
+          "toSec": 2.3,
+          "text": "The teach-back, after one spoken correction."
         },
         {
-          "fromSec": 7,
-          "toSec": 13.8,
-          "text": "The tutor warns before the mistake. It never blocks another app."
+          "fromSec": 2.45,
+          "toSec": 5.3,
+          "text": "Confirm: map v3 is confirmed by the expert."
+        }
+      ]
+    },
+    {
+      "type": "clip",
+      "durationSec": 8,
+      "src": "recordings/journey.mp4",
+      "startFromSec": 203.97,
+      "playbackRate": 1.188,
+      "layout": "framed",
+      "heading": "3 · Pass it on · live API",
+      "badge": "Simulated input: screen events and answers posted as text · synthetic data",
+      "captions": [
+        {
+          "fromSec": 0.3,
+          "toSec": 2.93,
+          "text": "A new case. The new hire moves to Send."
+        },
+        {
+          "fromSec": 3.08,
+          "toSec": 7.8,
+          "text": "Clipa: “The expert would stop here before sending and ask: why do you think this draft is ready to send?”"
         }
       ],
-      "playbackRate": 1.3
+      "zoom": [
+        {
+          "fromSec": 3.5,
+          "toSec": 9,
+          "x": 1,
+          "y": 0.42,
+          "scale": 1.45
+        }
+      ]
+    },
+    {
+      "type": "clip",
+      "durationSec": 5.5,
+      "src": "recordings/journey.mp4",
+      "startFromSec": 213.96,
+      "playbackRate": 1.636,
+      "layout": "framed",
+      "heading": "3 · Pass it on · live API",
+      "badge": "Simulated input: screen events and answers posted as text · synthetic data",
+      "captions": [
+        {
+          "fromSec": 0.3,
+          "toSec": 2.91,
+          "text": "The new hire adds the address and time as text."
+        },
+        {
+          "fromSec": 3.06,
+          "toSec": 5.3,
+          "text": "Clipa warns. She never clicks or blocks another app."
+        }
+      ]
     },
     {
       "type": "facts",
-      "durationSec": 15,
-      "kicker": "How it was built",
-      "title": "Two people, their agents, one day",
-      "items": [
-        {
-          "text": "Contracts first: ScreenBridge v1 between two parallel streams",
-          "atSec": 0.4
-        },
-        {
-          "text": "More than 700 automated tests (web 247, agent 190, API 97, screen 179, contracts 24)",
-          "atSec": 2.6
-        },
-        {
-          "text": "CI on every pull request; every merge deploys with a health check and automatic rollback",
-          "atSec": 5
-        },
-        {
-          "text": "An engine-agnostic model runner: Claude Agent SDK or Codex CLI",
-          "atSec": 7.4
-        },
-        {
-          "text": "When our Claude quota ran out before the pitch, we switched to Codex without touching the product",
-          "atSec": 9.8
-        }
-      ],
-      "footer": "Test counts: npm run check on this branch, 4 Oct 08:52 UTC"
-    },
-    {
-      "type": "facts",
-      "durationSec": 13,
+      "durationSec": 6,
       "kicker": "Honest limits",
-      "title": "What this demo is, and is not",
+      "title": "What this is, and is not",
       "items": [
         {
-          "text": "A teammate plays the expert; all data is synthetic",
-          "atSec": 0.4
+          "text": "Synthetic data; in these cuts, screen events and answers were posted as text",
+          "atSec": 0.3
         },
         {
-          "text": "Off the record stops screen, voice and model calls; it does not recall what was already sent",
-          "atSec": 2.2
+          "text": "Masks protect the screen, not speech; Off the record recalls nothing already sent",
+          "atSec": 1.2
         },
         {
-          "text": "Confirmed maps live in server memory: one team, one demo server",
-          "atSec": 4.4
-        },
-        {
-          "text": "On Codex, vision takes about 11 s per frame and a question about 13 s after a pause",
-          "atSec": 6.6
-        },
-        {
-          "text": "In these recordings the voice is off: answers and screen events are posted to the live API as text",
-          "atSec": 8.8
+          "text": "On Codex: about 11 s per vision frame, about 13 s from a pause to a question",
+          "atSec": 2.1
         }
       ]
     },
     {
       "type": "clipa-outro",
-      "durationSec": 7,
+      "durationSec": 4.5,
       "headline": "Next: a company memory that asks only about what changed",
-      "lines": [
-        "Clipa learns how your best people decide, teaches it to the next person, and turns it into agents that ask before they break your rules."
-      ],
       "links": [
         {
           "label": "Demo",
