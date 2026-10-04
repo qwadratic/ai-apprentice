@@ -1,10 +1,11 @@
 ---
 id: TASK-3.31
 title: 'Wire the brain, LLM route and Clipa director into the product shell'
-status: To Do
+status: In Progress
 assignee:
   - '@qwadratic'
 created_date: '2026-10-04 01:59'
+updated_date: '2026-10-04 02:15'
 labels:
   - stream-b
 dependencies: []
@@ -32,3 +33,15 @@ Replace the shell's NullBrain (apps/web/features/agent/shell) with packages/agen
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Branch task-3.31-wire-brain from task-3.29-brain (stacked on PR #26; merge main and #26 in as they land).
+2. Adapter from the shell's BrainDecision (shell/brain/types.ts) to packages/agent's policy output; one shared LlmClient for extractor, classifier and resolver; known customers from the workspace cases.
+3. Replace NullBrain: Learn (ASK_NOW at pauses via [ASK] contextual updates, answers to the map), Review (follow-ups, teach-back, confirm/correct by voice or buttons), Teach (predict-next, checkpoint WARN before Send with the expert's quote and moment).
+4. Replace the lab Clipa with the director from apps/web/features/agent/clipa; move the voice code still imported from features/agent/lab into the shell, then delete features/agent/lab.
+5. Adapters to stream A's contracts only (decision-4): ScreenBridge v1 types from packages/contracts, checkpoint reply within 4 s with an unknown fallback; the workspace and the real screen bridge mount after PR #12 and #21 merge.
+6. Align B fixtures with the workspace (customer_07 ref, DEMO-1201/1202, explicit acknowledgement on warn/unknown, Reset starts a new session).
+7. Pages root swap stays a separate follow-up.
+<!-- SECTION:PLAN:END -->
