@@ -9,12 +9,26 @@ export interface StageInfo {
   name: string;
   /** What happens there, in Clipa's words. */
   hint: string;
+  /** What Clipa says under the rail while she has nothing else to say on this stage. */
+  line: string;
 }
 
 export const STAGES: Readonly<Record<Mode, StageInfo>> = {
-  learn: { name: 'Show', hint: 'work as usual, I ask at pauses' },
-  review: { name: 'Reflect', hint: 'talk to me to fix the map' },
-  teach: { name: 'Pass it on', hint: 'a new hire tries, I step in before mistakes' },
+  learn: {
+    name: 'Show',
+    hint: 'work as usual, I ask at pauses',
+    line: 'Share your screen and work as usual. I stay quiet while you type and ask why at the pauses.',
+  },
+  review: {
+    name: 'Reflect',
+    hint: 'talk to me to fix the map',
+    line: 'I drew a map of what you did. Tell me what is wrong or missing, and I fix it.',
+  },
+  teach: {
+    name: 'Pass it on',
+    hint: 'a new hire tries, I step in before mistakes',
+    line: 'A new hire works a new case. I speak up before a mistake, in your words.',
+  },
 };
 
 /**
@@ -130,10 +144,9 @@ export function stageForKey(key: string, current: Mode): Mode | null {
   }
 }
 
-/** What Clipa says under the rail: her current line, else the conductor's guide text, else the selected stage's hint. */
+/** What Clipa says under the rail: her current line, else the conductor's guide text, else the selected stage's own line. */
 export function railCaption(bubble: string, guideText: string | null, selected: Mode): string {
   if (bubble.trim() !== '') return bubble.trim();
   if (guideText !== null && guideText.trim() !== '') return guideText.trim();
-  const stage = STAGES[selected];
-  return `${stage.name}: ${stage.hint}.`;
+  return STAGES[selected].line;
 }

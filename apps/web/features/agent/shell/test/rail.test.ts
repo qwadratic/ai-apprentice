@@ -106,7 +106,8 @@ test('arrow keys wrap around the rail, Home and End jump, other keys do nothing'
 test('the caption under the rail is Clipa\'s line, else the guide text, else the stage hint', () => {
   assert.equal(railCaption('  Why text instead of the image? ', 'Share your screen', 'learn'), 'Why text instead of the image?');
   assert.equal(railCaption('', 'Share your screen', 'learn'), 'Share your screen');
-  assert.equal(railCaption('', null, 'review'), 'Reflect: talk to me to fix the map.');
+  assert.equal(railCaption('', null, 'review'), STAGES.review.line);
+  assert.match(STAGES.learn.line, /ask why at the pauses/);
 });
 
 test('the Clipa store is read defensively: unknown states and missing fields fall back', () => {

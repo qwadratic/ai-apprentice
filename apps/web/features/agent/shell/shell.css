@@ -188,7 +188,7 @@
   background: var(--as-surface);
   border: 4px solid var(--wire-dim-body);
   box-shadow: 0 0 0 1.5px var(--wire-dim-outline), inset 0 0 0 1.5px var(--wire-dim-outline);
-  transition: width 0.25s ease, height 0.25s ease, background-color 0.25s ease;
+  transition: background-color 0.25s ease; /* no size transition: Clipa reads the seat's final size at once */
 }
 .apprentice-shell .as-stage__mark { font-size: 0.78rem; font-weight: 800; line-height: 1; color: var(--as-muted); }
 .apprentice-shell .as-stage[data-status="done"] .as-stage__node,
@@ -222,7 +222,7 @@
 .apprentice-shell .as-stage__live {
   padding: 1px 7px;
   border-radius: 999px;
-  background: var(--as-bad);
+  background: #c62828; /* "on air" red in both themes: white text stays readable */
   color: #ffffff;
   font-size: 0.66rem;
   font-weight: 800;
@@ -245,13 +245,12 @@
 .apprentice-shell .as-rail__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--wire-body); flex: none; }
 .apprentice-shell .as-rail__caption[data-clipa-state="warning"] .as-rail__dot { background: var(--as-warn); }
 .apprentice-shell .as-rail__caption[data-clipa-state="off"] .as-rail__dot { background: var(--as-muted); }
+/* One line, so the header (and Clipa's seat in it) never changes height while she talks; her bubble has the whole text. */
 .apprentice-shell .as-rail__line {
   min-width: 0;
   overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 /* Reflect: the map item the person clicked; Clipa points at it (journey/reflect-pointing.ts). */
