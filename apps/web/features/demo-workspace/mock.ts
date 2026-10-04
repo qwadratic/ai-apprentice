@@ -4,7 +4,11 @@ export type MockResult = CheckOutcome['status'] | 'error' | 'timeout';
 /** Explicit offline mock. It never reads the order, draft, customer or a rule. */
 export function createMockCheckpoint(result: MockResult = 'clear', delayMs = 350): CheckpointPort {
   return {
-    check(_scope, signal) {
+    async observeCurrentScreen(scope, signal) {
+      if (signal.aborted) throw new Error('Mock check cancelled.');
+      return { scope: { ...scope }, orderId: `mock-order-${scope.taskGeneration}-${scope.draftRevision}`, emailId: `mock-email-${scope.taskGeneration}-${scope.draftRevision}` };
+    },
+    evaluate(_observationIds, signal) {
       return new Promise((resolve, reject) => {
         if (signal.aborted) { reject(new Error('Mock check cancelled.')); return; }
         let timer: ReturnType<typeof setTimeout> | undefined;

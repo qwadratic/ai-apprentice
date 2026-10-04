@@ -1,6 +1,6 @@
 export type WorkspaceSurface = 'order' | 'email' | 'ticket';
 // Local facts only; the host adds the approved ScreenObservation envelope.
-export type WorkspaceActivity = { surface: WorkspaceSurface; typing: boolean; lastInputAtMs: number; idleMs: number };
+export type WorkspaceActivity = { surface: WorkspaceSurface; typing: boolean; idleMs: number };
 export type ActivityClock = {
   now(): number;
   setTimer(callback: () => void, delayMs: number): unknown;
@@ -29,13 +29,10 @@ export function createInputActivityReporter(onActivity?: (activity: WorkspaceAct
     if (timer !== undefined) clock.clearTimer(timer);
     timer = undefined;
   }
-  function emit(isTyping: boolean) {
-    if (lastInputAt === undefined) return;
-    const timestampMs = Math.floor(clock.now());
-    const lastInputAtMs = Math.floor(lastInputAt);
+  function emit(isTyping: boolean, idleMs: number) {
     typing = isTyping;
-    lastEmittedAt = timestampMs;
-    onActivity?.({ surface, typing: isTyping, lastInputAtMs, idleMs: timestampMs - lastInputAtMs });
+    lastEmittedAt = clock.now();
+    onActivity?.({ surface, typing: isTyping, idleMs: Math.floor(idleMs) });
   }
   function arm() {
     clear();
@@ -48,7 +45,7 @@ export function createInputActivityReporter(onActivity?: (activity: WorkspaceAct
     timer = clock.setTimer(() => {
       if (!enabled || disposed || scheduledGeneration !== generation || lastInputAt === undefined) return;
       const elapsed = Math.max(0, clock.now() - lastInputAt);
-      emit(elapsed < intervalMs);
+      emit(elapsed < intervalMs, elapsed);
       arm();
     }, Math.max(0, due - now));
   }
@@ -60,7 +57,7 @@ export function createInputActivityReporter(onActivity?: (activity: WorkspaceAct
       const changedSurface = surface !== nextSurface;
       surface = nextSurface;
       lastInputAt = clock.now();
-      if (!typing || changedSurface || lastInputAt - lastEmittedAt >= intervalMs) emit(true);
+      if (!typing || changedSurface || lastInputAt - lastEmittedAt >= intervalMs) emit(true, 0);
       arm();
     },
     reset,

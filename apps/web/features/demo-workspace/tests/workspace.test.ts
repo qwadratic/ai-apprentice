@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createWorkspace, type CheckpointPort, type CheckOutcome } from '../workspace.ts';
+import { createWorkspace, type CheckpointPort, type CheckOutcome, type ObservationReferences } from '../workspace.ts';
 import { demoCases } from '../cases.ts';
 import { createMockCheckpoint } from '../mock.ts';
 
 const clear: CheckOutcome = { status: 'clear', message: 'Checked.', evidenceIds: ['evidence-1'] };
-const tick = () => new Promise(resolve => setTimeout(resolve, 0));
+const tick = () => new Promise(resolve => setImmediate(resolve));
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>(done => { resolve = done; });
@@ -14,14 +14,15 @@ function deferred<T>() {
 function controlled() {
   const replies: ReturnType<typeof deferred<CheckOutcome>>[] = [];
   const signals: AbortSignal[] = [];
-  const scopes: unknown[] = [];
+  const references: readonly string[][] = [];
   const port: CheckpointPort = {
-    check(scope, signal) {
-      scopes.push(structuredClone(scope)); signals.push(signal);
+    async observeCurrentScreen(scope) { return { scope: { ...scope }, orderId: 'observed-order', emailId: 'observed-email' }; },
+    evaluate(ids, signal) {
+      (references as string[][]).push([...ids]); signals.push(signal);
       const reply = deferred<CheckOutcome>(); replies.push(reply); return reply.promise;
     },
   };
-  return { port, replies, signals, scopes };
+  return { port, replies, signals, references };
 }
 function make(port?: CheckpointPort, timeoutMs = 500) { return createWorkspace({ sessionId: 'session-1', checkpoint: port, timeoutMs, now: () => 1234 }); }
 
@@ -58,7 +59,7 @@ test('pending rejects double Preview and double Send without losing the original
   assert.equal(fixture.replies.length, 1); assert.equal(model.getState().check.status, 'pending');
   assert.equal(model.send(), false); assert.equal(model.send(), false);
   fixture.replies[0]!.resolve(clear); await first;
-  assert.equal(typeof (fixture.scopes[0]! as {revisions: {order: string}}).revisions.order, 'string');
+  assert.deepEqual(fixture.references[0], ['observed-order', 'observed-email']);
   assert.equal(model.canSend(), true); model.dispose();
 });
 
@@ -110,27 +111,30 @@ test('timeout aborts stalled work; its late response cannot authorize sending', 
 test('no agent, rejected response and malformed response are technical errors', async () => {
   const model = make(); await model.preview(); assert.equal(model.getState().check.status, 'error'); assert.equal(model.send(), false);
   model.setCheckpoint(createMockCheckpoint('error', 0)); await model.preview(); assert.equal(model.getState().check.status, 'error');
-  model.setCheckpoint({ async check() { return { status: 'clear' } as CheckOutcome; } });
+  model.setCheckpoint({ ...createMockCheckpoint(), async evaluate() { return { status: 'clear' } as CheckOutcome; } });
   await model.preview(); assert.equal(model.getState().check.status, 'error'); assert.equal(model.send(), false); model.dispose();
 });
 
-test('opaque order and email revisions change only with their visible surfaces', async () => {
-  let revision = 0;
-  const model = createWorkspace({ sessionId: 'session-1', checkpoint: createMockCheckpoint('clear', 0), createRevision: () => `r-${++revision}` });
-  const initial = model.getState().scope.revisions;
-  model.editDraft({ body: 'Changed body' });
-  const draft = model.getState().scope.revisions;
-  assert.equal(draft.order, initial.order); assert.notEqual(draft.email, initial.email);
-  model.editOrder({ deliveryWindow: 'Changed window' });
-  const order = model.getState().scope.revisions;
-  assert.notEqual(order.order, draft.order); assert.equal(order.email, draft.email);
-  await model.preview();
-  const preview = model.getState().scope.revisions;
-  assert.equal(preview.order, order.order); assert.notEqual(preview.email, order.email);
-  assert.equal(model.send(), true); assert.notEqual(model.getState().scope.revisions.email, preview.email);
-  model.reset();
-  assert.notEqual(model.getState().scope.revisions.order, preview.order);
-  model.dispose();
+test('stale or incomplete observation references are rejected before agent evaluation', async () => {
+  let evaluations = 0;
+  const model = make({
+    async observeCurrentScreen(scope) { return { scope: { ...scope, draftRevision: scope.draftRevision - 1 }, orderId: 'a', emailId: 'b' }; },
+    async evaluate() { evaluations++; return clear; },
+  });
+  await model.preview(); assert.equal(model.getState().check.status, 'error'); assert.equal(evaluations, 0);
+  model.setCheckpoint({
+    async observeCurrentScreen(scope) { return { scope, orderId: 'a', emailId: '' }; },
+    async evaluate() { evaluations++; return clear; },
+  });
+  await model.preview(); assert.equal(evaluations, 0); assert.equal(model.canSend(), false); model.dispose();
+});
+
+test('edits during observation acquisition prevent evaluation of old screen facts', async () => {
+  const refs = deferred<ObservationReferences>(); let evaluations = 0;
+  const model = make({ observeCurrentScreen() { return refs.promise; }, async evaluate() { evaluations++; return clear; } });
+  const oldScope = model.getState().scope; const pending = model.preview(); model.reset('unknown'); await pending;
+  refs.resolve({ scope: oldScope, orderId: 'old-order', emailId: 'old-email' }); await tick();
+  assert.equal(evaluations, 0); assert.equal(model.getState().draft.customerRef, null); model.dispose();
 });
 
 test('reset does not emit input activity; snapshots cannot mutate the workspace', () => {

@@ -1,4 +1,4 @@
-// Local development preview only. It is not imported by the product runtime.
+// Local development preview only. No build output or shared dependencies required.
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { stripTypeScriptTypes } from 'node:module';

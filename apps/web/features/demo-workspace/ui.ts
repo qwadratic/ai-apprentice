@@ -52,8 +52,6 @@ export function mountDemoWorkspace(container: HTMLElement, workspace: WorkspaceC
   function value(name: string, text: string) { if (field(name).value !== text) field(name).value = text; }
   let attachmentSignature = '';
   function render(state: WorkspaceState) {
-    root.dataset.orderRevision = state.scope.revisions.order;
-    root.dataset.emailRevision = state.scope.revisions.email;
     value('case', state.caseId);
     value('order-customer', state.order.customerRef ?? ''); value('items', state.order.items);
     value('address', state.order.deliveryAddress); value('window', state.order.deliveryWindow);
@@ -72,7 +70,7 @@ export function mountDemoWorkspace(container: HTMLElement, workspace: WorkspaceC
       }
       if (!state.draft.attachments.length) view('attachments').textContent = 'No attachments.';
     }
-    const titles = { idle: 'Preview required', pending: 'Checking…', clear: 'Clear', warn: 'Warning', unknown: 'Not verified · unknown', error: 'Not verified · check failed' };
+    const titles = { idle: 'Preview required', pending: 'Checking…', clear: 'Clear', warn: 'Warning', unknown: 'Unknown', error: 'Check failed' };
     view('check-panel').dataset.status = state.check.status; view('check-title').textContent = titles[state.check.status];
     view('check-message').textContent = state.check.status === 'idle' ? 'Check the current draft before sending. Any change requires a new Preview.'
       : state.check.status === 'pending' ? 'Waiting for current screen observations and the agent response. You can still edit; edits cancel this check.' : state.check.message;
