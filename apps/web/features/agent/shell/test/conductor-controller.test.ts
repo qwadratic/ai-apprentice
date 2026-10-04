@@ -183,8 +183,13 @@ test('off the record: the event goes first, then nothing is rendered until back 
   const rig = await booted();
   await rig.controller.start('learn');
   await settle();
+  rig.controller.noteTyping();
+  await settle();
   await rig.controller.goOffRecord();
   await settle();
+  rig.timers.advance(TYPING_IDLE_MS);
+  await settle();
+  assert.equal(rig.events().filter((e) => e.event.type === 'activity').length, 1, 'nothing but off_record is sent off the record');
   const off = rig.events().find((e) => e.event.type === 'off_record');
   assert.ok(off);
   assert.equal(off.event.on, true);
@@ -196,7 +201,11 @@ test('off the record: the event goes first, then nothing is rendered until back 
   assert.ok(!rig.events().some((e) => e.event.type === 'cue_done'), 'nothing is reported off the record');
   rig.controller.backOnRecord();
   await settle();
+  rig.timers.advance(BATCH_MS);
+  await settle();
   assert.equal(rig.events().filter((e) => e.event.type === 'off_record').at(-1)?.event.on, false);
+  // The pause that began off the record is reported, so the conductor does not wait for one.
+  assert.equal(rig.events().filter((e) => e.event.type === 'activity').at(-1)?.event.state, 'idle');
   rig.controller.dispose();
 });
 

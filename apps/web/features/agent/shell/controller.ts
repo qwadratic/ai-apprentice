@@ -420,7 +420,14 @@ export class ShellController {
     if (s.phase === 'live' && s.session !== null) this.conductor.send({ type: 'session', mode: s.session.mode, live: true, reason: null });
     const early = this.earlyEvents;
     this.earlyEvents = [];
-    for (const e of early) if (e.type !== 'mode' && e.type !== 'session' && e.type !== 'off_record') this.conductor.send(e);
+    const signals = new Set<ClientEvent['type']>(['mode', 'session', 'off_record', 'activity', 'talking', 'share']);
+    for (const e of early) if (!signals.has(e.type)) this.conductor.send(e);
+    // The latest of the page's signals (a conductor that restarted, or a stream that opened late, has none of them).
+    if (s.offRecord) return;
+    if (this.shareSent !== null) this.conductor.send({ type: 'share', state: this.shareSent, reason: null });
+    if (this.activitySent !== null) this.conductor.send({ type: 'activity', state: this.activitySent });
+    if (this.personTalking) this.conductor.send({ type: 'talking', by: 'person', active: true });
+    if (this.agentTalking) this.conductor.send({ type: 'talking', by: 'agent', active: true });
   }
 
   /** One event for the conductor; held until the stream is live (the hello goes first). Nothing is sent off the record except off_record itself. */
@@ -694,6 +701,10 @@ export class ShellController {
     this.store.dispatch({ type: 'OFF_RECORD_SET', on: false });
     this.conductorStore.set({ paused: false });
     this.conductorSend({ type: 'off_record', on: false });
+    // What changed while nothing was sent: the conductor would otherwise wait for a pause that already began.
+    if (this.activitySent !== null) this.conductorSend({ type: 'activity', state: this.activitySent });
+    this.conductorSend({ type: 'talking', by: 'person', active: this.personTalking });
+    this.conductorSend({ type: 'talking', by: 'agent', active: this.agentTalking });
     this.sys('Back on record. Start a mode to capture again.');
   }
 
@@ -724,7 +735,9 @@ export class ShellController {
     this.deps.presenter.setTarget(null);
     // After the bubble is cleared: the conductor answers the end of a stage with the next step's line.
     if (endingMode !== null) this.conductorSend({ type: 'session', mode: endingMode, live: false, reason: this.state.offRecord ? 'off_record' : 'ended' });
+    // The microphone and the agent are closed: nobody is talking any more (no voice event will say so).
     this.setTalking('agent', false);
+    this.setTalking('person', false);
     this.clearPendingAsk();
     this.expireOpenQuestions();
     this.bufferedContext = [];
