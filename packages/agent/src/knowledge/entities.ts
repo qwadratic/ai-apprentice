@@ -76,7 +76,8 @@ export interface MentionContext {
 
 const CANONICAL = /\bcustomer_\d+\b/gi;
 // Singular only: "customers two weeks ago" is not a customer.
-const SPOKEN = /\bcustomer[\s_-]*(?:number\s+|no\.?\s*|#\s*)?([a-z0-9-]+(?:\s+[a-z0-9-]+){0,3})/gi;
+// The words after "customer" are read in a lookahead, so two customers in one sentence do not swallow each other.
+const SPOKEN = /\bcustomer[\s_-]*(?:number\s+|no\.?\s*|#\s*)?(?=([a-z0-9-]+(?:\s+[a-z0-9-]+){0,3}))/gi;
 
 /** The customer number a spoken phrase names ("zero seven" in "customer zero seven"), when it is one and not a quantity. */
 function customerNumber(words: readonly string[]): number | null {

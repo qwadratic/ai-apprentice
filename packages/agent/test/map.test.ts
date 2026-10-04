@@ -141,7 +141,7 @@ test("a correction that changes the reason or the scope is applied and leaves th
   const state = await buildState({ confirm: false });
   const corrected = reduceMap(state, {
     type: "correct",
-    extraction: await answer("correction", "Not quite: it is because of his IT policy, and it holds for all customers.", { entityRef: null }),
+    extraction: await answer("correction", "One correction: it is because of his IT policy, and it holds for all customers.", { entityRef: null }),
   });
   const draft = workingMap(corrected);
   const g = must(draft.guardrails.find((x) => x.id === "g1"));
