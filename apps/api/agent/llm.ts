@@ -54,12 +54,17 @@ async function callRunner(config: AgentConfig, request: RunnerRequest, signal: A
 
 export function registerLlmRoutes(app: Express, rt: AgentRuntime): void {
   const { config, store } = rt;
-  const perIp = makeLimiter({ perMinute: config.limits.llmPerIpPerMinute }, config.now);
-  const perSession = makeLimiter({ perMinute: config.limits.llmPerSessionPerMinute }, config.now);
+  const { limits } = config;
+  const perIp = makeLimiter({ perMinute: limits.llmPerIpPerMinute, perIpPerHour: limits.llmPerIpPerHour }, config.now);
+  const perSession = makeLimiter({ perMinute: limits.llmPerSessionPerMinute, perIpPerHour: limits.llmPerSessionPerHour }, config.now);
+  const overall = makeLimiter({ perMinute: Number.MAX_SAFE_INTEGER, globalPerHour: limits.llmGlobalPerHour }, config.now);
+  const busySessions = new Set<string>();
+  let inFlight = 0;
   const limited = (res: Response): void => reply(res, 429, { ok: false, error: 'rate_limited' }, { 'Retry-After': '60' });
 
   app.post('/api/agent/llm/:task', async (req: Request, res: Response) => {
     if (!originAllowed(config, req)) { reply(res, 403, { ok: false, error: 'origin_not_allowed' }); return; }
+    // Tokens can be minted by anyone who sends an allowed Origin, so the IP window comes before everything else.
     if (perIp(clientIp(req))) { limited(res); return; }
     // The route carries no session id: the token identifies its session, which is then the rate-limit key.
     const auth = store.check(req.get('Authorization'), null);
@@ -67,27 +72,40 @@ export function registerLlmRoutes(app: Express, rt: AgentRuntime): void {
     const name = String(req.params.task);
     const task = Object.hasOwn(LLM_TASKS, name) ? LLM_TASKS[name] : undefined;
     if (!task) { reply(res, 404, { ok: false, error: 'unknown_task' }); return; }
-    if (perSession(auth.sessionId)) { limited(res); return; }
-    const raw = await readBody(req, config.limits.llmInputBytes);
+    const raw = await readBody(req, limits.llmInputBytes);
     if (!raw.ok) { reply(res, raw.status, { ok: false, error: raw.error, max_bytes: raw.maxBytes }); return; }
     const prepared = task.prepare(raw.body);
     if (!prepared.ok) { reply(res, 400, { ok: false, error: 'invalid_input', field: prepared.field }); return; }
 
-    const aborted = new AbortController();
-    res.on('close', () => { if (!res.writableEnded) aborted.abort(); });
-    const result = await callRunner(config, prepared.request, aborted.signal);
-    if (aborted.signal.aborted) return; // the client went away
-    if (!result.ok) {
-      config.log({ level: 'warn', msg: 'llm call failed', task: name, status: result.status, error: result.error });
-      reply(res, result.status, { ok: false, error: result.error }, result.error === 'runner_busy' ? { 'Retry-After': '5' } : {});
+    // Only calls that would reach the runner spend the session, global and in-flight budgets.
+    if (perSession(auth.sessionId) || overall('all')) { limited(res); return; }
+    // One call in flight per session and llmGlobalInFlight overall: the runner (concurrency 2) keeps a slot for vision.
+    if (busySessions.has(auth.sessionId) || inFlight >= limits.llmGlobalInFlight) {
+      reply(res, 429, { ok: false, error: 'busy' }, { 'Retry-After': '2' });
       return;
     }
-    const output = prepared.check(result.json);
-    if (output === null) {
-      config.log({ level: 'warn', msg: 'llm call failed', task: name, status: 502, error: 'invalid_output' });
-      reply(res, 502, { ok: false, error: 'invalid_output' });
-      return;
+    busySessions.add(auth.sessionId);
+    inFlight++;
+    try {
+      const aborted = new AbortController();
+      res.on('close', () => { if (!res.writableEnded) aborted.abort(); });
+      const result = await callRunner(config, prepared.request, aborted.signal);
+      if (aborted.signal.aborted) return; // the client went away
+      if (!result.ok) {
+        config.log({ level: 'warn', msg: 'llm call failed', task: name, status: result.status, error: result.error });
+        reply(res, result.status, { ok: false, error: result.error }, result.error === 'runner_busy' ? { 'Retry-After': '5' } : {});
+        return;
+      }
+      const output = prepared.check(result.json);
+      if (output === null) {
+        config.log({ level: 'warn', msg: 'llm call failed', task: name, status: 502, error: 'invalid_output' });
+        reply(res, 502, { ok: false, error: 'invalid_output' });
+        return;
+      }
+      reply(res, 200, { ok: true, output });
+    } finally {
+      busySessions.delete(auth.sessionId);
+      inFlight--;
     }
-    reply(res, 200, { ok: true, output });
   });
 }

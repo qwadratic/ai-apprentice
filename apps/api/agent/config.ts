@@ -46,9 +46,17 @@ export interface Limits {
   minSessionAgeMs: number;
   tmpMaxAgeMs: number;
   maintenanceIntervalMs: number;
-  /** POST /api/agent/llm/:task: per session, per client IP (a venue may share one), and the input cap. */
+  /**
+   * POST /api/agent/llm/:task costs money and shares the runner with vision, so it is bounded hard:
+   * per session, per client IP (checked before the token, a venue may share one IP) and globally (counted
+   * only for authorized calls), plus at most one call in flight per session and llmGlobalInFlight overall.
+   */
   llmPerSessionPerMinute: number;
+  llmPerSessionPerHour: number;
   llmPerIpPerMinute: number;
+  llmPerIpPerHour: number;
+  llmGlobalPerHour: number;
+  llmGlobalInFlight: number;
   llmInputBytes: number;
 }
 export interface Timing {
@@ -111,8 +119,12 @@ export function resolveConfig(options: AgentOptions = {}, env: NodeJS.ProcessEnv
     minSessionAgeMs: 24 * 3_600_000,
     tmpMaxAgeMs: 10 * 60_000,
     maintenanceIntervalMs: 10 * 60_000,
-    llmPerSessionPerMinute: int('AGENT_LLM_PER_SESSION_MIN', 30),
-    llmPerIpPerMinute: int('AGENT_LLM_PER_IP_MIN', 120),
+    llmPerSessionPerMinute: int('AGENT_LLM_PER_SESSION_MIN', 6),
+    llmPerSessionPerHour: int('AGENT_LLM_PER_SESSION_HOUR', 60),
+    llmPerIpPerMinute: int('AGENT_LLM_PER_IP_MIN', 20),
+    llmPerIpPerHour: int('AGENT_LLM_PER_IP_HOUR', 200),
+    llmGlobalPerHour: int('AGENT_LLM_GLOBAL_HOUR', 600),
+    llmGlobalInFlight: int('AGENT_LLM_GLOBAL_IN_FLIGHT', 1),
     llmInputBytes: 16 * 1024,
     ...options.limits,
   };

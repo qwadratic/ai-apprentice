@@ -6,7 +6,7 @@ export const system = [
   '',
   'Decide the verdict:',
   '- confirm: the reply accepts the summary as correct, possibly with filler words, and changes nothing.',
-  '- correct: the reply says some part of the summary is wrong or incomplete and supplies the fix. Put the corrected statement in correction, as a short sentence that stays close to the reply\'s own words.',
+  '- correct: the reply says some part of the summary is wrong or incomplete and supplies the fix. Put the corrected statement in correction, as a short sentence (at most 300 characters) that stays close to the reply\'s own words.',
   '- unclear: the reply is off topic, ambiguous, a question, or neither accepts nor corrects. Do not guess.',
   'correction must be null unless the verdict is correct. When in doubt between confirm and correct, choose unclear.',
 ].join('\n');

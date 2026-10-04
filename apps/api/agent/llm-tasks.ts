@@ -29,13 +29,13 @@ function textList(v: unknown, field: string, maxItems: number, maxLen: number, m
     if (!t.ok) return t;
     out.push(t.value);
   }
-  return { ok: true, value: out };
+  return { ok: true, value: [...new Set(out)] }; // duplicates would repeat enum values in the schema
 }
 const onlyKeys = (o: Json, keys: readonly string[]): boolean => Object.keys(o).every((k) => keys.includes(k));
 const hasOwn = (o: Json, k: string): boolean => Object.hasOwn(o, k);
 
-// "<" is escaped so that input text can never close the <input> block.
-const prompt = (input: unknown): string => `<input>\n${JSON.stringify(input).replaceAll('<', '\\u003c')}\n</input>`;
+// Input text can never close the <input> block: "</input" is written "<\/input" (a valid JSON escape for "/").
+const prompt = (input: unknown): string => `<input>\n${JSON.stringify(input).replace(/<\/(input)/gi, '<\\/$1')}\n</input>`;
 const nullable = (schema: Json): Json => ({ anyOf: [schema, { type: 'null' }] });
 const STRING: Json = { type: 'string' };
 const stringArray: Json = { type: 'array', items: STRING };
@@ -43,6 +43,44 @@ const stringArray: Json = { type: 'array', items: STRING };
 // ---- output checking helpers ----------------------------------------------
 const isStr = (v: unknown, max: number, min = 0): v is string => typeof v === 'string' && v.length >= min && v.length <= max;
 const strList = (v: unknown, maxItems: number, maxLen: number): v is string[] => Array.isArray(v) && v.length <= maxItems && v.every((x) => isStr(x, maxLen, 1));
+// Structured outputs do not enforce maxLength, so the free-text caps are enforced here and stated in the prompts.
+export const CAPS = { rationale: 300, correction: 300, condition: 200, requiredAction: 200, listItems: 5, listItemLength: 200 } as const;
+
+// ---- quote matching ---------------------------------------------------------
+// The model's quote and the answer are compared after folding: NFKC, curly to straight quotes, dashes, collapsed
+// whitespace and lower case, ignoring punctuation at the edges of the quote. The original span is returned.
+const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+function foldGrapheme(g: string): string {
+  const out = g.normalize('NFKC')
+    .replace(/[\u2018\u2019\u201a\u201b\u2032\u00b4`]/g, "'")
+    .replace(/[\u201c\u201d\u201e\u201f\u2033\u00ab\u00bb]/g, '"')
+    .replace(/[\u2010-\u2015\u2212]/g, '-')
+    .toLowerCase();
+  return /^\s+$/u.test(out) ? ' ' : out;
+}
+interface Folded { text: string; start: number[]; end: number[] }
+function fold(source: string): Folded {
+  const f: Folded = { text: '', start: [], end: [] };
+  for (const { segment, index } of graphemes.segment(source)) {
+    const piece = foldGrapheme(segment);
+    if (piece === ' ' && f.text.endsWith(' ')) continue;
+    for (let i = 0; i < piece.length; i++) { f.start.push(index); f.end.push(index + segment.length); }
+    f.text += piece;
+  }
+  return f;
+}
+/** The span of `answer` that `quote` designates once both are folded, or null. */
+export function findQuoteSpan(answer: string, quote: string): string | null {
+  const needle = fold(quote).text.replace(/^[\s\p{P}\p{S}]+|[\s\p{P}\p{S}]+$/gu, '');
+  if (needle === '') return null;
+  const hay = fold(answer);
+  const at = hay.text.indexOf(needle);
+  if (at < 0) return null;
+  const from = hay.start[at];
+  const to = hay.end[at + needle.length - 1];
+  return from === undefined || to === undefined ? null : answer.slice(from, to);
+}
+
 const exactKeys = (o: Json, keys: readonly string[]): boolean => Object.keys(o).length === keys.length && keys.every((k) => hasOwn(o, k));
 
 // ---- answer_extraction ------------------------------------------------------
@@ -104,22 +142,24 @@ export interface ExtractionOutput {
 function checkExtraction(raw: unknown, input: ExtractionInput): ExtractionOutput | null {
   if (!isRecord(raw) || !exactKeys(raw, EXTRACTION_KEYS)) return null;
   const { rationale, quote, guardrail, exceptions, unknowns, confidence } = raw;
-  if (rationale !== null && !isStr(rationale, 1000)) return null;
-  if (!isStr(quote, 4000, 1) || !input.answerText.includes(quote)) return null; // verbatim span of the answer
-  if (!strList(exceptions, 20, 500) || !strList(unknowns, 20, 500)) return null;
+  if (rationale !== null && !isStr(rationale, CAPS.rationale)) return null;
+  if (!isStr(quote, 4000, 1)) return null;
+  const span = findQuoteSpan(input.answerText, quote); // the original span of the answer, whatever small drift the model made
+  if (span === null) return null;
+  if (!strList(exceptions, CAPS.listItems, CAPS.listItemLength) || !strList(unknowns, CAPS.listItems, CAPS.listItemLength)) return null;
   if (typeof confidence !== 'number' || !Number.isFinite(confidence) || confidence < 0 || confidence > 1) return null;
   let out: ExtractionOutput['guardrail'] = null;
   if (guardrail !== null) {
     if (!isRecord(guardrail) || !exactKeys(guardrail, GUARDRAIL_KEYS)) return null;
     const { condition, requiredAction, requiredFields, scope } = guardrail;
-    if (!isStr(condition, 500, 1) || !isStr(requiredAction, 500, 1)) return null;
+    if (!isStr(condition, CAPS.condition, 1) || !isStr(requiredAction, CAPS.requiredAction, 1)) return null;
     if (!strList(requiredFields, 40, 64) || !requiredFields.every((f) => hasOwn(input.orderFields, f))) return null;
     if (!isRecord(scope) || !exactKeys(scope, ['entity'])) return null;
     const entity = scope.entity;
     if (entity !== null && (typeof entity !== 'string' || !input.customerRefs.includes(entity))) return null;
     out = { condition, requiredAction, requiredFields, scope: { entity } };
   }
-  return { rationale, quote, guardrail: out, exceptions, unknowns, confidence };
+  return { rationale, quote: span, guardrail: out, exceptions, unknowns, confidence };
 }
 
 const answerExtraction: LlmTask = {
@@ -152,9 +192,9 @@ const replyClassification: LlmTask = {
         if (!isRecord(raw) || !exactKeys(raw, ['verdict', 'correction'])) return null;
         const { verdict, correction } = raw;
         if (verdict !== 'confirm' && verdict !== 'correct' && verdict !== 'unclear') return null;
-        if (correction !== null && !isStr(correction, 1000)) return null;
-        // A correction is only meaningful with the "correct" verdict and must then be present.
-        if (verdict === 'correct') return typeof correction === 'string' && correction.trim() !== '' ? { verdict, correction } : null;
+        if (correction !== null && !isStr(correction, CAPS.correction)) return null;
+        // A correction is only meaningful with the "correct" verdict; "correct" without one is treated as unclear.
+        if (verdict === 'correct') return typeof correction === 'string' && correction.trim() !== '' ? { verdict, correction } : { verdict: 'unclear', correction: null };
         return { verdict, correction: null };
       },
     };
