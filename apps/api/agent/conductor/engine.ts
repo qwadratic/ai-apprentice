@@ -1001,7 +1001,9 @@ export class Conductor {
     this.thought('Putting your map together…');
     const map = await this.run<MapSynthesisOutput>('map_synthesis', { observations, transcript: turns, correction: null, previousTeachBack: null });
     if (this.offRecord || this.liveMode !== 'review') return;
-    if (!map) { this.review.phase = 'idle'; this.quiet('could not build the map; try Review again'); this.pose('idle'); return; }
+    // The model could not build this session's map: Reflect still opens with one (the last built map or the demo map),
+    // labelled, and the next Review tries this session's own map again.
+    if (!map) { this.quiet('could not build this session\'s map; showing an earlier one'); this.openFallbackMap(); return; }
     this.publishMap({ ...map, baselineProvenance: provenance, comments: [] }, false);
     this.pose('listen');
     if (map.gaps.length > 0) { this.review.phase = 'gaps'; this.guide('gaps', 'web'); }
@@ -1009,7 +1011,8 @@ export class Conductor {
   }
 
   /**
-   * Reflect always has a session to explore. Without a map or a screen of its own, the session gets a copy of the last map
+   * Reflect always has a session to explore. Without a map of its own (no screen yet, or the model could not build one),
+   * the session gets a copy of the last map
    * built in an earlier session (kept across restarts), else the synthetic demo map; the board labels where it comes from.
    * Edits change this session's copy only, and a confirmation registers it like any confirmed map, so Pass it on works.
    */

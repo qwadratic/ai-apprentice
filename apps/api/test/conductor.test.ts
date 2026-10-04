@@ -850,3 +850,17 @@ test('Reflect: confirming a fallback map registers it like any confirmed map, so
   await own.send({ type: 'ui', action: 'confirm', targetId: null, text: null });
   assert.ok(!mapsOf(own.cues).some((m) => m.confirmed));
 });
+
+test('Reflect: when the model cannot build the session\'s own map, the board still opens with the last built map', async () => {
+  const maps = new MapRegistry();
+  maps.recordBuilt('sess-old', MAP as never, 1);
+  // No map_synthesis answer: every build fails (runner_error), in the background after Show and again in Reflect.
+  const r = rig({}, maps, 'sess-new');
+  await r.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', null), obs('o2', 'Changed.'));
+  await r.send({ type: 'session', mode: 'learn', live: false, reason: 'user' }, { type: 'session', mode: 'review', live: true, reason: null });
+  const shown = mapsOf(r.cues).at(-1);
+  assert.equal(shown?.origin, 'earlier');
+  assert.deepEqual((shown?.map as ConductorMap).steps.map((s) => s.action), MAP.steps.map((s) => s.action));
+  assert.equal(cueOf(r.cues, 'guide').at(-1)?.step, 'earlier_map');
+  assert.ok(r.calls.filter((c) => c.task === 'map_synthesis').length >= 1, 'it did try to build its own map');
+});
