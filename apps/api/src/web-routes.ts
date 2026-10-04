@@ -5,6 +5,7 @@ import type { Express, RequestHandler } from 'express';
 export interface WebRoute {
   method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   path: string;
+  body?: 'json' | 'raw';
   handle(request: Request, context: Record<string, string>): Response | Promise<Response>;
 }
 /** Adapt existing Fetch handlers without duplicating their auth, media or model logic. */
@@ -18,10 +19,15 @@ export function registerWebRoute(app: Express, route: WebRoute): void {
       for (const [name, value] of Object.entries(req.headers)) {
         if (value !== undefined) headers.set(name, Array.isArray(value) ? value.join(', ') : value);
       }
-      // Express has already enforced the common JSON body limit. Preserve its parsed value.
-      headers.delete('content-length');
-      const body = req.body === undefined || ['GET', 'HEAD'].includes(req.method) ? undefined : JSON.stringify(req.body);
-      const request = new Request(new URL(req.originalUrl, 'http://127.0.0.1'), {method: req.method, headers, body, signal: controller.signal});
+      const hasBody = !['GET', 'HEAD'].includes(req.method);
+      // Raw routes retain the unread Node request stream. Authentication can therefore finish before a handler consumes bytes.
+      const body = !hasBody ? undefined : route.body === 'raw'
+        ? Readable.toWeb(req) as unknown as ReadableStream<Uint8Array>
+        : req.body === undefined ? undefined : JSON.stringify(req.body);
+      if (route.body !== 'raw') headers.delete('content-length');
+      const init: RequestInit & {duplex?: 'half'} = {method: req.method, headers, body, signal: controller.signal};
+      if (route.body === 'raw' && body !== undefined) init.duplex = 'half';
+      const request = new Request(new URL(req.originalUrl, 'http://127.0.0.1'), init);
       const response = await route.handle(request, req.params as Record<string, string>);
       res.status(response.status);
       response.headers.forEach((value, name) => res.setHeader(name, value));

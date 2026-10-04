@@ -12,7 +12,7 @@ export async function createApi({allowedOrigins = [], modules = []}: ApiOptions 
     if (origin) {
       res.set('Access-Control-Allow-Origin', origin);
       res.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
-      res.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+      res.set('Access-Control-Allow-Headers', 'Authorization, Content-Type, X-Recording-Chunk-Index');
     }
     if (req.method === 'OPTIONS') { res.sendStatus(204); return; }
     next();
