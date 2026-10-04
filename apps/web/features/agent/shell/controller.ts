@@ -80,6 +80,8 @@ export interface ControllerDeps {
   isHidden(): boolean;
   storage: KeyValueStorage;
   store?: Store;
+  /** Epoch ms of the last key press or text input in the page (the demo workspace included), or null. */
+  lastInputAt?: () => number | null;
 }
 
 export function parsePersona(value: string | null): Persona {
@@ -209,18 +211,25 @@ export class ShellController {
 
   // ---- Settings -----------------------------------------------------------
 
+  /**
+   * A tab click only changes what is shown. It never ends or starts a session: the running session (and its voice agent) stays until
+   * the person ends it or presses "End ... and start ..." (switchSession).
+   */
   setMode(mode: Mode): void {
+    if (this.state.mode === mode) return;
     this.store.dispatch({ type: 'MODE_SET', mode });
     if (mode === 'review') this.loadReview();
-    // One voice agent per session: a live session whose agent is not the one of the new mode ends. Teach starts its own session
-    // with the tutor at once; leaving Teach only ends the tutor session (starting Learn is the person's choice: it begins a new map).
+  }
+
+  /** The person's explicit switch: the running session ends, then a session of `mode` starts (with that mode's voice agent). */
+  async switchSession(mode: Mode): Promise<void> {
     const s = this.state;
-    if (s.phase !== 'live' || s.session === null || voiceRoleFor(s.session.mode) === voiceRoleFor(mode)) return;
-    const from = MODE_NAMES[s.session.mode];
-    void this.end(`${from} ended: ${MODE_NAMES[mode]} talks to the ${voiceRoleFor(mode)} agent.`).then(() => {
-      if (mode === 'teach' && this.state.mode === 'teach' && this.state.phase !== 'live') return this.start('teach');
-      return undefined;
-    });
+    if (s.phase === 'live' && s.session !== null) {
+      await this.end(`${MODE_NAMES[s.session.mode]} ended: the person started ${MODE_NAMES[mode]}.`);
+    }
+    if (this.state.phase === 'live' || this.state.phase === 'starting' || this.state.phase === 'ending') return;
+    if (this.state.mode !== mode) this.store.dispatch({ type: 'MODE_SET', mode });
+    await this.start(mode);
   }
 
   setPersona(persona: Persona): void {
@@ -576,7 +585,10 @@ export class ShellController {
   }
 
   private onVoiceMode(mode: VoiceMode): void {
-    this.log('recv', 'MODE', mode);
+    // The voice SDK's speaking/listening switch (not the Learn/Review/Teach tab). Logged only when it changes.
+    const was = this.state.voice.phase;
+    if ((mode === 'speaking') === (was === 'speaking') && (was === 'speaking' || was === 'listening')) return;
+    this.log('recv', 'VOICE_MODE', mode);
     this.store.dispatch({ type: 'VOICE_PHASE', phase: mode === 'speaking' ? 'speaking' : 'listening' });
     if (mode === 'speaking' && this.pendingAsk) {
       const ms = Math.max(0, Math.round(this.deps.perfNow() - this.pendingAsk.fromPerfMs));
@@ -814,9 +826,16 @@ export class ShellController {
   }
 
   private onScreenStatus(s: ScreenStatus): void {
+    this.safe('onStatus', () => this.brain.onStatus(s), undefined);
+    // A frame the vision could not read (no order, email or ticket in view: vision_incomplete, a model timeout) is reported by the
+    // server as an `error` status while the capture keeps running. It does not stop observation, so it is not shown as a stop.
+    if (s.state === 'error' && this.state.screen.capture?.state === 'capturing') {
+      this.store.dispatch({ type: 'SCREEN_STATUS', state: 'capturing', reason: `last frame skipped: ${s.reason ?? 'vision error'}` });
+      this.log('sys', 'SCREEN', `frame skipped (${s.reason ?? 'vision error'}); capture continues`);
+      return;
+    }
     this.store.dispatch({ type: 'SCREEN_STATUS', state: s.state, reason: s.reason ?? null });
     this.log('sys', 'SCREEN', `${s.state}${s.reason ? ` (${s.reason})` : ''}`);
-    this.safe('onStatus', () => this.brain.onStatus(s), undefined);
     if (s.state === 'error') {
       this.store.dispatch({ type: 'BANNER_SET', banner: { kind: 'error', text: `Screen observation stopped${s.reason ? `: ${s.reason}` : ''}.` } });
     }
@@ -835,7 +854,13 @@ export class ShellController {
       agentSpeaking: s.voice.phase === 'speaking',
       humanSpeaking: this.speech.isSpeaking(this.deps.perfNow()),
       asked: this.askedCount,
+      ...(this.deps.lastInputAt ? { lastInputAtMs: this.sessionTime(this.deps.lastInputAt()) } : {}),
     };
+  }
+
+  /** An epoch-ms instant as session time, or null (before the session started, or none). */
+  private sessionTime(epochMs: number | null): number | null {
+    return epochMs === null || epochMs < this.epochMs ? null : epochMs - this.epochMs;
   }
 
   private tickBrain(): void {
@@ -1040,11 +1065,25 @@ export class ShellController {
     });
   }
 
-  private async onCheckpoint(cp: ActionCheckpoint): Promise<void> {
+  /** What the demo workspace's Preview may do now: the tutor checks only in a live Teach session. */
+  checkpointGate(): { ok: true } | { ok: false; message: string } {
+    const s = this.state;
+    if (s.offRecord) return { ok: false, message: 'Off the record: nothing is checked.' };
+    if (s.phase !== 'live' || s.session === null || s.session.mode !== 'teach') {
+      return { ok: false, message: 'Start Teach first: the tutor checks a draft only while a Teach session runs. Nothing was checked.' };
+    }
+    return { ok: true };
+  }
+
+  /**
+   * The tutor's answer to a checkpoint (the brain within CHECKPOINT_TIMEOUT_MS, else `unknown`), shown and recorded. The bridge path
+   * (onCheckpoint) and the demo workspace's own Preview port (screen/checkpoint-binding.ts) both come here.
+   */
+  async answerCheckpoint(cp: ActionCheckpoint): Promise<CheckpointReply | null> {
     const run = this.runId;
     this.sys(`Checkpoint ${cp.id} raised by the workspace.`);
     const reply = await this.judge(cp);
-    if (!this.isCurrent(run)) return;
+    if (!this.isCurrent(run)) return null;
     this.store.dispatch({
       type: 'CHECKPOINT_RESULT',
       card: { checkpointId: reply.checkpointId, status: reply.status, message: reply.message, evidenceIds: reply.evidenceIds, atMs: cp.timestampMs, deliveryError: null },
@@ -1052,8 +1091,13 @@ export class ShellController {
     this.refreshMastery();
     this.persist('CHECKPOINT_RESULT', { checkpointId: reply.checkpointId, status: reply.status, evidenceIds: reply.evidenceIds, atMs: cp.timestampMs });
     this.log('sent', 'CHECKPOINT', `${reply.status}: ${reply.message}`);
+    return reply;
+  }
+
+  private async onCheckpoint(cp: ActionCheckpoint): Promise<void> {
+    const reply = await this.answerCheckpoint(cp);
     const source = this.source;
-    if (!source) return;
+    if (!reply || !source) return;
     try {
       await source.replyToCheckpoint(reply);
     } catch (e) {

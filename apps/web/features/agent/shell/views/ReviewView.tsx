@@ -41,6 +41,13 @@ export function ReviewView() {
         </p>
       )}
 
+      {brain.wired && teachBack.text === null && gaps.length === 0 && (map.guardrails ?? []).length === 0 && (
+        <p className="as-notwired" role="status" data-testid="review-next-step">
+          <strong>Next step:</strong> the Work Map holds no rule yet, so there is no teach-back to confirm. Run Learn first (do the task,
+          answer a few of Clipa&apos;s questions), then come back here. Questions deferred in Learn show up below as open gaps.
+        </p>
+      )}
+
       <section aria-labelledby="as-gaps-title">
         <h3 className="as-h3" id="as-gaps-title">Open gaps <span className="as-count">{gaps.length + waiting.length}</span></h3>
         {gaps.length + waiting.length === 0 ? (
