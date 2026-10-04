@@ -134,8 +134,9 @@ test("customers named in speech map onto the refs seen on screen, and are never 
   for (const spoken of strings("spokenCustomers")) assert.deepEqual(mentionedRefs(`Only ${spoken} gets it.`, { knownRefs: known }), ["customer_07"], spoken);
   assert.deepEqual(mentionedRefs("Customer nine asks for the same.", { knownRefs: known }), ["customer_09"]);
   assert.deepEqual(mentionedRefs("customer twenty one", { knownRefs: ["customer_21"] }), ["customer_21"]);
-  assert.deepEqual(mentionedRefs("customer seven", { knownRefs: ["customer_03"] }), ["customer_07"], "not on screen yet: same scheme");
-  assert.deepEqual(mentionedRefs("customer seven", { knownRefs: ["acct-3"] }), [], "another scheme: never invented");
+  assert.deepEqual(mentionedRefs("customer seven", { knownRefs: ["customer_03"] }), [], "not a known customer: never invented");
+  assert.deepEqual(mentionedRefs("customer seven"), [], "no known customers: nothing to resolve to");
+  assert.deepEqual(mentionedRefs("customer_55 is new", { knownRefs: known }), ["customer_55"], "a ref written out stands as written");
   assert.deepEqual(mentionedRefs("customer service is slow", { knownRefs: known }), []);
   assert.equal(spokenNumber(["zero", "seven"]), 7);
   assert.equal(spokenNumber(["twelve"]), 12);

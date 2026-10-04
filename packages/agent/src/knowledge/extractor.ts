@@ -18,12 +18,12 @@ export interface ExtractionInput {
   entityRef: string | null;
   /** The question as it was asked; helps an LLM extractor. */
   questionText?: string | null;
-  /** Customer refs seen on screen: a spoken "customer seven" is mapped onto one of them, never invented. */
+  /** Customer refs seen on screen plus the customer list of the workspace: a spoken "customer seven" is mapped onto one of them, never invented. */
   knownRefs?: readonly string[];
   /** Spoken phrases (lower case) already resolved to refs by an EntityResolver. */
   aliases?: Readonly<Record<string, string>>;
-  /** Names of the order fields the screen shows (not their values). */
-  orderFields?: readonly string[];
+  /** The order fields the screen shows, by name (orderId, deliveryAddress, deliveryWindow) with their visible values. */
+  orderFields?: Readonly<Record<string, string>>;
 }
 
 export interface AnswerExtraction {

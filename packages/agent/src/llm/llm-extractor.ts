@@ -6,18 +6,31 @@ import { mentionedRefs, resolveAliases } from "../knowledge/entities.ts";
 import type { EntityResolver } from "../knowledge/entities.ts";
 import { extractionIssues } from "../knowledge/extractor.ts";
 import type { AnswerExtraction, AnswerExtractor, ExtractionInput } from "../knowledge/extractor.ts";
-import { findEscalateTo, heuristicExtract } from "../knowledge/heuristic-extractor.ts";
+import { findEscalateTo, heuristicExtract, mayJoinScope } from "../knowledge/heuristic-extractor.ts";
 import { FACT_KEYS } from "../knowledge/types.ts";
 import type { FactKey, MapExceptionData } from "../knowledge/types.ts";
 import { isJsonObject } from "./client.ts";
 import type { LlmClient } from "./client.ts";
 
-/** What the route is sent for task answer_extraction. Field names only for the order, never their values. */
+/** What the route is sent for task answer_extraction (the route rejects any other key). */
 export interface AnswerExtractionRequest {
   questionTopic: string;
+  /** Never empty: the route refuses an empty question. */
   questionText: string;
   answerText: string;
-  visibleFacts: { customerRefs: string[]; orderFields: string[] };
+  /** Customer refs seen on screen, and the visible order fields by name (orderId, deliveryAddress, deliveryWindow) with their values. */
+  visibleFacts: { customerRefs: string[]; orderFields: Record<string, string> };
+}
+
+/** The route's limits: an answer of up to 4000 characters, up to 50 customer refs of up to 64 characters. */
+const MAX_ANSWER = 4000;
+const MAX_REFS = 50;
+const MAX_REF_LENGTH = 64;
+
+function questionTextFor(input: ExtractionInput): string {
+  const asked = input.questionText?.trim();
+  if (asked) return asked.slice(0, 1000);
+  return input.topic === "correction" ? "The expert replied to the teach-back." : `The expert was asked about: ${input.topic.replace(/_/g, " ")}.`;
 }
 
 /** What the route answers. */
@@ -85,13 +98,15 @@ export function mergeLlmExtraction(base: AnswerExtraction, out: AnswerExtraction
   }
   if (fields.length > 0) merged.requiredFacts = FACT_KEYS.filter((k) => fields.includes(k));
 
-  const entity = out.guardrail?.scope.entity ?? null;
+  // Only a scope answer or a correction can widen the rule, and only to a customer the expert puts into it.
+  const entity = input.topic === "scope" || input.topic === "correction" ? (out.guardrail?.scope.entity ?? null) : null;
   if (entity !== null) {
     // The model must name a customer the screen has shown; anything else is noted, not believed.
     const known = input.knownRefs ?? [];
     const guess = known.find((r) => r.toLowerCase() === entity.toLowerCase()) ?? mentionedRefs(entity, { knownRefs: input.knownRefs, aliases: input.aliases })[0];
     const ref = guess !== undefined && (known.length === 0 || known.includes(guess)) ? guess : undefined;
     if (ref === undefined) notes.push(`The route named a customer that is not on screen: ${entity}.`);
+    else if (!mayJoinScope(input, ref)) notes.push(`The route put ${ref} into the scope, but the expert did not.`);
     else merged.scope = { ...base.scope, customers: [...new Set([...base.scope.customers, ref])], explicit: base.scope.explicit || input.topic === "scope" };
   }
 
@@ -133,11 +148,18 @@ export class LlmAnswerExtractor implements AnswerExtractor {
     const base = this.fallback ? await this.fallback.extract(withAliases) : heuristicExtract(withAliases);
     if (input.topic === "ticket_note") return base;
 
+    if (input.text.trim().length === 0 || input.text.length > MAX_ANSWER) {
+      this.client.skip("answer_extraction");
+      return base;
+    }
     const request: AnswerExtractionRequest = {
       questionTopic: input.topic,
-      questionText: input.questionText ?? "",
+      questionText: questionTextFor(input),
       answerText: input.text,
-      visibleFacts: { customerRefs: [...(input.knownRefs ?? [])], orderFields: [...(input.orderFields ?? FACT_KEYS)] },
+      visibleFacts: {
+        customerRefs: (input.knownRefs ?? []).filter((r) => r.length > 0 && r.length <= MAX_REF_LENGTH).slice(0, MAX_REFS),
+        orderFields: { ...input.orderFields },
+      },
     };
     const { result, startedAt } = await this.client.call("answer_extraction", request);
     if (!result.ok) {

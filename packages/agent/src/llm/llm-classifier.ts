@@ -8,6 +8,10 @@ import type { ReplyClassifier, ReplyVerdict } from "../knowledge/review.ts";
 import { isJsonObject } from "./client.ts";
 import type { LlmClient } from "./client.ts";
 
+/** The route's limits: a teach-back of up to 4000 characters (longer is cut, it is only context), a reply of up to 2000. */
+const MAX_TEACH_BACK = 4000;
+const MAX_REPLY = 2000;
+
 /** Task reply_classification: what the route is sent, and what it answers. */
 export interface ReplyClassificationRequest {
   teachBack: string;
@@ -43,7 +47,11 @@ export class LlmReplyClassifier implements ReplyClassifier {
   }
 
   async classify(teachBack: string, reply: string): Promise<ReplyVerdict> {
-    const request: ReplyClassificationRequest = { teachBack, reply };
+    if (reply.trim().length === 0 || reply.length > MAX_REPLY) {
+      this.client.skip("reply_classification");
+      return this.fallback.classify(teachBack, reply);
+    }
+    const request: ReplyClassificationRequest = { teachBack: teachBack.slice(0, MAX_TEACH_BACK), reply };
     const { result, startedAt } = await this.client.call("reply_classification", request);
     if (!result.ok) {
       this.client.record("reply_classification", startedAt, "fallback", result.reason, result.status);
@@ -97,7 +105,13 @@ export class LlmEntityResolver implements EntityResolver {
     // The numeric scheme is exact and free: only phrases it cannot resolve go to the model.
     const local = await new HeuristicEntityResolver().resolve(spoken, knownRefs);
     if (local !== null) return local;
-    const request: EntityResolutionRequest = { spoken, knownRefs: [...knownRefs] };
+    // The route needs a phrase of up to 200 characters and 1 to 100 known refs of up to 64 characters.
+    const refs = knownRefs.filter((r) => r.length > 0 && r.length <= 64).slice(0, 100);
+    if (spoken.trim().length === 0 || spoken.length > 200 || refs.length === 0) {
+      this.client.skip("entity_resolution");
+      return this.fallback.resolve(spoken, knownRefs);
+    }
+    const request: EntityResolutionRequest = { spoken, knownRefs: refs };
     const { result, startedAt } = await this.client.call("entity_resolution", request);
     if (!result.ok) {
       this.client.record("entity_resolution", startedAt, "fallback", result.reason, result.status);

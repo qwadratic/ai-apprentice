@@ -25,7 +25,7 @@ export interface PolicyOptions {
   cooldownMs?: number;
   /** Rolling window of the budget. Default 10 minutes. */
   windowMs?: number;
-  /** A candidate still unasked after this long is stale and dropped. Default 30 s. */
+  /** A candidate still unasked after this long is held for Review (Learn) or dropped (Teach). Default 60 s: a long burst of typing must not eat the question. */
   maxAgeMs?: number;
   /** How long a question held for Review stays valid. Default 2 hours. */
   reviewTtlMs?: number;
@@ -301,7 +301,7 @@ export class ConversationPolicy {
   tick(nowMs?: number): BrainDecision[] {
     const now = this.time(nowMs);
     const out: BrainDecision[] = [];
-    const cfg = { maxAgeMs: this.options.maxAgeMs ?? 30_000, reviewTtlMs: this.options.reviewTtlMs ?? 7_200_000 };
+    const cfg = { maxAgeMs: this.options.maxAgeMs ?? 60_000, reviewTtlMs: this.options.reviewTtlMs ?? 7_200_000 };
 
     for (const c of this.candidates) {
       if (c.state === "review" && c.expiresAtMs !== null && now >= c.expiresAtMs) {
@@ -400,7 +400,7 @@ export class ConversationPolicy {
 
   private tickTeach(now: number): BrainDecision[] {
     const out: BrainDecision[] = [];
-    const maxAgeMs = this.options.maxAgeMs ?? 30_000;
+    const maxAgeMs = this.options.maxAgeMs ?? 60_000;
     for (const c of this.candidates) {
       if (c.state !== "pending" || c.kind !== "decision_point") continue;
       if (now - c.createdAtMs > maxAgeMs) {

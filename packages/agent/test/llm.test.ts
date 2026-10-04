@@ -47,7 +47,13 @@ test("the client calls POST {apiBase}/api/agent/llm/:task with the session token
   const llm = new LlmClient({ apiBase: `${BASE}/`, token: TOKEN, fetch });
   const extractor = new LlmAnswerExtractor({ client: llm });
   const text = must(reasonParaphrases[0]);
-  await extractor.extract({ ...input, topic: "reason", text, questionText: "What made you do that?", orderFields: ["orderId", "deliveryAddress", "deliveryWindow"] });
+  await extractor.extract({
+    ...input,
+    topic: "reason",
+    text,
+    questionText: "What made you do that?",
+    orderFields: { orderId: "ORD-2041", deliveryAddress: "14 Sample Lane", deliveryWindow: "2026-10-12 14:00-16:00" },
+  });
   const call = must(calls[0]);
   assert.equal(call.url, `${BASE}/api/agent/llm/answer_extraction`);
   assert.equal(call.authorization, `Bearer ${TOKEN}`);
@@ -55,7 +61,7 @@ test("the client calls POST {apiBase}/api/agent/llm/:task with the session token
     questionTopic: "reason",
     questionText: "What made you do that?",
     answerText: text,
-    visibleFacts: { customerRefs: ["customer_07"], orderFields: ["orderId", "deliveryAddress", "deliveryWindow"] },
+    visibleFacts: { customerRefs: ["customer_07"], orderFields: { orderId: "ORD-2041", deliveryAddress: "14 Sample Lane", deliveryWindow: "2026-10-12 14:00-16:00" } },
   });
   // Events name the task and the outcome only: no transcript, no token.
   assert.deepEqual(llm.events.map((e) => [e.task, e.outcome]), [["answer_extraction", "llm"]]);
@@ -91,7 +97,7 @@ test("five paraphrased reasons through the model: validated, merged, and the tut
   // The model path used the model's fields: paraphrase 3 named the fields and the customer in the model's words.
   const third = await llmExtractor.extract({ ...input, topic: "reason", text: must(reasonParaphrases[2]) });
   assert.deepEqual(third.requiredFacts, ["deliveryAddress", "deliveryWindow"]);
-  assert.deepEqual(third.scope.customers, ["customer_07"]);
+  assert.deepEqual(third.scope.customers, [], "a reason answer does not widen the rule");
 });
 
 test("exceptions come from the model's list, grounded in the expert's words", async () => {
@@ -186,13 +192,26 @@ test("output validation: shapes, field names and ranges", () => {
   assert.equal(parseEntityResolutionOutput({ ref: "customer_99" }, ["customer_07"]), null, "a ref that is not on screen is a hallucination");
 });
 
-test("a field the map does not track is dropped and noted, not guessed", async () => {
-  const body = { rationale: "x y z", quote: "x y z", guardrail: { condition: "c", requiredAction: "a", requiredFields: ["phone number", "address"], scope: { entity: "customer_55" } }, exceptions: [], unknowns: [], confidence: 0.6 };
-  const x = await new LlmAnswerExtractor({ client: client(respond(200, body)) }).extract({ ...input, topic: "essentials", text: "x y z" });
+test("a field the map does not track is dropped and noted, not guessed; a customer that is not on screen is noted, not believed", async () => {
+  const body = { rationale: null, quote: "Only customer_07 gets it", guardrail: { condition: "c", requiredAction: "a", requiredFields: ["phone number", "address"], scope: { entity: "customer_55" } }, exceptions: [], unknowns: [], confidence: 0.6 };
+  const x = await new LlmAnswerExtractor({ client: client(respond(200, body)) }).extract({ ...input, topic: "scope", text: "Only customer_07 gets it." });
   assert.deepEqual(x.requiredFacts, ["deliveryAddress"]);
   assert.ok(x.unknowns.some((u) => /phone number/.test(u)));
   assert.ok(x.unknowns.some((u) => /customer_55/.test(u)));
+  assert.deepEqual(x.scope.customers, ["customer_07"]);
+});
+
+test("the model cannot put a customer into the rule that the expert set apart", async () => {
+  const text = "Customer three is the usual case.";
+  const body = { rationale: null, quote: text, guardrail: { condition: "c", requiredAction: "a", requiredFields: [], scope: { entity: "customer_03" } }, exceptions: [], unknowns: [], confidence: 0.7 };
+  const known = ["customer_03", "customer_07"];
+  const x = await new LlmAnswerExtractor({ client: client(respond(200, body)) }).extract({ ...input, knownRefs: known, topic: "scope", text });
   assert.deepEqual(x.scope.customers, []);
+  assert.ok(x.unknowns.some((u) => /customer_03/.test(u)));
+  // Said the other way round, the model's customer joins.
+  const too = "Customer three too.";
+  const y = await new LlmAnswerExtractor({ client: client(respond(200, { ...body, quote: too })) }).extract({ ...input, knownRefs: known, topic: "scope", text: too });
+  assert.deepEqual(y.scope.customers, ["customer_03"]);
 });
 
 test("reply classification through the model: three confirmations, a correction and an unclear reply", async () => {
@@ -287,4 +306,127 @@ test("a whole Review on model-backed parts: paraphrases in, confirmed map out, T
   assert.ok(used.includes("answer_extraction") && used.includes("reply_classification"));
   // Answers with no recording (404) were read by the heuristic, and logged as such.
   assert.ok(llm.events.some((e) => e.outcome === "fallback" && e.reason === "http_error"));
+});
+
+// ---------------------------------------------------------------------------
+// The server allows one call in flight per session and answers 429 "busy" otherwise.
+
+const busy: FetchLike = async () => ({ ok: false, status: 429, json: async () => ({ ok: false, error: "busy" }) });
+
+test("HTTP 429 busy: every model-backed part falls back to the heuristic without losing the turn, and says so", async () => {
+  const text = must(reasonParaphrases[0]);
+  const heuristic = await new HeuristicAnswerExtractor().extract({ ...input, topic: "reason", text });
+  const llm = client(busy);
+  assert.deepEqual(await new LlmAnswerExtractor({ client: llm }).extract({ ...input, topic: "reason", text }), heuristic);
+  assert.equal((await new LlmReplyClassifier({ client: llm }).classify("t", "Sounds good.")).verdict, "confirm");
+  assert.equal((await new LlmReplyClassifier({ client: llm }).classify("t", "Correct, he wants the order number in there as well.")).verdict, "correct");
+  assert.equal(await new LlmEntityResolver({ client: llm }).resolve("customer Sample", ["customer_07"]), null);
+  assert.deepEqual(llm.events.map((e) => [e.task, e.outcome, e.reason, e.status]), [
+    ["answer_extraction", "fallback", "busy", 429],
+    ["reply_classification", "fallback", "busy", 429],
+    ["reply_classification", "fallback", "busy", 429],
+    ["entity_resolution", "fallback", "busy", 429],
+  ]);
+
+  // A whole review on a busy server still ends with a confirmed map.
+  const extractor = new LlmAnswerExtractor({ client: llm });
+  const classifier = new LlmReplyClassifier({ client: llm });
+  let state = await buildState({ followUps: false, confirm: false, texts: { reason: text }, extractor });
+  for (const q of planFollowUps(workingMap(state))) {
+    const extraction = await extractor.extract({ topic: q.topic, text: expertAnswer(q.topic), questionId: q.id, atMs: 60000, evidenceIds: q.evidenceIds, targetId: q.targetId, entityRef: q.entityRef, knownRefs: ["customer_07"] });
+    state = reduceMap(state, { type: "answer", extraction });
+  }
+  const confirmed = await applyTeachBackReply(state, { text: "Uh, yes, that's right.", atMs: 95000 }, extractor, classifier);
+  assert.equal(confirmed.outcome, "confirmed");
+  assert.equal(t1(latestConfirmed(confirmed.state)), "warn");
+  assert.ok(llm.events.every((e) => e.outcome === "fallback" && e.reason === "busy"));
+});
+
+test("calls are queued and sent one at a time", async () => {
+  let inFlight = 0;
+  let peak = 0;
+  const urls: string[] = [];
+  const slow: FetchLike = async (url) => {
+    inFlight++;
+    peak = Math.max(peak, inFlight);
+    urls.push(url.slice(url.lastIndexOf("/") + 1));
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    inFlight--;
+    return { ok: true, status: 200, json: async () => ({ ok: true, output: { verdict: "confirm", correction: null } }) };
+  };
+  const llm = client(slow);
+  const classifier = new LlmReplyClassifier({ client: llm });
+  const results = await Promise.all([1, 2, 3, 4].map((n) => classifier.classify("t", `Sounds good, number ${n}.`)));
+  assert.equal(peak, 1, "never two calls in flight");
+  assert.equal(urls.length, 4);
+  assert.ok(results.every((r) => r.verdict === "confirm"));
+  assert.ok(llm.events.every((e) => e.outcome === "llm"));
+
+  // Different tasks share the queue too: an extraction and a classification do not overlap.
+  inFlight = 0;
+  peak = 0;
+  await Promise.all([
+    new LlmAnswerExtractor({ client: llm }).extract({ ...input, topic: "reason", text: must(reasonParaphrases[0]) }),
+    classifier.classify("t", "Sounds good."),
+  ]);
+  assert.equal(peak, 1);
+});
+
+test("a call that waits too long in the queue falls back without being sent, and the queue goes on", async () => {
+  let sent = 0;
+  const gate: { open: () => void } = { open: () => undefined };
+  const held = new Promise<void>((resolve) => {
+    gate.open = resolve;
+  });
+  const impl: FetchLike = async () => {
+    sent++;
+    if (sent === 1) await held;
+    return { ok: true, status: 200, json: async () => ({ ok: true, output: { verdict: "confirm", correction: null } }) };
+  };
+  const llm = new LlmClient({ apiBase: BASE, token: TOKEN, fetch: impl, timeoutMs: 500, maxQueueWaitMs: 20 });
+  const classifier = new LlmReplyClassifier({ client: llm });
+  const first = classifier.classify("t", "Sounds good.");
+  const second = await classifier.classify("t", "Okay, that's correct.");
+  assert.equal(second.verdict, "confirm", "the heuristic answered the turn");
+  assert.equal(sent, 1, "the second call never reached the server");
+  assert.equal(must(llm.events.at(-1)).reason, "queue_timeout");
+  gate.open();
+  assert.equal((await first).verdict, "confirm");
+  assert.equal((await classifier.classify("t", "Sounds good.")).verdict, "confirm");
+  assert.equal(sent, 2, "a later call is sent normally");
+  assert.equal(must(llm.events.at(-1)).outcome, "llm");
+});
+
+test("what is sent matches what the server accepts: exact keys, a non-empty question, order fields by name with values", async () => {
+  const bodies: Record<string, Record<string, unknown>> = {};
+  const spy: FetchLike = async (url, init) => {
+    bodies[url.slice(url.lastIndexOf("/") + 1)] = JSON.parse(init.body) as Record<string, unknown>;
+    return { ok: false, status: 404, json: async () => ({}) };
+  };
+  const llm = client(spy);
+  await new LlmAnswerExtractor({ client: llm }).extract({ ...input, topic: "reason", text: "He asked for it." });
+  await new LlmAnswerExtractor({ client: llm }).extract({ ...input, topic: "correction", text: "Yes. Customer twelve too." });
+  await new LlmReplyClassifier({ client: llm }).classify("Let me play it back.", "Sounds good.");
+  await new LlmEntityResolver({ client: llm }).resolve("customer Sample", ["customer_07"]);
+  const extraction = must(bodies.answer_extraction);
+  assert.deepEqual(Object.keys(extraction).sort(), ["answerText", "questionText", "questionTopic", "visibleFacts"]);
+  assert.ok(typeof extraction.questionText === "string" && extraction.questionText.length > 0, "the route refuses an empty question");
+  const facts = rec(extraction.visibleFacts);
+  assert.deepEqual(Object.keys(facts).sort(), ["customerRefs", "orderFields"]);
+  assert.deepEqual(facts.orderFields, {}, "no order fields given: an empty map, not a list");
+  assert.deepEqual(Object.keys(must(bodies.reply_classification)).sort(), ["reply", "teachBack"]);
+  assert.deepEqual(Object.keys(must(bodies.entity_resolution)).sort(), ["knownRefs", "spoken"]);
+
+  // Inputs the route would refuse are not sent.
+  const calls: string[] = [];
+  const counting: FetchLike = async (url) => {
+    calls.push(url);
+    return { ok: false, status: 404, json: async () => ({}) };
+  };
+  const llm2 = client(counting);
+  await new LlmAnswerExtractor({ client: llm2 }).extract({ ...input, topic: "reason", text: "x".repeat(4001) });
+  await new LlmReplyClassifier({ client: llm2 }).classify("t", "y".repeat(2001));
+  await new LlmEntityResolver({ client: llm2 }).resolve("customer Sample", []);
+  assert.deepEqual(calls, []);
+  assert.deepEqual(llm2.events.map((e) => [e.outcome, e.reason]), [["fallback", "invalid_input"], ["fallback", "invalid_input"], ["fallback", "invalid_input"]]);
 });

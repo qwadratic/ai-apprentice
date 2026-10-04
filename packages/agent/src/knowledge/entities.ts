@@ -1,6 +1,7 @@
 // Customers named in speech. The screen gives stable refs ("customer_07"); a person says "customer seven", "customer 07" or
-// "customer zero seven". Spoken mentions are mapped onto the refs seen on screen (knownRefs); a mention that matches no known
-// ref is never invented. An EntityResolver (heuristic here, LLM-backed in llm/) can resolve phrases this module cannot.
+// "customer zero seven". Spoken mentions are mapped onto KNOWN refs only: the refs seen on screen plus the customer list the
+// workspace or the scenario provides. A mention that matches no known ref stays unresolved; ids are never minted from loose
+// number words. An EntityResolver (heuristic here, LLM-backed in llm/) can resolve phrases this module cannot.
 
 export interface EntityResolver {
   readonly name: string;
@@ -14,8 +15,20 @@ const UNITS: Readonly<Record<string, number>> = {
 };
 const TENS: Readonly<Record<string, number>> = { twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90 };
 
-/** The number a leading run of digits or number words stands for ("07", "seven", "zero seven", "twenty one"), or null. */
-export function spokenNumber(words: readonly string[]): number | null {
+/** Words that follow a quantity ("two weeks ago", "three orders"): a number before one of them is not a customer number. */
+const QUANTITY_WORDS = new Set([
+  "second", "seconds", "minute", "minutes", "hour", "hours", "day", "days", "week", "weeks", "month", "months", "year", "years",
+  "time", "times", "percent", "euro", "euros", "eur", "dollar", "dollars", "order", "orders", "unit", "units", "item", "items",
+  "piece", "pieces", "people", "person", "persons", "ago", "later", "earlier", "or", "of", "more", "less", "o'clock", "am", "pm",
+]);
+
+interface SpokenNumber {
+  value: number;
+  /** How many of the words it used. */
+  used: number;
+}
+
+function readSpokenNumber(words: readonly string[]): SpokenNumber | null {
   const lead: string[] = [];
   for (const w of words) {
     const t = w.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -25,16 +38,22 @@ export function spokenNumber(words: readonly string[]): number | null {
   }
   const first = lead[0];
   if (first === undefined) return null;
-  if (/^\d+$/.test(first)) return Number.parseInt(first, 10);
+  if (/^\d+$/.test(first)) return { value: Number.parseInt(first, 10), used: 1 };
   const single = (t: string | undefined): boolean => t !== undefined && t in UNITS && (UNITS[t] ?? 99) <= 9;
   // "zero seven", "oh seven", "one two": digits read one by one.
-  if (lead.length > 1 && lead.every(single)) return Number.parseInt(lead.map((t) => String(UNITS[t])).join(""), 10);
+  if (lead.length > 1 && lead.every(single)) return { value: Number.parseInt(lead.map((t) => String(UNITS[t])).join(""), 10), used: lead.length };
   const a = TENS[first];
   if (a !== undefined) {
     const b = lead[1];
-    return a + (single(b) && b !== undefined ? (UNITS[b] ?? 0) : 0);
+    return single(b) && b !== undefined ? { value: a + (UNITS[b] ?? 0), used: 2 } : { value: a, used: 1 };
   }
-  return UNITS[first] ?? null;
+  const value = UNITS[first];
+  return value === undefined ? null : { value, used: 1 };
+}
+
+/** The number a leading run of digits or number words stands for ("07", "seven", "zero seven", "twenty one"), or null. */
+export function spokenNumber(words: readonly string[]): number | null {
+  return readSpokenNumber(words)?.value ?? null;
 }
 
 /** The number in a ref such as "customer_07" (7), or null. */
@@ -43,30 +62,31 @@ export function refNumber(ref: string): number | null {
   return m?.[1] === undefined ? null : Number.parseInt(m[1], 10);
 }
 
-const SCHEME = /^customer_(\d+)$/;
-
-/**
- * The known ref with this number. A customer the screen has not shown yet gets a ref in the scheme the known refs use
- * ("customer_09" next to "customer_07"), so a mention of them can be matched later; with refs of another scheme, none.
- */
+/** The known ref with this number, or null. Nothing is minted for a number that matches no known ref. */
 export function refForNumber(n: number, knownRefs: readonly string[] | undefined): string | null {
-  const known = knownRefs?.find((r) => refNumber(r) === n);
-  if (known !== undefined) return known;
-  if (knownRefs !== undefined && knownRefs.length > 0 && !knownRefs.every((r) => SCHEME.test(r))) return null;
-  const width = SCHEME.exec(knownRefs?.[0] ?? "")?.[1]?.length ?? 2;
-  return `customer_${String(n).padStart(width, "0")}`;
+  return knownRefs?.find((r) => refNumber(r) === n) ?? null;
 }
 
 export interface MentionContext {
+  /** Customer refs seen on screen plus the customer list of the workspace or scenario. */
   knownRefs?: readonly string[] | undefined;
   /** Phrases (lower case) already resolved by an EntityResolver, to their refs. */
   aliases?: Readonly<Record<string, string>> | undefined;
 }
 
 const CANONICAL = /\bcustomer_\d+\b/gi;
-const SPOKEN = /\bcustomers?[\s_-]*(?:number\s+|no\.?\s*|#\s*)?([a-z0-9-]+(?:\s+[a-z0-9-]+){0,2})/gi;
+// Singular only: "customers two weeks ago" is not a customer.
+const SPOKEN = /\bcustomer[\s_-]*(?:number\s+|no\.?\s*|#\s*)?([a-z0-9-]+(?:\s+[a-z0-9-]+){0,3})/gi;
 
-/** Customers named in a piece of text, in the order they are named, once each. */
+/** The customer number a spoken phrase names ("zero seven" in "customer zero seven"), when it is one and not a quantity. */
+function customerNumber(words: readonly string[]): number | null {
+  const read = readSpokenNumber(words);
+  if (read === null) return null;
+  const next = words[read.used]?.toLowerCase().replace(/[^a-z0-9']/g, "");
+  return next !== undefined && QUANTITY_WORDS.has(next) ? null : read.value;
+}
+
+/** Customers named in a piece of text, in the order they are named, once each. Only known customers are returned for spoken numbers. */
 export function mentionedRefs(text: string, ctx: MentionContext = {}): string[] {
   const found: Array<{ at: number; ref: string }> = [];
   const lower = text.toLowerCase();
@@ -74,15 +94,16 @@ export function mentionedRefs(text: string, ctx: MentionContext = {}): string[] 
     const at = lower.indexOf(phrase.toLowerCase());
     if (at !== -1) found.push({ at, ref });
   }
+  // A ref written out ("customer_07", "customer_7") is explicit: a known ref wins, otherwise it stands as written.
   for (const m of text.matchAll(CANONICAL)) {
     const token = m[0].toLowerCase();
-    const known = ctx.knownRefs?.find((r) => r.toLowerCase() === token);
     const n = refNumber(token);
-    found.push({ at: m.index, ref: known ?? (n !== null ? (refForNumber(n, ctx.knownRefs) ?? token) : token) });
+    const known = ctx.knownRefs?.find((r) => r.toLowerCase() === token) ?? (n !== null ? refForNumber(n, ctx.knownRefs) : null);
+    found.push({ at: m.index, ref: known ?? token });
   }
   for (const m of text.matchAll(SPOKEN)) {
     if (/^customer_/i.test(m[0])) continue; // handled above
-    const n = spokenNumber((m[1] ?? "").split(/\s+/));
+    const n = customerNumber((m[1] ?? "").split(/\s+/));
     const ref = n === null ? null : refForNumber(n, ctx.knownRefs);
     if (ref !== null) found.push({ at: m.index, ref });
   }
@@ -102,7 +123,9 @@ export function unresolvedCustomerPhrases(text: string, knownRefs: readonly stri
   for (const m of text.matchAll(SPOKEN)) {
     if (/^customer_/i.test(m[0])) continue;
     const words = (m[1] ?? "").split(/\s+/);
-    if (spokenNumber(words) !== null && refForNumber(spokenNumber(words) ?? 0, knownRefs) !== null) continue;
+    const n = customerNumber(words);
+    if (n !== null && refForNumber(n, knownRefs) !== null) continue;
+    if (readSpokenNumber(words) !== null) continue; // a number that matches no known customer is not a name to look up
     const kept: string[] = [];
     for (const w of words) {
       if (STOP_WORDS.has(w.toLowerCase())) break;

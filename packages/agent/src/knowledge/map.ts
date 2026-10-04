@@ -74,7 +74,9 @@ export type MapEvent =
   /** The expert corrects the teach-back; the extraction is of their reply. */
   | { type: "correct"; extraction: AnswerExtraction }
   /** The expert confirms the teach-back. quote is their reply, when there is one. */
-  | { type: "confirm"; atMs: number; quote: string | null };
+  | { type: "confirm"; atMs: number; quote: string | null }
+  /** Customers the workspace or the scenario lists, beyond those seen on screen: what a spoken customer can be resolved to. */
+  | { type: "known_customers"; refs: readonly string[] };
 
 export class MapValidationError extends Error {
   readonly issues: string[];
@@ -103,7 +105,7 @@ export class MapConfirmationError extends MapValidationError {
   }
 }
 
-export function createMapState(): MapState {
+export function createMapState(knownCustomers: readonly string[] = []): MapState {
   const draft: DraftData = {
     version: 1,
     sealedVersion: null,
@@ -118,7 +120,7 @@ export function createMapState(): MapState {
     prevEmail: null,
     observedBodyFacts: [],
     bodyStepId: null,
-    customers: [],
+    customers: [...new Set(knownCustomers)],
     typedFacts: {},
   };
   return deepFreeze({ draft, versions: [] as WorkMap[] });
@@ -482,6 +484,10 @@ function reduceCorrection(d: DraftData, x: AnswerExtraction): void {
     if (x.scope.all && x.scope.explicit) {
       g.scope = { kind: "all", customers: [], explicit: true };
       g.scopeQuote = x.scopeQuote ?? x.quote;
+    } else if (x.scope.customers.length > 0 && g.scope.kind === "customers") {
+      // "Customer twelve too": the expert puts more customers into the rule's scope.
+      g.scope = { kind: "customers", customers: unique([...g.scope.customers, ...x.scope.customers]), explicit: true };
+      g.scopeQuote = x.scopeQuote ?? x.quote;
     }
     if (x.rationale !== null) {
       g.reason = x.rationale;
@@ -661,6 +667,10 @@ export function reduceMap(state: MapState, event: MapEvent): MapState {
       if (sealed !== null) versions = [...versions, sealed];
       break;
     }
+    case "known_customers": {
+      for (const ref of event.refs) if (!d.customers.includes(ref)) d.customers.push(ref);
+      break;
+    }
     case "confirm": {
       const issues = draftConfirmIssues(d);
       if (issues.length > 0) throw new MapConfirmationError(issues);
@@ -691,7 +701,7 @@ function reduceCorrectionEvent(d: DraftData, x: AnswerExtraction): WorkMap | nul
 // Reading a state
 // ---------------------------------------------------------------------------
 
-/** Customer refs seen on screen so far: what a spoken "customer seven" can be mapped onto. */
+/** Customer refs seen on screen so far, plus the customer list given to the map: what a spoken "customer seven" can be mapped onto. */
 export function knownCustomerRefs(state: MapState): string[] {
   return [...state.draft.customers];
 }

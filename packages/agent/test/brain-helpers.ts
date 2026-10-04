@@ -52,6 +52,11 @@ export function order(orderId: string): OrderFacts {
   };
 }
 
+/** The customer list of the scenario (the workspace's customer table): refs a spoken customer can be resolved to. */
+export function scenarioCustomers(): string[] {
+  return arr(rec(readJson("sim/scenario.json")).customers).map((c) => str(rec(c).ref));
+}
+
 export function expertAnswer(topic: string): string {
   return str(rec(rec(rec(readJson("sim/expert-script.json")).answers)[topic]).text);
 }
@@ -125,7 +130,7 @@ export class Feed {
   }
 }
 
-const IMAGE = { kind: "image" as const, ocrText: "order template" };
+export const IMAGE = { kind: "image" as const, ocrText: "order template" };
 
 export interface LearnObservations {
   all: ScreenObservation[];
@@ -200,7 +205,7 @@ export function recordedFetch(): { fetch: FetchLike; calls: RecordedCall[] } {
       .map(rec)
       .find((r) => r[key] === rec(body)[key]);
     if (hit === undefined) return { ok: false, status: 404, json: async () => ({}) };
-    return { ok: true, status: 200, json: async () => ({ output: hit.output }) };
+    return { ok: true, status: 200, json: async () => ({ ok: true, output: hit.output }) };
   };
   return { fetch: impl, calls };
 }
@@ -221,7 +226,7 @@ export interface BuildOptions {
 export async function buildState(opts: BuildOptions = {}): Promise<MapState> {
   const extractor = opts.extractor ?? new HeuristicAnswerExtractor();
   const run = learnObservations();
-  let state = createMapState();
+  let state = createMapState(scenarioCustomers());
   for (const ob of run.all) state = reduceMap(state, { type: "observation", observation: ob });
   const given = opts.answers ?? ["reason", "essentials", "guardrail", "scope", "exception", "why_stop", "duration"];
   const live: Array<[Topic, ScreenObservation]> = [
@@ -288,16 +293,13 @@ export interface TeachCase {
   checkpoint: ActionCheckpoint;
 }
 
-/** A Teach case from fixtures/agent/teach/<id>.json as canonical observations plus the checkpoint raised at Preview. */
-export function teachCase(id: string): TeachCase {
-  const r = rec(readJson(`teach/${id}.json`));
-  const d = rec(r.draft);
-  const o = order(str(r.orderId));
+/** A Teach case for any order and draft: the observations plus the checkpoint raised at Preview. */
+export function customTeachCase(id: string, o: OrderFacts, bodyText: string, attachTemplateImage: boolean): TeachCase {
   const feed = new Feed(`sess-teach-${id}`);
   const orderObs = feed.order(0, o);
   const emailObs = feed.email(3000, o.customerRef, {
-    bodyText: str(d.bodyText),
-    attachments: d.attachTemplateImage === true ? [{ kind: "image", ocrText: `Order ${o.orderId} | ${o.deliveryAddress}` }] : [],
+    bodyText,
+    attachments: attachTemplateImage ? [{ kind: "image", ocrText: `Order ${o.orderId} | ${o.deliveryAddress}` }] : [],
     previewState: "preview",
   });
   const checkpoint = parseActionCheckpoint({
@@ -309,7 +311,14 @@ export function teachCase(id: string): TeachCase {
     revisions: { order: must(orderObs.sourceRevision), email: must(emailObs.sourceRevision) },
     action: "send",
   });
-  return { id, title: str(r.title), order: orderObs, email: emailObs, observations: [orderObs, emailObs], checkpoint };
+  return { id, title: id, order: orderObs, email: emailObs, observations: [orderObs, emailObs], checkpoint };
+}
+
+/** A Teach case from fixtures/agent/teach/<id>.json as canonical observations plus the checkpoint raised at Preview. */
+export function teachCase(id: string): TeachCase {
+  const r = rec(readJson(`teach/${id}.json`));
+  const d = rec(r.draft);
+  return { ...customTeachCase(id, order(str(r.orderId)), str(d.bodyText), d.attachTemplateImage === true), title: str(r.title) };
 }
 
 // -- a Learn session on a fake clock ----------------------------------------
@@ -345,7 +354,7 @@ export function startLearnSession(opts: LearnSessionOptions = {}): LearnSession 
   const now = (): number => clock.now() - epoch;
   const policy = new ConversationPolicy({ mode: "learn", persona: opts.persona, budget: opts.budget, now });
   const extractor = opts.extractor ?? new HeuristicAnswerExtractor();
-  let state = createMapState();
+  let state = createMapState(scenarioCustomers());
   const feed = new Feed("sess-learn", 100);
   const timeline: ScreenObservation[] = [...(opts.timeline ?? learnObservations().all)];
   for (const [from, to] of opts.typing ?? [[13000, 17000]]) {

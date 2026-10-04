@@ -106,24 +106,56 @@ export type TeachBackReply = "confirm" | "correct" | "unclear";
 
 const FILLER = /^(?:(?:well|so|um|uh|er|hmm|oh|ah|okay|ok|alright|all right|yeah|yes|yep|yup|sure)\b[\s,.!-]*)+/i;
 const AFFIRM = /\b(yes|yep|yeah|yup|correct|right|exactly|confirmed?|sounds (good|right|correct)|looks (good|right|correct)|that works|that's (right|correct|it|good|fine|perfect)|perfect|spot on|agreed|go ahead|good|fine|okay|ok|sure)\b/i;
+// The agreement at the start of a reply: "Okay, that's correct.", "Uh, yes, that's right.", "Sounds good."
+const AFFIRM_LEAD =
+  /^(?:[\s,.!;:-]*(?:yes|yep|yeah|yup|correct|right|exactly|okay|ok|sure|perfect|absolutely|alright|agreed|good|fine|that'?s (?:right|correct|it|good|fine|perfect)|sounds (?:good|right|correct)|looks (?:good|right|correct)))+[\s,.!;:-]*/i;
+// "No, that's right" agrees: the "no" answers "did I get anything wrong?".
+const NO_THATS_RIGHT = /^\W*no[\s,.!-]+(?=(?:that'?s|that is|it'?s|you'?re|you are)\s+(?:absolutely |exactly |completely |perfectly )?(?:right|correct)\b)/i;
 // Words that turn an agreement into a correction.
 const HEDGE =
   /\b(but|except|one thing|correction|almost|not quite|wrong|actually|however|missing|forgot|also|add|instead|incorrect)\b|\b(not|isn't|aren't|wasn't) (quite |exactly |really |entirely )?(right|correct|true|good|fine|accurate|it|what)\b|^\W*no\b(?!\s+(problem|worries|issue|doubt))/i;
 const UNSURE = /\b(not sure|don't know|do not know|no idea|hmm+|repeat|again|pardon|what\?|come again)\b/i;
+// Something added after an agreement: "Correct, he wants the order number in there as well." "Yes. Customer twelve too."
+const PLEASANTRY = /\bthank(?:s| you)\b[^.!?]*|\b(?:great|nice|good job|well done|appreciate it)\b[^.!?]*/gi;
+const ADDITION_STRONG = /\b(as well|too|also|in addition|additionally|plus|on top of|missing|forgot|add(?:ed)?)\b|\band (?:the|his|her|their|an?|customer)\b/i;
+const ADDITION_WEAK = /\b(needs?|wants?|must|should)\b/i;
+const words = (s: string): number => s.split(/\s+/).filter(Boolean).length;
+
+/** The agreement stripped from the start of a reply, and what follows it. */
+function afterAgreement(body: string): string | null {
+  const lead = AFFIRM_LEAD.exec(body);
+  if (lead === null) return null;
+  const rest = body.slice(lead[0].length).trim();
+  return rest.length > 0 ? rest : null;
+}
 
 /**
- * The expert confirms the teach-back, corrects it, or the reply cannot be told. Agreement can come first ("Okay, that's
- * correct", "Uh, yes, that's right", "Sounds good"); a "but", an addition or a negation turns it into a correction; a reply
- * with no agreement and no content ("Hmm", "I'm not sure") is unclear. Keyword heuristic; see LlmReplyClassifier for the model-backed one.
+ * Reads the expert's reply to the teach-back: a confirmation, a correction, or unclear. Agreement can come first ("Okay,
+ * that's correct", "Uh, yes, that's right", "Sounds good", "No, that's right"). An addition after the agreement ("Correct, he wants
+ * the order number in there as well", "Yes. Customer twelve too.") makes it a correction and is returned as the correction;
+ * so do a "but", a negation or a missing piece. A reply with no agreement and no content ("Hmm", "I'm not sure") is unclear.
+ * Keyword heuristic; LlmReplyClassifier is the model-backed one.
  */
+export function readReply(text: string): ReplyVerdict {
+  const body = text
+    .trim()
+    .replace(FILLER, (m) => (AFFIRM.test(m) ? m : ""))
+    .replace(NO_THATS_RIGHT, "");
+  const rest = afterAgreement(body);
+  if (HEDGE.test(body)) return { verdict: "correct", correction: rest };
+  if (UNSURE.test(body)) return { verdict: "unclear", correction: null };
+  if (AFFIRM.test(body)) {
+    const meat = (rest ?? "").replace(PLEASANTRY, "").trim();
+    const adds = ADDITION_STRONG.test(meat) || (ADDITION_WEAK.test(meat) && words(meat) >= 4 && !/^that'?s what\b/i.test(meat));
+    if (meat.length > 0 && adds) return { verdict: "correct", correction: rest };
+    if (words(body) <= 25) return { verdict: "confirm", correction: null };
+  }
+  if (words(body) <= 2) return { verdict: "unclear", correction: null };
+  return { verdict: "correct", correction: null };
+}
+
 export function classifyReply(text: string): TeachBackReply {
-  const body = text.trim().replace(FILLER, (m) => (AFFIRM.test(m) ? m : ""));
-  const words = body.split(/\s+/).filter(Boolean).length;
-  if (HEDGE.test(body)) return "correct";
-  if (UNSURE.test(body)) return "unclear";
-  if (AFFIRM.test(body) && words <= 25) return "confirm";
-  if (words <= 2) return "unclear";
-  return "correct";
+  return readReply(text).verdict;
 }
 
 export interface ReplyVerdict {
@@ -141,7 +173,7 @@ export interface ReplyClassifier {
 export class HeuristicReplyClassifier implements ReplyClassifier {
   readonly name = "heuristic";
   classify(_teachBack: string, reply: string): Promise<ReplyVerdict> {
-    return Promise.resolve({ verdict: classifyReply(reply), correction: null });
+    return Promise.resolve(readReply(reply));
   }
 }
 

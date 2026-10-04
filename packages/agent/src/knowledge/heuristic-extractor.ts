@@ -1,6 +1,6 @@
 // Heuristic answer extraction: sentence splitting and keyword cues. No model, no network.
 // Its vocabulary is generic (reason words, scope words, the names of order fields); it contains no customer rule.
-// It is deliberately simple and has known blind spots (negation, pronouns, deep paraphrase); an LLM extractor behind the
+// It is deliberately simple and has known blind spots (pronouns, deep paraphrase); an LLM extractor behind the
 // same AnswerExtractor interface (llm/) replaces it where it is available, and falls back to this one.
 import { mentionedRefs, resolveAliases } from "./entities.ts";
 import type { EntityResolver } from "./entities.ts";
@@ -14,12 +14,21 @@ const FACT_PATTERNS: ReadonlyArray<readonly [FactKey, RegExp]> = [
   ["orderId", /\border (number|id|no\.?|ref(erence)?)\b|\bORD-\d+|\border ?#/i],
 ];
 
+/** A clause that says something is NOT wanted: the fields it names are not required. "Not only X" still wants X. */
+const NEGATION =
+  /\b(not|no|never|without|except|ignore|irrelevant|skip)\b|n't\b|\bdoes ?n[o']t matter\b|\bno need\b|\b(not|isn't) (needed|important|necessary|required)\b/i;
+const NOT_ONLY = /\bnot (only|just|merely)\b/gi;
+
 /** The reason follows the cue: "because the customer asked". */
 const REASON_CUE = /\b(because|since|so that|the reason( is)?|due to|owing to|on account of)\b/i;
 /** The reason comes before the cue: "the customer asked, that is why I ...". */
 const REASON_BEFORE_CUE = /\b(that's why|that is why|which is why|this is why|that's the reason|hence|therefore)\b/i;
+/** The expert says outright that there is no reason or that they never found it out. Applies to every topic. */
 const UNKNOWN_REASON_CUE =
   /\b(never (found out|asked|learned|knew)|no idea|don't know why|do not know why|not sure why|can't say why|dunno|idk|no clue|just because|no (particular |real )?reason)\b/i;
+/** A non-answer to a "why" question: not sure, don't know, don't remember, can't say. Only read where a reason was asked for. */
+const NON_ANSWER =
+  /\b(?:i'?m |i am )?not (?:really |entirely |completely |quite |100% )?(?:sure|certain)\b|\b(?:i )?(?:don'?t|do not|can'?t|cannot|couldn'?t|can not) (?:really |quite |exactly )?(?:know|remember|recall|say|tell)\b|\b(?:i )?(?:forgot|forget|have forgotten)\b|\bno (?:real |particular )?(?:idea|clue)\b|\bwho knows\b|\bnot something i (?:know|remember)\b/i;
 const EXCEPTION_CUE = /\b(fine|ok|okay|allowed|acceptable|no problem|doesn't matter|does not matter|on top)\b/i;
 const RETRACT_CUE = /\b(actually,? (no|not)|not needed any more|no longer|ignore that|scratch that|never mind)\b/i;
 const CONFIRM_CUE = /^\s*(yes|yep|yeah|correct|right|exactly|that's (right|correct)|confirmed)\b/i;
@@ -31,6 +40,11 @@ const WHO_CUE =
   /\b(?:ask|check with|call|escalate to|tell|ping)\s+((?:the|my)\s+[a-z]+(?:\s+[a-z]+)?)(?=\s+(?:first|before|about)|[.,;!?]|$)/i;
 const LEADING_FILLER = /^(?:(?:well|so|um|uh|er|hmm|yeah|yes|yep|okay|ok|right|sure|honestly|basically|actually|look)\b[\s,.-]*)+/i;
 
+/** A sentence that names customers puts them INTO the rule's scope only when it says so: "too", "and", "only", "gets"... */
+const IN_SCOPE = /\b(too|also|as well|likewise|both|same|and|plus|only|just|gets?|needs?|wants?|asks? for|requires?|prefers?|include|add)\b/i;
+/** ... and never when it sets them apart: "customer three is the usual case". */
+const OUT_OF_SCOPE = /\b(not|never|no|usual|normal|regular|standard|default|ordinary|typical|different|differs?|unlike|exception|except)\b|n't\b/i;
+
 export function splitSentences(text: string): string[] {
   return text
     .split(/(?<=[.!?])\s+/)
@@ -38,10 +52,15 @@ export function splitSentences(text: string): string[] {
     .filter((s) => s.length > 0);
 }
 
+/** The order fields the text asks for. A clause that says a field is not wanted ("the time doesn't matter") does not count. */
 export function extractFacts(text: string): FactKey[] {
-  const found: FactKey[] = [];
-  for (const [key, re] of FACT_PATTERNS) if (re.test(text)) found.push(key);
-  return found;
+  const found = new Set<FactKey>();
+  for (const raw of text.split(/[,;.!?]+|\s+(?:but|except|instead of|rather than)\s+/i)) {
+    const clause = raw.replace(NOT_ONLY, " only ");
+    if (NEGATION.test(clause)) continue;
+    for (const [key, re] of FACT_PATTERNS) if (re.test(clause)) found.add(key);
+  }
+  return FACT_KEYS.filter((k) => found.has(k));
 }
 
 /** Every fact the answer says is wanted ("everything", "all the details"), in canonical order. */
@@ -50,6 +69,7 @@ export function extractFactsOrAll(text: string): FactKey[] {
 }
 
 const stripEnd = (s: string): string => s.replace(/[\s.!?,;:-]+$/, "").trim();
+const wordCount = (s: string): number => s.split(/\s+/).filter(Boolean).length;
 
 /** Who the expert asks or defers to in a sentence ("ask the finance lead first"), or null. */
 export function findEscalateTo(text: string): string | null {
@@ -74,6 +94,27 @@ function clauseBefore(sentence: string, cue: RegExp): string | null {
   return clause.length > 2 ? clause : null;
 }
 
+/** Does this sentence put the customers it names into the scope of the rule? */
+export function putsInScope(sentence: string, topic: ExtractionInput["topic"]): boolean {
+  if (topic !== "scope" && topic !== "correction") return false;
+  if (OUT_OF_SCOPE.test(sentence)) return false;
+  if (IN_SCOPE.test(sentence)) return true;
+  // A scope answer that is just the names ("Customer three.").
+  return topic === "scope" && wordCount(sentence) <= 5;
+}
+
+/**
+ * May this customer join the scope of the rule because of this answer? Only when a sentence that names them puts them in
+ * ("too", "and", "only", "gets") and does not set them apart ("the usual case"). The customer the question was about
+ * is the rule's own customer and needs no such sentence.
+ */
+export function mayJoinScope(input: ExtractionInput, ref: string): boolean {
+  if (ref === input.entityRef) return true;
+  return splitSentences(input.text).some(
+    (s) => mentionedRefs(s, { knownRefs: input.knownRefs, aliases: input.aliases }).includes(ref) && putsInScope(s, input.topic),
+  );
+}
+
 export function heuristicExtract(input: ExtractionInput): AnswerExtraction {
   const text = input.text.trim();
   const sentences = splitSentences(text);
@@ -82,7 +123,7 @@ export function heuristicExtract(input: ExtractionInput): AnswerExtraction {
 
   let rationale: string | null = null;
   let reasonQuote: string | null = null;
-  let reasonUnknown = false;
+  let strictUnknown = false;
   let scopeExplicit = false;
   let scopeAll = false;
   let scopeQuote: string | null = null;
@@ -94,20 +135,23 @@ export function heuristicExtract(input: ExtractionInput): AnswerExtraction {
   const scopeCustomers = new Set<string>();
   let namedCustomerSentence: string | null = null;
   const unknowns: string[] = [];
+  const softNonAnswers = new Set<number>();
 
   sentences.forEach((s, i) => {
+    const hasReasonCue = REASON_CUE.test(s) || REASON_BEFORE_CUE.test(s);
     const unknownWhy = UNKNOWN_REASON_CUE.test(s);
+    if (asksWhy && !unknownWhy && !hasReasonCue && NON_ANSWER.test(s)) softNonAnswers.add(i);
     const refs = mentions(s);
     if (unknownWhy) {
-      reasonUnknown = true;
+      strictUnknown = true;
       for (const ref of refs) {
         unexplainedCustomers.push({ customerRef: ref, quote: s });
         unknowns.push(`The expert does not know why ${ref} is treated this way.`);
       }
       if (refs.length === 0) unknowns.push("The expert does not know why.");
-    } else {
+    } else if (refs.length > 0 && putsInScope(s, input.topic)) {
       for (const ref of refs) scopeCustomers.add(ref);
-      if (refs.length > 0) namedCustomerSentence ??= s;
+      namedCustomerSentence ??= s;
     }
     if (rationale === null && !unknownWhy) {
       const after = REASON_CUE.test(s) ? clauseAfter(s, REASON_CUE) : null;
@@ -145,18 +189,38 @@ export function heuristicExtract(input: ExtractionInput): AnswerExtraction {
   });
 
   const retracts = RETRACT_CUE.test(text);
-  // A "why" question was asked and the answer gives something other than "I don't know": that something is the reason,
-  // whether or not the expert said "because". The whole answer (minus leading filler) is kept in their own words.
-  if (asksWhy && rationale === null && !reasonUnknown && !retracts) {
-    const body = stripEnd(text.replace(LEADING_FILLER, ""));
-    if (body.split(/\s+/).filter(Boolean).length >= 3) {
-      rationale = body;
-      reasonQuote = text;
+
+  // A "why" question was answered and the answer is not "I don't know": what the expert said is the reason, whether or not
+  // they said "because". Sentences that only say "not sure / don't remember" are left out; if nothing else is left, there is
+  // no reason and the fact stays unknown. The whole span is kept in their own words.
+  let reasonUnknown = strictUnknown;
+  if (asksWhy && rationale === null && !strictUnknown && !retracts) {
+    const kept = sentences.map((s, i) => (softNonAnswers.has(i) ? null : s));
+    const first = kept.findIndex((s) => s !== null);
+    const last = kept.findLastIndex((s) => s !== null);
+    if (first !== -1) {
+      const from = text.indexOf(must(sentences[first]));
+      const lastSentence = must(sentences[last]);
+      const span = text.slice(from, text.indexOf(lastSentence, from) + lastSentence.length);
+      const body = stripEnd(span.replace(LEADING_FILLER, ""));
+      if (wordCount(body) >= 3) {
+        rationale = body;
+        reasonQuote = span;
+      }
+    }
+    if (rationale === null && softNonAnswers.size > 0) {
+      reasonUnknown = true;
+      unknowns.push("The expert does not know why.");
     }
   }
 
   // A scope answer that names customers is explicit even without "only" or "all".
   if (input.topic === "scope" && !scopeExplicit && scopeCustomers.size > 0) {
+    scopeExplicit = true;
+    scopeQuote ??= namedCustomerSentence;
+  }
+  // The expert adds customers to the rule while correcting the teach-back ("Customer twelve too").
+  if (input.topic === "correction" && scopeCustomers.size > 0) {
     scopeExplicit = true;
     scopeQuote ??= namedCustomerSentence;
   }
@@ -218,6 +282,11 @@ export function heuristicExtract(input: ExtractionInput): AnswerExtraction {
     confirms: CONFIRM_CUE.test(text),
     confidence: evidenceOfClaim ? 0.7 : 0.4,
   };
+}
+
+function must<T>(value: T | undefined): T {
+  if (value === undefined) throw new Error("expected a value");
+  return value;
 }
 
 export class HeuristicAnswerExtractor implements AnswerExtractor {
