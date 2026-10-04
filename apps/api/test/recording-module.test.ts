@@ -28,7 +28,9 @@ test('production recording composition preserves raw bytes, session and Origin b
   const base = `http://127.0.0.1:${address.port}`;
   const first = await issue(base); const second = await issue(base);
   const asset = `${base}/screen/sessions/${first.sessionId}/recordings/segment-1`;
-  const bytes = Buffer.from([0x00, 0xff, 0x80, 0x61, 0xc3, 0x28, 0x7f]);
+  const firstChunk = Buffer.from([0x00, 0xff, 0x80, 0x61]);
+  const secondChunk = Buffer.from([0xc3, 0x28, 0x7f, 0x00]);
+  const bytes = Buffer.concat([firstChunk, secondChunk]);
 
   const preflight = await fetch(`${asset}/chunks`, {method: 'OPTIONS', headers: {origin: ORIGIN,
     'access-control-request-method': 'POST', 'access-control-request-headers': 'authorization,content-type,x-recording-chunk-index'}});
@@ -36,12 +38,15 @@ test('production recording composition preserves raw bytes, session and Origin b
   assert.match(preflight.headers.get('access-control-allow-headers') ?? '', /X-Recording-Chunk-Index/i);
 
   const chunk = await fetch(`${asset}/chunks`, {method: 'POST', headers: headers(first.token, {'content-type': 'video/webm',
-    'x-recording-chunk-index': '0'}), body: bytes});
+    'x-recording-chunk-index': '0'}), body: firstChunk});
   assert.equal(chunk.status, 201);
+  const nextChunk = await fetch(`${asset}/chunks`, {method: 'POST', headers: headers(first.token, {'content-type': 'video/webm',
+    'x-recording-chunk-index': '1'}), body: secondChunk});
+  assert.equal(nextChunk.status, 201);
   const segment = {id: 'segment-1', sessionId: first.sessionId, assetRef: `recording:${first.sessionId}:segment-1`,
     startMs: 100, endMs: 200, mediaStartMs: 0, mediaEndMs: 100, mimeType: 'video/webm'};
   const finalized = await fetch(`${asset}/finalize`, {method: 'POST', headers: headers(first.token, {'content-type': 'application/json'}),
-    body: JSON.stringify({chunkCount: 1, mimeType: 'video/webm', segment})});
+    body: JSON.stringify({chunkCount: 2, mimeType: 'video/webm', segment})});
   assert.equal(finalized.status, 201);
   assert.equal((await finalized.json() as {asset: {assetRef: string}}).asset.assetRef, segment.assetRef);
 
