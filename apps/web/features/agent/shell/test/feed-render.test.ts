@@ -122,6 +122,10 @@ test('Clipa\'s line: the conductor\'s current line, else the next step in one li
   assert.match(html, /data-tone="speak" data-kind="ask"/);
   assert.match(html, /class="as-now__state">speaking</);
   assert.match(html, /class="as-now__line"[^>]*>Why did you paste the address\?</);
+  r.conductor.set({ line: { cueId: 'c10', kind: 'teachback', text: 'A long teach-back. '.repeat(40), step: null } });
+  const tb = render(r, createElement(ClipaNow, { idle: '' }));
+  assert.match(tb, />Here is what I understood\. Confirm it or correct it\.</, 'the teach-back itself stays in its card');
+  assert.doesNotMatch(tb, /A long teach-back/);
 });
 
 test('Show: Clipa\'s line and the live feed; the long lists are gone from the main view', () => {

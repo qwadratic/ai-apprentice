@@ -53,7 +53,9 @@ export function ClipaNow({ idle }: { idle: string }) {
     return null;
   });
   const { word, tone } = useClipaState();
-  const text = offRecord ? null : leads ? (line?.text ?? null) : asked;
+  // The teach-back is long and has its own card in Reflect: here it is one line about it.
+  const said = line === null ? null : line.kind === 'teachback' ? 'Here is what I understood. Confirm it or correct it.' : line.text;
+  const text = offRecord ? null : leads ? said : asked;
   const kind = offRecord ? 'off' : leads ? (line?.kind ?? 'idle') : asked !== null ? 'ask' : 'idle';
 
   return (

@@ -592,7 +592,17 @@
 .apprentice-shell .as-now__name { color: var(--as-accent); }
 .apprentice-shell .as-now__state { font-weight: 500; letter-spacing: 0.02em; text-transform: none; }
 .apprentice-shell .as-now__dot { width: 9px; height: 9px; border-radius: 50%; background: var(--as-accent); box-shadow: 0 0 10px rgba(44, 196, 184, 0.6); }
-.apprentice-shell .as-now__line { margin: 8px 0 0; font-size: 1.14rem; line-height: 1.42; font-weight: 600; overflow-wrap: anywhere; }
+.apprentice-shell .as-now__line {
+  margin: 8px 0 0;
+  font-size: 1.14rem;
+  line-height: 1.42;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .apprentice-shell .as-now__line--idle { font-size: 1rem; font-weight: 500; color: var(--as-muted); }
 .apprentice-shell .as-now[data-tone="speak"] .as-now__dot { animation: as-speak 0.9s ease-in-out infinite alternate; }
 @keyframes as-speak { from { transform: scale(0.8); opacity: 0.7; } to { transform: scale(1.25); opacity: 1; } }
