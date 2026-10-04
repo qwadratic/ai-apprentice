@@ -1,10 +1,11 @@
-// Deploy status: the web sha (deploy.json next to this page), the API (/health), whether both run the same commit,
+// Deploy status: the web sha (deploy.json next to this page), the API (/health for liveness, /ops/vm-health for the
+// runner state and the deployed sha, with /health's own fields as the fallback), whether both run the same commit,
 // and the last deploy the VM did (/ops/deploy/status). Each request has its own time limit and its own failure
 // state, so one dead endpoint never hides the others. Nothing in here throws on a network problem.
-import { ACTIONS_RELEASE_URL, DEPLOY_JSON_URL, HEALTH_URL, OPS_STATUS_URL } from './config.ts';
+import { ACTIONS_RELEASE_URL, DEPLOY_JSON_URL, HEALTH_URL, OPS_STATUS_URL, VM_HEALTH_URL } from './config.ts';
 import { chip, el, formatClock, link, shaLink, timeEl } from './dom.ts';
 import type { Child, Tone } from './dom.ts';
-import { parseHealth, parseOpsStatus, parseWebDeploy, syncVerdict } from './model.ts';
+import { parseHealth, parseOpsStatus, parseVmHealth, parseWebDeploy, syncVerdict } from './model.ts';
 import type { ApiHealth, VmDeploy, WebDeploy } from './model.ts';
 import { describeFailure, getJson } from './net.ts';
 import type { Failure } from './net.ts';
@@ -16,6 +17,18 @@ async function load<T>(url: string, parse: (data: unknown) => T | null): Promise
   if (!res.ok) return res;
   const value = parse(res.data);
   return value === null ? { ok: false, failure: { kind: 'shape' } } : { ok: true, value };
+}
+
+/**
+ * The API row: /health says whether the API is up; runner and deployed sha come from /ops/vm-health. Before the
+ * switch to apps/api the placeholder served the VM: it answers 404 there and carries both fields in /health, so
+ * whenever /ops/vm-health gives no usable answer (404 or anything else), /health's own fields are used (apps/api's
+ * /health has none, which shows as "unknown"). The requests run in parallel; a dead /health is "unreachable".
+ */
+async function loadApi(): Promise<Loaded<ApiHealth>> {
+  const [health, vm] = await Promise.all([load(HEALTH_URL, parseHealth), load(VM_HEALTH_URL, parseVmHealth)]);
+  if (!health.ok || !vm.ok) return health;
+  return { ok: true, value: { ok: health.value.ok, runner: vm.value.runner, deployedSha: vm.value.deployedSha, source: 'vm-health' } };
 }
 
 // ---- Rows --------------------------------------------------------------------
@@ -64,10 +77,11 @@ function renderApi(row: Row, res: Loaded<ApiHealth>): void {
     setRow(row, chip('unreachable', 'bad'), dots(describeFailure(res.failure), raw));
     return;
   }
-  const { ok, runner, deployedSha } = res.value;
+  const { ok, runner, deployedSha, source } = res.value;
   const runnerText = el('span', runner === 'up' ? undefined : 'attention', `runner ${runner ?? 'unknown'}`);
   const deployed = deployedSha ? el('span', undefined, 'deployed ', shaLink(deployedSha)) : 'deployed sha unknown';
-  setRow(row, ok ? chip('ok', 'good') : chip('down', 'bad'), dots(runnerText, deployed, raw));
+  const links = source === 'vm-health' ? [raw, link('/ops/vm-health', VM_HEALTH_URL, 'raw')] : [raw];
+  setRow(row, ok ? chip('ok', 'good') : chip('down', 'bad'), dots(runnerText, deployed, ...links));
 }
 
 function renderSync(row: Row, web: Loaded<WebDeploy>, api: Loaded<ApiHealth>): void {
@@ -148,9 +162,9 @@ export function initStatus(parts: StatusParts): void {
     parts.updated.textContent = 'Checking...';
     for (const row of Object.values(rows)) setRow(row, chip('checking', 'muted'), []);
     try {
-      // The three requests run in parallel, and each row is drawn as soon as its own answer is in.
+      // The requests run in parallel, and each row is drawn as soon as its own answer is in.
       const web = load(DEPLOY_JSON_URL, parseWebDeploy);
-      const api = load(HEALTH_URL, parseHealth);
+      const api = loadApi();
       const ops = load(OPS_STATUS_URL, parseOpsStatus);
       await Promise.all([
         web.then((r) => renderWeb(rows.web, r, new Date())),
