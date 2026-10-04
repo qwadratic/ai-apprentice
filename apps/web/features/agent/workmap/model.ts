@@ -270,6 +270,7 @@ function missingOf(evidenceIds: readonly string[], quote: string | null): Array<
 // ---------------------------------------------------------------------------
 
 type VisionObservation = Exclude<ScreenObservation, { kind: 'input_activity' }>;
+type WorkspaceObservation = Exclude<VisionObservation, { kind: 'screen_activity' }>;
 
 const WORKSPACE_KINDS: ReadonlySet<string> = new Set(['order_view', 'email_draft', 'ticket']);
 
@@ -301,7 +302,7 @@ function genericFacts(g: GenericScreen): FactRow[] {
   return rows;
 }
 
-function factRows(obs: VisionObservation): FactRow[] {
+function factRows(obs: WorkspaceObservation): FactRow[] {
   const rows: FactRow[] = [{ key: 'kind', value: obs.kind }];
   const add = (key: string, value: string | null): void => {
     rows.push({ key, value: value === null || value.length === 0 ? '—' : value });
@@ -333,7 +334,7 @@ function factRows(obs: VisionObservation): FactRow[] {
   return rows;
 }
 
-function changesOf(obs: VisionObservation, prev: VisionObservation | null, order: OrderLike | null): ChangeEvent[] {
+function changesOf(obs: WorkspaceObservation, prev: WorkspaceObservation | null, order: OrderLike | null): ChangeEvent[] {
   const out: ChangeEvent[] = [];
   if (obs.kind === 'order_view') {
     const p = prev?.kind === 'order_view' ? prev.facts : null;
@@ -398,7 +399,7 @@ export function buildKeyframes(
     .filter((o): o is VisionObservation => o.kind !== 'input_activity')
     .slice()
     .sort((a, b) => a.timestampMs - b.timestampMs || a.sequence - b.sequence);
-  const prevBySurface = new Map<Surface, VisionObservation>();
+  const prevBySurface = new Map<Surface, WorkspaceObservation>();
   let order: OrderLike | null = null;
   let prevScreen: GenericScreen | null = null;
   const frames: Keyframe[] = [];
@@ -424,7 +425,7 @@ export function buildKeyframes(
     });
   };
   for (const obs of vision) {
-    if (!WORKSPACE_KINDS.has(obs.kind)) {
+    if (obs.kind === 'screen_activity' || !WORKSPACE_KINDS.has(obs.kind)) {
       // A generic screen observation (any app): a keyframe when the app, the surface or the summary changed.
       const g = genericScreenOf(obs);
       const changes = genericChanges(g, prevScreen);

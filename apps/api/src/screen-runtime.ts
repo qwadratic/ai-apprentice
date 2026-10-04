@@ -19,8 +19,10 @@ export function createScreenRuntime(options: ScreenRuntimeOptions): ScreenRuntim
   database.exec('CREATE TABLE IF NOT EXISTS screen_evidence (id TEXT PRIMARY KEY, record_json TEXT NOT NULL) STRICT');
   const evidence = createFileEvidenceStore({mediaDir: options.mediaDir, metadata: createSqliteEvidenceMetadata(database)});
   const runner = options.runner ?? createRunnerClient({env: options.env});
+  // VISION_GENERIC=off reads a frame with no known surface as before screen_activity (workspace kinds only).
+  const genericVision = options.env?.VISION_GENERIC !== 'off';
   const hub = new ScreenSessionHub(({publish, onEvent}) => createScreenService({
-    runner, evidence, publish, onEvent, parseObservation: parseScreenObservation,
+    runner, evidence, publish, onEvent, parseObservation: parseScreenObservation, genericVision,
   }), parseScreenStatus);
   return {hub, evidence, close: () => database.close()};
 }
