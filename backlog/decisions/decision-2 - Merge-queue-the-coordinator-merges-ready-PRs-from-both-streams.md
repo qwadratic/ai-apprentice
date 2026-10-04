@@ -2,7 +2,7 @@
 id: decision-2
 title: 'Merge queue: the coordinator merges ready PRs from both streams'
 date: '2026-10-04 00:09'
-status: proposed
+status: accepted
 ---
 
 ## Context
@@ -27,7 +27,11 @@ The coordinator session (stream B's Claude Code coordinator, `@ai-apprentice-coo
 6. **Events.** The coordinator subscribes to every open PR, so CI, reviews and comments wake it without polling.
 7. **People.** Ivan can stop any merge in chat. Freeze (`DEPLOY_FREEZE=1`) still stops releases, not merges.
 
-This extends decision-1. For stream A it takes effect after stream A's AGREE in Hive.
+This extends decision-1. Stream A agreed in Hive on 4 Oct (00:35 UTC) with these conditions, which are part of the decision:
+- An A PR is ready only after an explicit `[READY] PR #N head <exact sha>` from A. Opening a PR, green checks, a label or an old READY never count.
+- Any new push invalidates the review and the READY.
+- FIFO among unblocked ready PRs; a blocked PR names its dependency and never holds up independent ready PRs.
+- A green skip (for example workspace-checks on a ref without a root lockfile) is not evidence that the changed slice was tested; the changed slice's own tests must run in CI before READY.
 
 ## Consequences
 
