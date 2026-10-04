@@ -1,9 +1,11 @@
 ---
 id: TASK-3.46
 title: Web shell as a Clipa Conductor client
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@qwadratic'
 created_date: '2026-10-04 05:00'
+updated_date: '2026-10-04 05:02'
 labels:
   - stream-b
 dependencies: []
