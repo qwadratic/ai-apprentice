@@ -1,60 +1,45 @@
 /*
  * Product shell styles. Everything is scoped under .apprentice-shell and uses classes (as-*), never bare element
  * selectors: nothing here may change how stream A's workspace and screen panel look (vision reads those pixels).
- * Light and dark follow prefers-color-scheme. Layout: workspace left (~60%), Clipa and the mode view right;
- * below 900px one column.
+ * The page is dark whatever the system theme (AppShell sets data-theme="dark" for Clipa's layer). Layout: the shared
+ * screen left as the hero, Clipa's line and the live feed right; below 900px one column.
  */
 .apprentice-shell {
-  --as-bg: #f3f6f5;
-  --as-surface: #ffffff;
-  --as-surface-2: #eaf0ef;
-  --as-text: #14211f;
-  --as-muted: #4f605c;
-  --as-border: #cbd7d4;
-  --as-accent: #0a766f;
-  --as-accent-text: #ffffff;
-  --as-accent-soft: #d8efec;
-  --as-ok: #0b6b4c;
-  --as-ok-soft: #d9f0e6;
-  --as-warn: #8a5300;
-  --as-warn-soft: #fbecd0;
-  --as-bad: #b3261e;
-  --as-bad-soft: #fbdedb;
-  --as-focus: #0a766f;
-  --as-shadow: 0 1px 2px rgba(9, 30, 27, 0.08);
+  /* Dark by default (the demo's look): a deep teal night with Clipa's teal as the one accent. */
+  --as-bg: #091110;
+  --as-surface: #101b1a;
+  --as-surface-2: #152422;
+  --as-text: #e7f1ef;
+  --as-muted: #94aba6;
+  --as-border: #22403b;
+  --as-accent: #2cc4b8;
+  --as-accent-text: #032420;
+  --as-accent-soft: #113a36;
+  --as-ok: #6fdcb0;
+  --as-ok-soft: #0f3529;
+  --as-warn: #f2bb5c;
+  --as-warn-soft: #3a2a0c;
+  --as-bad: #ff9a90;
+  --as-bad-soft: #451c18;
+  --as-focus: #5fe3d7;
+  --as-live: #ff5a4f;
+  --as-shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 10px 30px rgba(0, 0, 0, 0.28);
+  --as-glow: 0 0 0 1px rgba(44, 196, 184, 0.28), 0 18px 48px rgba(0, 0, 0, 0.45);
+  --as-radius: 16px;
 
   position: fixed;
   inset: 0;
   overflow: auto;
   display: flex;
   flex-direction: column;
-  background: var(--as-bg);
+  background:
+    radial-gradient(1100px 520px at 85% -8%, rgba(44, 196, 184, 0.13), transparent 62%),
+    radial-gradient(900px 480px at -12% 108%, rgba(23, 179, 163, 0.09), transparent 60%),
+    var(--as-bg);
   color: var(--as-text);
-  color-scheme: light dark;
+  color-scheme: dark;
   font: 15px/1.45 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   -webkit-text-size-adjust: 100%;
-}
-
-@media (prefers-color-scheme: dark) {
-  .apprentice-shell {
-    --as-bg: #0d1413;
-    --as-surface: #162120;
-    --as-surface-2: #1d2b29;
-    --as-text: #e5eeec;
-    --as-muted: #a3b6b2;
-    --as-border: #2f4240;
-    --as-accent: #2cc4b8;
-    --as-accent-text: #04201d;
-    --as-accent-soft: #15403c;
-    --as-ok: #6fdcb0;
-    --as-ok-soft: #123a2c;
-    --as-warn: #f0b95a;
-    --as-warn-soft: #3b2c0c;
-    --as-bad: #ff9a90;
-    --as-bad-soft: #471d19;
-    --as-focus: #2cc4b8;
-    --as-shadow: none;
-  }
 }
 
 .apprentice-shell .as-btn:focus-visible,
@@ -78,7 +63,9 @@
   align-items: center;
   gap: 6px 20px;
   padding: 8px 20px 6px;
-  background: var(--as-surface);
+  background: rgba(9, 17, 16, 0.82);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--as-border);
 }
 .apprentice-shell .as-brand { grid-area: brand; display: flex; align-items: center; min-width: 0; }
@@ -111,16 +98,9 @@
   --wire-body: #17b3a3;
   --wire-shade: #0f9585;
   --wire-hi: #a3f2e7;
-  --wire-dim-outline: #9fb3ae;
-  --wire-dim-body: #d3dfdc;
-  --wire-dim-hi: #f2f7f6;
-}
-@media (prefers-color-scheme: dark) {
-  .apprentice-shell .as-rail {
-    --wire-dim-outline: #44605c;
-    --wire-dim-body: #2b3d3b;
-    --wire-dim-hi: #3f5552;
-  }
+  --wire-dim-outline: #44605c;
+  --wire-dim-body: #2b3d3b;
+  --wire-dim-hi: #3f5552;
 }
 .apprentice-shell .as-rail__track {
   display: grid;
@@ -318,8 +298,22 @@
 .apprentice-shell .as-btn:hover:not(:disabled) { background: var(--as-surface-2); }
 .apprentice-shell .as-btn:disabled { opacity: 0.55; cursor: not-allowed; }
 .apprentice-shell .as-btn--small { padding: 3px 10px; min-height: 28px; font-size: 0.88rem; }
-.apprentice-shell .as-btn--primary { background: var(--as-accent); color: var(--as-accent-text); border-color: var(--as-accent); font-weight: 600; }
-.apprentice-shell .as-btn--primary:hover:not(:disabled) { background: var(--as-accent); filter: brightness(1.08); }
+.apprentice-shell .as-btn--primary {
+  background: linear-gradient(180deg, #3ad6c9, #1ea89c);
+  color: var(--as-accent-text);
+  border-color: transparent;
+  font-weight: 700;
+  box-shadow: 0 6px 18px rgba(44, 196, 184, 0.22);
+}
+.apprentice-shell .as-btn--primary:hover:not(:disabled) { background: linear-gradient(180deg, #3ad6c9, #1ea89c); filter: brightness(1.08); }
+.apprentice-shell .as-btn--quiet { background: transparent; border-color: transparent; color: var(--as-muted); }
+.apprentice-shell .as-btn--quiet:hover:not(:disabled) { color: var(--as-text); background: var(--as-surface-2); }
+.apprentice-shell .as-btn--big { width: 100%; min-height: 48px; padding: 10px 20px; border-radius: 12px; font-size: 1.02rem; }
+.apprentice-shell .as-btn--end {
+  display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+  color: #ffd9d5; background: rgba(255, 90, 79, 0.1); border-color: rgba(255, 90, 79, 0.6); font-weight: 700;
+}
+.apprentice-shell .as-btn--end:hover:not(:disabled) { background: rgba(255, 90, 79, 0.18); }
 .apprentice-shell .as-btn--off { color: var(--as-bad); border-color: var(--as-bad); font-weight: 600; }
 .apprentice-shell .as-btn--off.is-on { background: var(--as-bad-soft); }
 
@@ -335,11 +329,11 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 10px;
+  padding: 2px 10px;
   border: 1px solid var(--as-border);
   border-radius: 999px;
-  background: var(--as-surface);
-  font-size: 0.85rem;
+  background: rgba(255, 255, 255, 0.02);
+  font-size: 0.78rem;
   min-width: 0;
 }
 .apprentice-shell .as-chip__dot { width: 9px; height: 9px; border-radius: 50%; background: var(--as-muted); flex: none; }
@@ -388,7 +382,7 @@
    Show: the shared screen leads, large; the questions and the session sit in a narrow column beside it.
    Reflect: the Work Map board takes the width; the session and the replay sit beside it; screen and workspace are hidden.
    Pass it on: the new hire's case first, then the screen; the tutor's warnings and the session beside them. */
-.apprentice-shell .as-main[data-mode="learn"] { grid-template-columns: minmax(0, 7fr) minmax(280px, 3fr); }
+.apprentice-shell .as-main[data-mode="learn"] { grid-template-columns: minmax(0, 1fr) minmax(320px, 400px); }
 .apprentice-shell .as-main[data-mode="review"] { grid-template-columns: minmax(0, 1fr); }
 .apprentice-shell .as-main[data-mode="review"] .as-left { display: none; }
 .apprentice-shell .as-main[data-mode="review"] .as-right {
@@ -399,17 +393,19 @@
 .apprentice-shell .as-main[data-mode="review"] .as-mode { grid-area: mode; }
 .apprentice-shell .as-main[data-mode="review"] .as-session { grid-area: session; }
 .apprentice-shell .as-main[data-mode="review"] .as-replay { grid-area: replay; }
-.apprentice-shell .as-main[data-mode="teach"] { grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr); }
+.apprentice-shell .as-replay { border-color: rgba(44, 196, 184, 0.4); animation: as-alert-in 240ms ease-out both; }
+.apprentice-shell .as-replay__range { margin: 0 0 4px; font-size: 1.02rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.apprentice-shell .as-main[data-mode="teach"] { grid-template-columns: minmax(0, 1fr) minmax(340px, 440px); }
 .apprentice-shell .as-main[data-mode="teach"] .as-left .as-workspace { order: 1; }
 .apprentice-shell .as-main[data-mode="teach"] .as-left .as-screen { order: 2; }
 /* A tutor's warning moves the warning area to the top of the side column (browsers without :has keep the order). */
 .apprentice-shell .as-main[data-mode="teach"] .as-right:has(.as-checkpoint--warn) .as-mode { order: -1; }
 
 .apprentice-shell .as-card {
-  background: var(--as-surface);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0) 120px), var(--as-surface);
   border: 1px solid var(--as-border);
-  border-radius: 12px;
-  padding: 14px;
+  border-radius: var(--as-radius);
+  padding: 14px 16px;
   box-shadow: var(--as-shadow);
   min-width: 0;
 }
@@ -564,12 +560,253 @@
 .apprentice-shell .as-event--sent .as-event__text { color: var(--as-accent); }
 .apprentice-shell .as-event__end { height: 1px; border: 0; padding: 0; }
 
+/* ---- Stage canvas: graphical, not boxes ------------------------------------------
+   Show and Pass it on: the screen is the hero with a soft teal frame; the side column has no box of its own, only
+   Clipa's line and the live feed, each with its own surface. */
+.apprentice-shell .as-main[data-mode="learn"] .as-mode,
+.apprentice-shell .as-main[data-mode="teach"] .as-mode,
+.apprentice-shell .as-main[data-mode="review"] .as-mode { background: transparent; border: 0; box-shadow: none; padding: 0; }
+.apprentice-shell .as-main[data-mode="learn"] .as-screen,
+.apprentice-shell .as-main[data-mode="teach"] .as-screen { border-color: rgba(44, 196, 184, 0.34); box-shadow: var(--as-glow); }
+.apprentice-shell .as-main[data-mode="learn"] .as-screen:has(.as-screen__mount[data-live="true"]),
+.apprentice-shell .as-main[data-mode="teach"] .as-screen:has(.as-screen__mount[data-live="true"]) {
+  border-color: rgba(44, 196, 184, 0.7);
+  box-shadow: 0 0 0 1px rgba(44, 196, 184, 0.45), 0 0 36px rgba(44, 196, 184, 0.16), 0 18px 48px rgba(0, 0, 0, 0.45);
+}
+.apprentice-shell .as-screen > .as-note { font-size: 0.82rem; }
+.apprentice-shell .as-view { gap: 14px; }
+/* The status line under the header: quiet, on the right; the live feed and the session card carry the state. */
+.apprentice-shell .as-status { justify-content: flex-end; padding: 6px 16px 0; opacity: 0.85; }
+
+/* Clipa's line now: the largest text in the column. */
+.apprentice-shell .as-now {
+  position: relative;
+  padding: 14px 16px 16px;
+  border-radius: var(--as-radius);
+  border: 1px solid rgba(44, 196, 184, 0.38);
+  background: linear-gradient(135deg, rgba(44, 196, 184, 0.17), rgba(44, 196, 184, 0.03) 62%), var(--as-surface-2);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+  transition: border-color 0.3s ease, background 0.3s ease;
+}
+.apprentice-shell .as-now__who { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 0.76rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--as-muted); }
+.apprentice-shell .as-now__name { color: var(--as-accent); }
+.apprentice-shell .as-now__state { font-weight: 500; letter-spacing: 0.02em; text-transform: none; }
+.apprentice-shell .as-now__dot { width: 9px; height: 9px; border-radius: 50%; background: var(--as-accent); box-shadow: 0 0 10px rgba(44, 196, 184, 0.6); }
+.apprentice-shell .as-now__line {
+  margin: 8px 0 0;
+  font-size: 1.14rem;
+  line-height: 1.42;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.apprentice-shell .as-now__line--idle { font-size: 1rem; font-weight: 500; color: var(--as-muted); }
+.apprentice-shell .as-now[data-tone="speak"] .as-now__dot { animation: as-speak 0.9s ease-in-out infinite alternate; }
+@keyframes as-speak { from { transform: scale(0.8); opacity: 0.7; } to { transform: scale(1.25); opacity: 1; } }
+.apprentice-shell .as-now[data-tone="warn"] {
+  border-color: rgba(242, 187, 92, 0.7);
+  background: linear-gradient(135deg, rgba(242, 187, 92, 0.2), rgba(242, 187, 92, 0.04) 62%), var(--as-surface-2);
+}
+.apprentice-shell .as-now[data-tone="warn"] .as-now__name { color: var(--as-warn); }
+.apprentice-shell .as-now[data-tone="warn"] .as-now__dot { background: var(--as-warn); box-shadow: 0 0 10px rgba(242, 187, 92, 0.6); }
+.apprentice-shell .as-now[data-tone="off"] { filter: grayscale(1); opacity: 0.72; }
+
+/* The live feed: newest on top on a thin teal wire; new items slide in, the newest is lit for a moment. */
+.apprentice-shell .as-live {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px 14px;
+  border-radius: var(--as-radius);
+  border: 1px solid var(--as-border);
+  background: var(--as-surface);
+  box-shadow: var(--as-shadow);
+  transition: filter 0.3s ease, opacity 0.3s ease;
+}
+.apprentice-shell .as-live__head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.apprentice-shell .as-live__title { margin: 0; font-size: 0.76rem; font-weight: 800; letter-spacing: 0.09em; text-transform: uppercase; color: var(--as-muted); }
+.apprentice-shell .as-live__state { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; font-size: 0.8rem; color: var(--as-muted); }
+.apprentice-shell .as-live__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--as-muted); }
+.apprentice-shell .as-live[data-running="true"] .as-live__state { color: var(--as-text); font-weight: 600; }
+.apprentice-shell .as-live[data-running="true"] .as-live__dot { background: var(--as-live); animation: as-live-pulse 1.6s ease-out infinite; }
+@keyframes as-live-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(255, 90, 79, 0.55); }
+  70% { box-shadow: 0 0 0 8px rgba(255, 90, 79, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 90, 79, 0); }
+}
+.apprentice-shell .as-live[data-off-record="true"] { filter: grayscale(1); opacity: 0.6; }
+.apprentice-shell .as-live__note { margin: 0; font-size: 0.82rem; color: var(--as-muted); }
+.apprentice-shell .as-live__empty { margin: 0; padding: 14px 12px; border: 1px dashed var(--as-border); border-radius: 12px; color: var(--as-muted); font-size: 0.9rem; }
+.apprentice-shell .as-live__list { position: relative; list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.apprentice-shell .as-live__list::before {
+  content: '';
+  position: absolute;
+  left: 15px;
+  top: 12px;
+  bottom: 12px;
+  width: 2px;
+  border-radius: 1px;
+  background: linear-gradient(to bottom, rgba(44, 196, 184, 0.7), rgba(44, 196, 184, 0.05));
+}
+.apprentice-shell .as-live__item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 6px 8px 6px 0;
+  border-radius: 12px;
+  animation: as-feed-in 200ms ease-out both;
+  transition: background-color 0.8s ease, box-shadow 0.8s ease;
+}
+@keyframes as-feed-in { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: none; } }
+.apprentice-shell .as-live__item.is-fresh { background: rgba(44, 196, 184, 0.12); box-shadow: inset 0 0 0 1px rgba(44, 196, 184, 0.45); }
+.apprentice-shell .as-live__icon {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  color: var(--as-accent);
+  background: var(--as-surface-2);
+  border: 1px solid var(--as-border);
+}
+.apprentice-shell .as-icon { display: block; }
+.apprentice-shell .as-live__item[data-kind="screen"] .as-live__icon { color: var(--as-muted); }
+.apprentice-shell .as-live__item[data-kind="answer"] .as-live__icon { color: var(--as-text); }
+.apprentice-shell .as-live__item[data-kind="rule"] .as-live__icon,
+.apprentice-shell .as-live__item[data-tone="ok"] .as-live__icon { color: var(--as-ok); border-color: rgba(111, 220, 176, 0.5); background: var(--as-ok-soft); }
+.apprentice-shell .as-live__item[data-kind="warn"] .as-live__icon { color: var(--as-warn); border-color: rgba(242, 187, 92, 0.6); background: var(--as-warn-soft); }
+.apprentice-shell .as-live__item[data-kind="ask"] .as-live__icon { background: var(--as-accent-soft); border-color: rgba(44, 196, 184, 0.5); }
+.apprentice-shell .as-live__body { min-width: 0; padding-top: 1px; }
+.apprentice-shell .as-live__meta { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 0.76rem; color: var(--as-muted); }
+.apprentice-shell .as-live__label { font-weight: 700; letter-spacing: 0.02em; color: var(--as-muted); }
+.apprentice-shell .as-live__item[data-kind="ask"] .as-live__label,
+.apprentice-shell .as-live__item[data-kind="say"] .as-live__label { color: var(--as-accent); }
+.apprentice-shell .as-live__item[data-kind="rule"] .as-live__label { color: var(--as-ok); }
+.apprentice-shell .as-live__item[data-kind="warn"] .as-live__label { color: var(--as-warn); }
+.apprentice-shell .as-live__repeat { font-variant-numeric: tabular-nums; }
+.apprentice-shell .as-live__time { margin-left: auto; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.apprentice-shell .as-live__text {
+  margin: 1px 0 0;
+  font-size: 0.92rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.apprentice-shell .as-live__item[data-kind="screen"] .as-live__text { color: var(--as-muted); }
+.apprentice-shell .as-live__item[data-kind="ask"] .as-live__text,
+.apprentice-shell .as-live__item[data-kind="warn"] .as-live__text { font-weight: 600; }
+.apprentice-shell .as-live__more {
+  align-self: flex-start;
+  margin-left: 42px;
+  padding: 2px 0;
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--as-accent);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.apprentice-shell .as-live__more:hover { text-decoration: underline; text-underline-offset: 3px; }
+.apprentice-shell .as-live__more:focus-visible { outline: 3px solid var(--as-focus); outline-offset: 2px; border-radius: 4px; }
+
+/* Pass it on: the tutor's answer before Send, as the column's main object. */
+.apprentice-shell .as-alert {
+  padding: 16px 18px;
+  border-radius: var(--as-radius);
+  border: 1px solid var(--as-border);
+  background: var(--as-surface-2);
+  animation: as-alert-in 240ms ease-out both;
+}
+@keyframes as-alert-in { from { opacity: 0; transform: scale(0.98); } to { opacity: 1; transform: none; } }
+.apprentice-shell .as-alert__title { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 1.16rem; }
+.apprentice-shell .as-alert__title::before {
+  content: '';
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--as-muted);
+}
+.apprentice-shell .as-alert__message { margin: 8px 0 4px; font-size: 1.02rem; font-weight: 600; overflow-wrap: anywhere; }
+.apprentice-shell .as-alert__hint { margin: 0; font-size: 0.86rem; color: var(--as-muted); }
+.apprentice-shell .as-alert--warn {
+  border-color: rgba(242, 187, 92, 0.75);
+  background: linear-gradient(135deg, rgba(242, 187, 92, 0.22), rgba(242, 187, 92, 0.05) 70%), var(--as-surface);
+  box-shadow: 0 0 0 1px rgba(242, 187, 92, 0.2), 0 14px 36px rgba(242, 187, 92, 0.1);
+}
+.apprentice-shell .as-alert--warn .as-alert__title { color: var(--as-warn); }
+.apprentice-shell .as-alert--warn .as-alert__title::before { background: var(--as-warn); box-shadow: 0 0 12px rgba(242, 187, 92, 0.8); }
+.apprentice-shell .as-alert--clear { border-color: rgba(111, 220, 176, 0.6); background: linear-gradient(135deg, rgba(111, 220, 176, 0.16), transparent 70%), var(--as-surface); }
+.apprentice-shell .as-alert--clear .as-alert__title { color: var(--as-ok); }
+.apprentice-shell .as-alert--clear .as-alert__title::before { background: var(--as-ok); }
+.apprentice-shell .as-case { padding: 12px 14px; border: 1px dashed rgba(242, 187, 92, 0.55); border-radius: var(--as-radius); }
+.apprentice-shell .as-case .as-row { margin-bottom: 0; }
+.apprentice-shell .as-mastery-card { padding: 14px 16px; border-radius: var(--as-radius); border: 1px solid var(--as-border); background: var(--as-surface); }
+.apprentice-shell .as-mastery ul { margin: 0; padding-left: 18px; }
+.apprentice-shell .as-footnote { margin: 0; font-size: 0.8rem; color: var(--as-muted); }
+
+/* Reflect: the open questions and the teach-back side by side above the board. */
+.apprentice-shell .as-focus { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); gap: 12px; align-items: stretch; }
+.apprentice-shell .as-focus__card {
+  min-width: 0;
+  padding: 14px 16px;
+  border-radius: var(--as-radius);
+  border: 1px solid var(--as-border);
+  background: var(--as-surface);
+  box-shadow: var(--as-shadow);
+}
+.apprentice-shell .as-focus__card--teachback {
+  border-color: rgba(44, 196, 184, 0.45);
+  background: linear-gradient(160deg, rgba(44, 196, 184, 0.14), transparent 70%), var(--as-surface);
+}
+.apprentice-shell .as-focus__card--teachback[data-confirmed="true"] { border-color: rgba(111, 220, 176, 0.7); }
+.apprentice-shell .as-focus__title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 10px; font-size: 1rem; }
+.apprentice-shell .as-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--as-accent);
+  color: var(--as-accent-text);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+.apprentice-shell .as-focus .as-gaps { margin-bottom: 8px; }
+.apprentice-shell .as-focus .as-gap { background: var(--as-surface-2); transition: border-color 0.2s ease; }
+.apprentice-shell .as-focus .as-gap:hover { border-color: var(--as-accent); }
+.apprentice-shell .as-gap__button { width: 100%; padding: 0; font: inherit; font-weight: 600; text-align: left; color: var(--as-text); background: none; border: 0; cursor: pointer; }
+.apprentice-shell .as-gap__button:disabled { cursor: not-allowed; opacity: 0.6; }
+.apprentice-shell .as-gap__button:focus-visible { outline: 3px solid var(--as-focus); outline-offset: 4px; border-radius: 4px; }
+.apprentice-shell .as-focus .as-teachback { font-size: 1.02rem; line-height: 1.5; }
+
+/* The session card: one big button and one line. */
+.apprentice-shell .as-session__main { display: flex; flex-direction: column; gap: 8px; }
+.apprentice-shell .as-session__hint { margin: 0; font-size: 0.88rem; color: var(--as-muted); }
+.apprentice-shell .as-session__rec { width: 10px; height: 10px; border-radius: 50%; background: var(--as-live); animation: as-live-pulse 1.6s ease-out infinite; }
+.apprentice-shell .as-session .as-disclosure { margin-top: 12px; }
+.apprentice-shell .as-fold { border-top: 1px solid var(--as-border); padding-top: 8px; }
+.apprentice-shell .as-fold__summary { cursor: pointer; font-weight: 700; }
+
 /* ---- Narrow screens --------------------------------------------------------- */
 @media (max-width: 1100px) {
   .apprentice-shell .as-header { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "brand tools" "rail rail"; }
   .apprentice-shell .as-rail { width: 100%; }
 }
 @media (max-width: 900px) {
+  .apprentice-shell .as-focus { grid-template-columns: minmax(0, 1fr); }
   .apprentice-shell .as-main,
   .apprentice-shell .as-main[data-mode="learn"],
   .apprentice-shell .as-main[data-mode="teach"] { grid-template-columns: minmax(0, 1fr); }
@@ -589,6 +826,9 @@
   .apprentice-shell .as-rail__caption { justify-content: flex-start; font-size: 0.82rem; }
 }
 @media (max-width: 520px) {
+  .apprentice-shell .as-now__line { font-size: 1.04rem; }
+  .apprentice-shell .as-live { padding: 10px 10px 12px; }
+  .apprentice-shell .as-live__more { margin-left: 0; }
   .apprentice-shell .as-status { padding: 8px 12px 0; }
   .apprentice-shell .as-main { padding: 10px 12px 14px; gap: 12px; }
   .apprentice-shell .as-banner { margin: 8px 12px 0; }

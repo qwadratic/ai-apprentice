@@ -57,8 +57,10 @@ export function WorkspaceSlot({ adapter = null }: { adapter?: WorkspaceAdapter |
   return (
     <section className="as-card as-workspace" aria-labelledby="as-workspace-title" ref={ref} data-clipa-surface="workspace">
       <div className="as-card__head">
-        <h2 className="as-card__title" id="as-workspace-title">{mounted && adapter ? adapter.label : 'Workspace (stream A)'}</h2>
-        {!mounted && <span className="as-tag as-tag--muted">{adapter === null ? 'not mounted' : 'stand-ins'}</span>}
+        <h2 className="as-card__title" id="as-workspace-title">{liveMount !== null ? 'Demo workspace' : mounted && adapter ? adapter.label : 'Workspace (stream A)'}</h2>
+        {liveMount !== null
+          ? <span className="as-tag as-tag--warn">Synthetic data</span>
+          : !mounted && <span className="as-tag as-tag--muted">{adapter === null ? 'not mounted' : 'stand-ins'}</span>}
       </div>
       {liveMount !== null && <div ref={liveRef} className="as-workspace__mount" data-testid="live-workspace" />}
       {liveMount === null && adapter !== null && (
