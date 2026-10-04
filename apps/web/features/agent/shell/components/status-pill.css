@@ -1,0 +1,23 @@
+/* The compact status pill: "Recording" (a pulsing red dot) or "Off the record" (a grey one). */
+.apprentice-shell .as-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  padding: 2px 12px 2px 10px;
+  border: 1px solid var(--as-border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--as-text);
+  font-size: 0.8rem;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.apprentice-shell .as-pill__dot { width: 9px; height: 9px; flex: none; border-radius: 50%; background: var(--as-muted); }
+.apprentice-shell .as-pill--rec { border-color: var(--as-live); }
+.apprentice-shell .as-pill--rec .as-pill__dot { background: var(--as-live); animation: as-live-pulse 1.6s ease-out infinite; }
+.apprentice-shell .as-pill--off { color: var(--as-muted); }
+
+/* The same four chips in the Debug drawer: left-aligned, full strength, no page gutter. */
+.apprentice-shell .as-status.as-status--debug { justify-content: flex-start; padding: 0 0 12px; opacity: 1; }

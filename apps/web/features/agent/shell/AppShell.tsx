@@ -3,8 +3,10 @@ import './shell.css';
 import { Banner } from './components/Banner.tsx';
 import { DebugDrawer } from './components/DebugDrawer.tsx';
 import { Header } from './components/Header.tsx';
+import { MethodPanel } from './components/MethodPanel.tsx';
 import { SessionControls } from './components/SessionControls.tsx';
 import { StatusBar } from './components/StatusBar.tsx';
+import { WorkflowStrip } from './components/WorkflowStrip.tsx';
 import { setClipaFavicon } from './components/ClipaLogo.tsx';
 import { ClipaThought } from './conductor/ClipaThought.tsx';
 import { ShellContext, useShellState } from './hooks.ts';
@@ -64,9 +66,10 @@ function useHeaderHeight(shell: RefObject<HTMLDivElement | null>, header: RefObj
 }
 
 /**
- * The product page: the header with the journey rail, the status bar, and the stage canvas (workspace area and the stage's own
- * column). Clipa is not a card here: the motion director (runtime.ts) keeps her in one layer above the whole page, resting on the
- * rail at the stage on screen and flying out to what she talks about.
+ * The product page: the header with the journey rail, the expert's workflow with Clipa's lane (and the recording pill), the stage
+ * canvas (workspace area and the stage's own column) and, below it, how Clipa thinks. Clipa is not a card here: the motion
+ * director (runtime.ts) keeps her in one layer above the whole page, resting on the rail at the stage on screen and flying out to
+ * what she talks about.
  */
 export function AppShell() {
   const [runtime] = useState(createRuntime);
@@ -105,8 +108,8 @@ export function AppShell() {
     <ShellContext.Provider value={runtime}>
       <div className="apprentice-shell" ref={shellRef}>
         <Header debugOpen={debugOpen} onToggleDebug={() => setDebugOpen((v) => !v)} headerRef={headerRef} />
-        <StatusBar />
         <Banner />
+        <WorkflowStrip aside={<StatusBar />} />
         <ModeLayout>
           <div className="as-left">
             <ScreenSlot collapsed={screenCollapsed} onToggle={() => setScreenCollapsed((v) => !v)} />
@@ -118,6 +121,7 @@ export function AppShell() {
             <ReplaySlot />
           </div>
         </ModeLayout>
+        <MethodPanel />
         <DebugDrawer open={debugOpen} onClose={() => setDebugOpen(false)} />
         <ClipaThought />
       </div>

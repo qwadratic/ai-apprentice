@@ -6,10 +6,12 @@ import { useShellState } from '../hooks.ts';
 import { formatClock } from '../session-clock.ts';
 import { summarizeLatency } from '../state/derive.ts';
 import { EvidenceLinks } from './Parts.tsx';
+import { StatusPanel } from './StatusChips.tsx';
 
-type Tab = 'clipa' | 'screen' | 'decisions' | 'events' | 'session';
+type Tab = 'status' | 'clipa' | 'screen' | 'decisions' | 'events' | 'session';
 
 const TABS: ReadonlyArray<{ id: Tab; label: string }> = [
+  { id: 'status', label: 'Status' },
   { id: 'clipa', label: 'Clipa lines' },
   { id: 'screen', label: 'Screen events' },
   { id: 'decisions', label: 'Decision log' },
@@ -157,7 +159,7 @@ function SessionInfo() {
 }
 
 export function DebugDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [tab, setTab] = useState<Tab>('clipa');
+  const [tab, setTab] = useState<Tab>('status');
   if (!open) return null;
   return (
     <aside className="as-drawer" id="as-debug" aria-label="Debug drawer" data-testid="debug-drawer">
@@ -181,6 +183,7 @@ export function DebugDrawer({ open, onClose }: { open: boolean; onClose: () => v
         <button type="button" className="as-btn as-btn--small" onClick={onClose}>Close</button>
       </div>
       <div className="as-drawer__body" role="tabpanel" id={`as-dbg-panel-${tab}`} aria-labelledby={`as-dbg-tab-${tab}`}>
+        {tab === 'status' && <StatusPanel />}
         {tab === 'clipa' && <ClipaLines />}
         {tab === 'screen' && <ScreenEvents />}
         {tab === 'decisions' && <DecisionLog />}

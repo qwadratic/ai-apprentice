@@ -1,0 +1,3 @@
+/* Clipa's card in the side column shows only for a real cue (feed/ClipaNow.tsx sets `hidden` otherwise). Its own display rule
+   (shell.css) would win over the hidden attribute, so this restores it. */
+.apprentice-shell .as-now[hidden] { display: none; }

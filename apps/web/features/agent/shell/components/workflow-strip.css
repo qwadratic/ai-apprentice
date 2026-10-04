@@ -1,0 +1,148 @@
+/* The expert's workflow with Clipa's lane under it. A swimlane on a wide screen: the steps in five columns and, under them, one row
+   per stage whose markers sit in the columns they belong to (--from and --span, set by the component). On a phone the columns
+   give way to lists, and each marker says in words where it sits. Colours are the shell's --as-* tokens; nothing widens the page. */
+
+.apprentice-shell .ws {
+  --ws-label: 5.4rem;
+  margin: 12px 16px 0;
+  padding: 10px 16px 12px;
+  min-width: 0;
+  border: 1px solid var(--as-border);
+  border-radius: var(--as-radius);
+  background: var(--as-surface);
+}
+.apprentice-shell .ws__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; min-height: 28px; }
+.apprentice-shell .ws__title { margin: 0; font-size: 0.98rem; }
+
+.apprentice-shell .ws__board { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.apprentice-shell .ws__row {
+  display: grid;
+  grid-template-columns: var(--ws-label) minmax(0, 1fr);
+  align-items: center;
+  column-gap: 8px;
+  min-width: 0;
+}
+.apprentice-shell .ws__who {
+  display: flex;
+  flex-direction: column;
+  color: var(--as-muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.15;
+}
+.apprentice-shell .ws__who-sub { color: var(--as-accent); font-size: 0.64rem; letter-spacing: 0.08em; text-transform: uppercase; }
+.apprentice-shell .ws__row--lane[data-current="true"] .ws__who { color: var(--as-accent); }
+
+/* The expert's steps. */
+.apprentice-shell .ws__steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+.apprentice-shell .ws__step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--as-border);
+  border-radius: 10px;
+  background: var(--as-surface-2);
+  font-size: 0.84rem;
+  line-height: 1.2;
+}
+.apprentice-shell .ws__no {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--as-border);
+  color: var(--as-text);
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+.apprentice-shell .ws__name { min-width: 0; overflow-wrap: anywhere; }
+.apprentice-shell .ws__ref { color: var(--as-muted); white-space: nowrap; }
+
+/* Clipa's lane: the same five columns, so a marker sits under its step. */
+.apprentice-shell .ws__marks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0 6px;
+}
+.apprentice-shell .ws__mark {
+  grid-column: var(--from) / span var(--span);
+  min-width: 0;
+  padding: 3px 9px;
+  border: 1px solid var(--as-border);
+  border-radius: 999px;
+  color: var(--as-muted);
+  font-size: 0.8rem;
+  line-height: 1.25;
+  opacity: 0.82;
+}
+.apprentice-shell .ws__mark-text { overflow-wrap: anywhere; }
+/* A stretch across steps: a bar. A point on the workflow: a pin, its dot on the line between two steps. */
+.apprentice-shell .ws__mark--bar { border-style: dashed; text-align: center; }
+.apprentice-shell .ws__mark--pin { position: relative; border-style: solid; }
+.apprentice-shell .ws__mark--pin::before {
+  content: '';
+  position: absolute;
+  left: -6px;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--as-border);
+  transform: translateY(-50%);
+}
+
+/* The stage on screen is lit. */
+.apprentice-shell .ws__row--lane[data-current="true"] .ws__mark {
+  border-color: var(--as-accent);
+  background: var(--as-accent-soft);
+  color: var(--as-text);
+  font-weight: 600;
+  opacity: 1;
+}
+.apprentice-shell .ws__row--lane[data-current="true"] .ws__mark--pin::before { background: var(--as-accent); box-shadow: 0 0 8px rgba(44, 196, 184, 0.6); }
+
+/* Where a marker sits, in words: for screen readers on a wide screen, in plain sight on a phone. */
+.apprentice-shell .ws__at {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (max-width: 860px) {
+  .apprentice-shell .ws { --ws-label: 4.6rem; }
+  .apprentice-shell .ws__step { flex-direction: column; align-items: flex-start; gap: 4px; padding: 5px 6px; font-size: 0.78rem; }
+}
+
+/* A phone: the steps wrap as a numbered list, each stage is a block of its own markers with the place in words. */
+@media (max-width: 640px) {
+  .apprentice-shell .ws { padding: 10px 12px 12px; }
+  .apprentice-shell .ws__row { grid-template-columns: minmax(0, 1fr); row-gap: 4px; }
+  .apprentice-shell .ws__who { flex-direction: row; align-items: baseline; gap: 8px; font-size: 0.8rem; }
+  .apprentice-shell .ws__steps { display: flex; flex-wrap: wrap; gap: 6px; }
+  .apprentice-shell .ws__step { flex-direction: row; align-items: center; gap: 6px; padding: 4px 9px 4px 6px; font-size: 0.82rem; }
+  .apprentice-shell .ws__marks { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+  .apprentice-shell .ws__mark { grid-column: auto; margin-left: 0; max-width: 100%; border-radius: 12px; text-align: left; }
+  .apprentice-shell .ws__mark--pin { margin-left: 12px; }
+  .apprentice-shell .ws__mark--pin::before { left: -12px; }
+  .apprentice-shell .ws__at { position: static; width: auto; height: auto; overflow: visible; clip-path: none; white-space: normal; margin-left: 6px; color: var(--as-muted); font-size: 0.74rem; font-weight: 400; }
+  .apprentice-shell .ws__at::before { content: '\00b7\00a0'; }
+}

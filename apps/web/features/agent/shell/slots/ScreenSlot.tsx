@@ -14,7 +14,7 @@ import { useShell, useShellState } from '../hooks.ts';
  * (doc-9). The observations of the Learn view come from the sample source until then.
  *
  * The picker needs a user gesture, so the panel calls `session()` synchronously inside its own click. That is why
- * the session must exist first: Start a mode, then choose the window.
+ * the session must exist first: Start a mode, then choose the window. Clipa's bubble says so once; the card does not repeat it.
  */
 export function ScreenSlot({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
   const { controller, live: liveMount } = useShell();
@@ -60,15 +60,13 @@ export function ScreenSlot({ collapsed, onToggle }: { collapsed: boolean; onTogg
           {collapsed ? 'Show' : 'Hide'}
         </button>
       </div>
-      <p className="as-note">
-        {liveMount !== null
-          ? live
+      {live && (
+        <p className="as-note">
+          {liveMount !== null
             ? 'Frames are masked here first, then read by vision on our server.'
-            : 'Press Start first, then share your screen below.'
-          : live
-            ? 'Choose the window below. The preview stays on this page: vision is not wired.'
-            : 'Press Start first, then choose the window to share.'}
-      </p>
+            : 'Choose the window below. The preview stays on this page: vision is not wired.'}
+        </p>
+      )}
       <div
         id="as-screen-mount"
         ref={rootRef}
