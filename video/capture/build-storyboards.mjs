@@ -22,6 +22,20 @@ const clip = (from, to, target, heading, captions, extra = {}) => {
   return { type: 'clip', durationSec, src: SRC, startFromSec: Number(from.toFixed(2)), playbackRate: rate, layout: 'framed', heading, badge: BADGE, captions: captions(durationSec), ...extra };
 };
 
+/** Like clip(), but each caption starts at a moment of the recording: lines = [[sourceSec, text], ...]. */
+const timedClip = (from, to, target, heading, lines, extra = {}) => {
+  const span = Math.max(0.5, to - from);
+  const rate = Math.max(1, Number((span / target).toFixed(2)));
+  const durationSec = Number((span / rate).toFixed(2));
+  const starts = lines.map(([sec]) => Math.max(0.3, (sec - from) / rate));
+  const captions = lines.map(([, text], i) => ({
+    fromSec: Number(starts[i].toFixed(2)),
+    toSec: Number((i + 1 < lines.length ? starts[i + 1] - 0.15 : durationSec - 0.2).toFixed(2)),
+    text,
+  })).filter((c) => c.toSec - c.fromSec > 0.8);
+  return { type: 'clip', durationSec, src: SRC, startFromSec: Number(from.toFixed(2)), playbackRate: rate, layout: 'framed', heading, badge: BADGE, captions, ...extra };
+};
+
 /** Splits a scene's time evenly between caption lines. */
 const spread = (lines) => (d) => {
   const step = d / lines.length;
@@ -32,9 +46,26 @@ const firstCue = (type, fromSec, toSec = Infinity, mode = null) =>
   cues.find((c) => c.type === type && c.tSec >= fromSec && c.tSec <= toSec && (mode === null || c.mode === mode));
 const clean = (t, n = 150) => (t ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
 
+
+// The same choice of spoken answer as recorder/journey.ts, so a caption quotes exactly what the recorder posted.
+const expertAnswer = (question) => {
+  const q = (question ?? '').toLowerCase();
+  if (/(unknown|not sure|unsure|can't tell|cannot tell|stop|ask someone|check with)/.test(q)) return 'If I cannot tell which customer it is, I ask the account owner before sending. I never guess.';
+  if (/(other customer|every|all customers|only|always|apply|anyone else)/.test(q)) return 'Only customer_07. They asked to get it as text. Everyone else gets the usual template image.';
+  if (/\bwhy\b/.test(q)) return 'Because customer_07 asked us to send the delivery address and time as text in the email. Only for them; an extra image is fine.';
+  if (/(remove|image|attach|picture|screenshot)/.test(q)) return 'I would not remove it. The image can stay as an extra; what matters is that the address and the delivery time are written in the email text.';
+  return 'Because customer_07 asked us to send the delivery address and time as text in the email. Only for them; an extra image is fine.';
+};
+
+const quoteAnswer = (question) => {
+  const answer = expertAnswer(question);
+  if (answer.startsWith('I would not remove it. ') && !/remove/i.test(question ?? '')) return `… ${answer.slice('I would not remove it. '.length)}`;
+  return answer;
+};
+
 const ask1 = firstCue('ask', m['show-change'] ?? 0, m['show-end'] ?? Infinity);
 const ask2 = has('show-ask2') ? firstCue('ask', m['show-change2'], m['show-end'] ?? Infinity) : null;
-const gap = has('reflect-ask-0') ? firstCue('ask', m['reflect-map'] ?? m.reflect) : null;
+const gap = has('reflect-ask-0') ? firstCue('ask', m.reflect) : null;
 const teachback = firstCue('teachback', m.reflect ?? 0);
 const warn = has('teach-warn') ? firstCue('warn', m['teach-send']) : null;
 
@@ -46,7 +77,7 @@ scenes.push({
 });
 scenes.push({
   type: 'clipa-intro', durationSec: 6, greeting: "Hi, I'm Clipa.",
-  line: 'I watch an expert work, ask why at the pauses, and coach the next person.', footer: 'A teal paperclip apprentice. Not an office assistant.',
+  line: 'I watch an expert work, ask why at the pauses, and coach the next person.', footer: 'Your teal paperclip apprentice',
 });
 const tm = Object.fromEntries(tour.markers.map((x) => [x.marker, x.tSec]));
 scenes.push({
@@ -65,15 +96,17 @@ scenes.push(clip(m.show - 0.3, m['show-change'] + 0.5, 11, '1 · Show', spread([
   'Clipa stays quiet while she types.',
 ])));
 if (ask1) {
-  scenes.push(clip(m['show-change'] + 0.5, m['show-answer'] + 3.5, 12, '1 · Show', (d) => [
-    { fromSec: 0.3, toSec: d * 0.55, text: 'At the pause, Clipa asks why, about what changed on screen.' },
-    { fromSec: d * 0.58, toSec: d - 0.2, text: 'Expert: “customer_07 asked for it as text. Only for them.”' },
-  ], { zoom: [{ fromSec: 0.8, toSec: 99, x: 0.2, y: 0.05, scale: 1.45 }] }));
+  const from = m['show-change'] - 0.5;
+  scenes.push(timedClip(from, m['show-answer'] + 8, 15, '1 · Show', [
+    [from, 'She stops typing. Clipa waits for the pause.'],
+    [m['show-ask'], `Clipa, at the pause: “${clean(ask1.text, 180)}”`],
+    [m['show-answer'], `Expert: “${quoteAnswer(ask1.text)}”`],
+  ]));
 }
 if (ask2) {
   scenes.push(clip(m['show-change2'], m['show-answer2'] + 2.5, 8, '1 · Show', spread([
     'A second question, about the attached image.',
-  ]), { zoom: [{ fromSec: 0.5, toSec: 99, x: 0.2, y: 0.05, scale: 1.45 }] }));
+  ])));
 }
 
 // 2 · Reflect
@@ -81,23 +114,28 @@ const mapAt = m['reflect-map'] ?? m.reflect + 20;
 scenes.push(clip(m.reflect - 0.3, mapAt + 7, 12, '2 · Reflect', spread([
   '2 · Reflect: Clipa turns the session into a Work Map.',
   'Steps with their screen moments; rules in the expert’s own words.',
-]), { zoom: [{ fromSec: 6.5, toSec: 99, x: 0.3, y: 0.35, scale: 1.3 }] }));
+])));
 if (has('reflect-ask-0')) {
-  scenes.push(clip(m['reflect-ask-0'] - 0.5, m['reflect-answer-0'] + 3, 9, '2 · Reflect', spread([
-    'An open point the task did not answer. The expert replies.',
-  ])));
+  scenes.push(clip(m['reflect-ask-0'] - 0.5, m['reflect-answer-0'] + 8, 11, '2 · Reflect', (d) => [
+    { fromSec: 0.3, toSec: d * 0.55, text: gap ? `An open point: “${clean(gap.text, 180)}”` : 'An open point the task did not answer.' },
+    { fromSec: d * 0.57, toSec: d - 0.2, text: `Expert: “${quoteAnswer(gap?.text)}”` },
+  ]));
 }
 if (has('reflect-teachback')) {
+  const from = m['reflect-teachback'] - 0.3;
   const end = has('reflect-correction') ? m['reflect-correction'] + 5 : m['reflect-teachback'] + 10;
-  scenes.push(clip(m['reflect-teachback'] - 0.3, end, 12, '2 · Reflect', spread([
-    'The teach-back: Clipa reads back what she understood.',
-    'Expert: “One correction: the delivery time window, not only the date.”',
-  ])));
+  scenes.push(timedClip(from, end, 12, '2 · Reflect', [
+    [from, 'The teach-back: Clipa reads back what she understood.'],
+    ...(has('reflect-correction') ? [[m['reflect-correction'], 'Expert: “One correction: it is the delivery time window, not only the date.”']] : []),
+  ]));
 }
 if (has('reflect-confirm')) {
-  scenes.push(clip(m['reflect-confirm'] - 1.5, m['reflect-confirm'] + 6, 7, '2 · Reflect', spread([
-    'Confirmed by the expert, not written afterwards.',
-  ])));
+  const from = has('reflect-teachback-2') ? m['reflect-teachback-2'] - 0.3 : m['reflect-confirm'] - 1.5;
+  const fixed = cues.find((c) => c.type === 'say' && c.mode === 'review' && c.tSec >= from - 1 && c.tSec <= m['reflect-confirm']);
+  scenes.push(timedClip(from, m['reflect-confirm'] + 6, 10, '2 · Reflect', [
+    ...(fixed ? [[from, `Clipa: “${clean(fixed.text, 160)}”`]] : []),
+    [m['reflect-confirm'], 'The expert presses Confirm: the map is confirmed, not written afterwards.'],
+  ]));
 }
 
 // 3 · Pass it on
@@ -105,20 +143,23 @@ if (has('teach')) {
   const warnEnd = has('teach-warn') ? m['teach-warn'] + 8 : m['teach-send'] + 12;
   scenes.push(clip(m.teach - 0.3, m['teach-send'], 8, '3 · Pass it on', spread([
     '3 · Pass it on: a new hire, a new case for customer_07.',
-    'The draft has only the image. The new hire moves to Send.',
+    'The draft only says “see the attached delivery summary”.',
   ])));
-  scenes.push(clip(m['teach-send'], warnEnd, 12, '3 · Pass it on', spread([
-    'Before Send, Clipa warns, with the expert’s reason.',
-    'She warns. She never clicks for you or blocks another app.',
-  ]), { zoom: [{ fromSec: 1.5, toSec: 99, x: 0.95, y: 0.6, scale: 1.4 }] }));
+  scenes.push(timedClip(m['teach-send'] - 0.5, warnEnd, 14, '3 · Pass it on', [
+    [m['teach-send'] - 0.5, 'The new hire moves to Send. Clipa checks the expert’s confirmed rules.'],
+    ...(has('teach-warn') ? [[m['teach-warn'], warn ? `Before Send, Clipa steps in: “${clean(warn.text, 180)}”` : 'Before Send, Clipa warns.']] : []),
+  ]));
 }
 if (has('teach-fixed')) {
-  scenes.push(clip(m['teach-fixed'] - 5, m['teach-fixed'] + 2, 6, '3 · Pass it on', spread(['The new hire adds the address and time as text.'])));
+  scenes.push(clip(m['teach-fixed'] - 6, m['teach-fixed'] + 2, 7, '3 · Pass it on', spread([
+    'She warns. She never clicks for you or blocks another app.',
+    'The new hire adds the address and time as text.',
+  ])));
 }
 if (has('teach-allow')) {
   scenes.push(clip(m['teach-allow'] - 3, (m['teach-allow-end'] ?? m['teach-allow'] + 20), 9, '3 · Pass it on', spread([
-    'Another customer, the same image-only email: the rule does not apply.',
-    'Clipa stays quiet.',
+    'customer_03, the same image-only email: the expert’s rule is only for customer_07.',
+    'No warning: Clipa stays quiet.',
   ])));
 }
 if (has('off')) {
@@ -129,7 +170,7 @@ if (has('off')) {
 }
 scenes.push({
   type: 'clipa-outro', durationSec: 7, headline: "Clipa. The expert's judgment, passed on.",
-  lines: ['Show. Reflect. Pass it on.'],
+  lines: ['Clipa learns how your best people decide, teaches it to the next person,', 'and turns it into agents that ask before they break your rules.'],
   links: [{ label: 'Demo', url: 'qwadratic.github.io/clipa' }, { label: 'Code', url: 'github.com/qwadratic/clipa' }],
   note: 'Synthetic data; a teammate wrote the expert’s answers. Masks protect the screen, not speech.',
 });
@@ -143,9 +184,9 @@ console.log('quoted live lines:', JSON.stringify({ ask1: clean(ask1?.text), ask2
 // The tech video's three product clips.
 const tech = JSON.parse(readFileSync('scripts/tech.json', 'utf8'));
 const clips = tech.scenes.filter((s) => s.type === 'clip');
-if (clips[0]) clips[0].startFromSec = Number(((m['show-typing'] ?? 14) - 1).toFixed(2));
+if (clips[0]) Object.assign(clips[0], { startFromSec: Number(((m['show-typing'] ?? 14) - 1).toFixed(2)), playbackRate: 1.2 });
 if (clips[1]) clips[1].startFromSec = Number(((m['reflect-map'] ?? m.reflect ?? 90) - 3).toFixed(2));
-if (clips[2]) clips[2].startFromSec = Number(((m['teach-send'] ?? 200) - 2).toFixed(2));
+if (clips[2]) Object.assign(clips[2], { startFromSec: Number(((m['teach-send'] ?? 200) - 2).toFixed(2)), playbackRate: 1.3 });
 writeFileSync('scripts/tech.json', `${JSON.stringify(tech, null, 2)}\n`);
 const techTotal = tech.scenes.reduce((s, x) => s + x.durationSec, 0) - 0.5 * (tech.scenes.length - 1);
 console.log(`tech.json: ${tech.scenes.length} scenes, ${techTotal.toFixed(1)} s`);

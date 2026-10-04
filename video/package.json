@@ -13,6 +13,8 @@
     "typecheck": "tsc --noEmit",
     "record": "tsx recorder/record.ts",
     "record:sample": "tsx recorder/record.ts sample",
+    "record:journey": "tsx recorder/journey.ts",
+    "storyboards": "node capture/build-storyboards.mjs",
     "render": "tsx render.ts",
     "render:sample": "tsx render.ts Sample",
     "render:title": "tsx render.ts TitleCard",

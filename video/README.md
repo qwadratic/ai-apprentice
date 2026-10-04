@@ -67,6 +67,9 @@ Defined in `src/script.ts`. Times are seconds and count from the start of the sc
 - **clipa-intro**: `durationSec`, `greeting`, optional `line`, `footer`.
 - **clipa-outro**: `durationSec`, `headline`, optional `lines`, `links` (`label`, `url`), `note`.
 - **layers**: `durationSec`, `title`, optional `subtitle`, `exampleLabel`, `footer`, `layers` (`name`, `caption`, `example`) and optional `question` (`ask`, `answer`).
+- **architecture**: `durationSec`, `title`, optional `kicker`, `footer`, `groups` (dashed boxes), `nodes` (`x`, `y`, `w`, `h` in pixels, `title`, `sub`, `atSec`, `tone`), `edges` (`from`, `to`, `via`, `label`, `labelAt`, `atSec`, `both`, `tone`) and `captions`. Each part appears at its `atSec`.
+- **facts**: `durationSec`, `title`, optional `kicker`, `items` (`text`, `atSec`), `code` (`title`, `text`, `atSec`: a code panel on the right), `footer`, `captions`, `showClipa`.
+- A **clip** may also have `zoom` (`fromSec`, `toSec`, `x`, `y`, `scale`): it eases into that point of the picture and back out.
 
 Copy rules for what goes on screen: English, short, honest. Say that simulation or synthetic content is synthetic (the sample has an "All data in this video is synthetic" footer and a "synthetic data" badge on the clip). No secrets and no real personal data. Do not claim the checkpoint blocks clicks outside our demo workspace, and say that Off the record does not recall data already sent (see the honesty rules in `CLAUDE.md`).
 
@@ -94,6 +97,20 @@ How it works, and why:
 - The recording uses fake microphone and camera devices (`--use-fake-device-for-media-stream`), so nothing real is captured.
 - The container's HTTPS proxy re-signs traffic with its own CA, so the context uses `ignoreHTTPSErrors`. The proxy is taken from `HTTPS_PROXY` for non-local URLs.
 - **The sample walkthrough clicks "Start Learn", which opens a real session on the backend of the URL it records.** The recording stops two seconds later and the session expires on its own. Use `--url` with a local build, or drop that step, if you do not want that. The recording also shows the product as it is today; record again after the UI changes, then check `sample.json` against the new recording and adjust the captions.
+
+## The submission videos
+
+`scripts/demo.json` and `scripts/tech.json` are the two submission videos (see `docs/pitch/videos.md`):
+
+```sh
+NODE_USE_ENV_PROXY=1 npx tsx recorder/journey.ts   # one take of Show -> Reflect -> Pass it on on the live app and API
+node capture/build-storyboards.mjs                 # scripts/demo.json and the clip times in scripts/tech.json, from the take
+npm run render -- Sample --script scripts/demo.json --out out/clipa-demo.mp4
+npm run render -- Sample --script scripts/tech.json --out out/clipa-tech.mp4
+bash capture/finalize.sh out/clipa-demo.mp4 ../apps/web/public/videos/clipa-demo.mp4
+```
+
+`recorder/journey.ts` simulates only what headless Chrome cannot do: it posts the screen observations the vision step would produce and the spoken answers as transcript text, and it blocks the voice signed-URL request so no voice conversation opens. Everything Clipa says comes from the live API; the take writes it to `assets/recordings/journey.cues.json`. The take opens real sessions and, at the end of Reflect, confirms a synthetic map in the API's memory. `NODE_USE_ENV_PROXY=1` makes Node's fetch use `HTTPS_PROXY`; it is only needed behind a proxy.
 
 ## Browser and downloads
 

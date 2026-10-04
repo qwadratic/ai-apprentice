@@ -312,7 +312,7 @@
       "type": "clip",
       "durationSec": 16,
       "src": "recordings/journey.mp4",
-      "startFromSec": 14,
+      "startFromSec": 11.93,
       "layout": "framed",
       "heading": "The Conductor · live API",
       "badge": "Simulated input: screen events and answers posted as text · synthetic data",
@@ -332,7 +332,8 @@
           "toSec": 15.8,
           "text": "It prepares the question as the screen settles, and asks at the pause."
         }
-      ]
+      ],
+      "playbackRate": 1.2
     },
     {
       "type": "facts",
@@ -366,7 +367,7 @@
       "type": "clip",
       "durationSec": 14,
       "src": "recordings/journey.mp4",
-      "startFromSec": 90,
+      "startFromSec": 89.31,
       "layout": "framed",
       "heading": "Reflect · live API",
       "badge": "Simulated input: answers posted as text · synthetic data",
@@ -387,7 +388,7 @@
       "type": "clip",
       "durationSec": 14,
       "src": "recordings/journey.mp4",
-      "startFromSec": 200,
+      "startFromSec": 193,
       "layout": "framed",
       "heading": "Pass it on · live API",
       "badge": "Simulated input: screen events posted as text · synthetic data",
@@ -402,7 +403,8 @@
           "toSec": 13.8,
           "text": "The tutor warns before the mistake. It never blocks another app."
         }
-      ]
+      ],
+      "playbackRate": 1.3
     },
     {
       "type": "facts",
@@ -415,7 +417,7 @@
           "atSec": 0.4
         },
         {
-          "text": "More than 700 automated tests (web 247, agent 190, API 96, screen 164, contracts 24)",
+          "text": "More than 700 automated tests (web 247, agent 190, API 97, screen 179, contracts 24)",
           "atSec": 2.6
         },
         {
@@ -431,7 +433,7 @@
           "atSec": 9.8
         }
       ],
-      "footer": "Test counts: main, 4 Oct 07:40 UTC"
+      "footer": "Test counts: npm run check on this branch, 4 Oct 08:52 UTC"
     },
     {
       "type": "facts",
@@ -463,10 +465,11 @@
     },
     {
       "type": "clipa-outro",
-      "durationSec": 6,
-      "headline": "Next: a company memory that only asks about what changed",
+      "durationSec": 7,
+      "headline": "Next: a company memory that asks only about what changed",
       "lines": [
-        "Show. Reflect. Pass it on."
+        "Clipa learns how your best people decide, teaches it to the next person,",
+        "and turns it into agents that ask before they break your rules."
       ],
       "links": [
         {

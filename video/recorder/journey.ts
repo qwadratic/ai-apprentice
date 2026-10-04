@@ -68,61 +68,105 @@ const headers = (s: Session, extra: Record<string, string> = {}): Record<string,
   Origin: ORIGIN, Accept: 'application/json', Authorization: `Bearer ${s.token}`, ...extra,
 });
 
-/** Reads the conductor's cue stream of one session (a second web face; the page has its own). */
+/** Reads the conductor's cue stream of one session (a second web face; the page has its own). Reconnects after a drop. */
 const followCues = (s: Session): void => {
   const ac = new AbortController();
   streams.push(ac);
   void (async () => {
-    try {
-      const res = await fetch(`${API}/api/agent/conductor/${s.id}/cues?after=-1&client=web`, { headers: headers(s, { Accept: 'text/event-stream' }), signal: ac.signal });
-      if (res.status !== 200 || !res.body) { log(`cue stream ${short(s.id)} -> ${res.status}`); return; }
-      const reader = res.body.getReader();
-      const dec = new TextDecoder();
-      let buf = '';
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += dec.decode(value, { stream: true });
-        let i: number;
-        while ((i = buf.indexOf('\n\n')) >= 0) {
-          const block = buf.slice(0, i);
-          buf = buf.slice(i + 2);
-          const data = block.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim()).join('\n');
-          if (!data) continue;
-          let env: { seq?: number; mode?: string | null; cue?: Record<string, unknown> };
-          try { env = JSON.parse(data); } catch { continue; }
-          const c = env.cue;
-          if (!c || typeof c.type !== 'string') continue;
-          if (cues.some((r) => r.session === s.id && r.seq === env.seq)) continue;
-          const row: CueRow = { atMs: Date.now(), session: s.id, seq: env.seq ?? -1, mode: env.mode ?? null, type: c.type };
-          if (typeof c.text === 'string' && c.type !== 'open_web') row.text = c.text;
-          if (typeof c.reason === 'string') row.reason = c.reason;
-          if (c.type === 'map') row.extra = { version: c.version, confirmed: c.confirmed, map: c.map };
-          if (c.type === 'warn') row.extra = { guardrailId: c.guardrailId };
-          if (c.type === 'ask') row.extra = { topic: c.topic };
-          cues.push(row);
-          const what = row.text ? `"${row.text.slice(0, 160)}"` : row.reason ? `reason="${row.reason}"` : c.type === 'map' ? `v${String(c.version)} confirmed=${String(c.confirmed)}` : '';
-          if (!['presence', 'state'].includes(c.type)) log(`CUE ${short(s.id)} #${row.seq} ${row.mode ?? '-'} ${c.type} ${what}`);
+    let last = -1;
+    for (let attempt = 0; !ac.signal.aborted; attempt++) {
+      try {
+        const res = await fetch(`${API}/api/agent/conductor/${s.id}/cues?after=${last}&client=web`, { headers: headers(s, { Accept: 'text/event-stream' }), signal: ac.signal });
+        if (res.status !== 200 || !res.body) { log(`cue stream ${short(s.id)} -> ${res.status}`); await sleep(1500); continue; }
+        if (attempt > 0) log(`cue stream ${short(s.id)} reconnected after #${last}`);
+        const reader = res.body.getReader();
+        const dec = new TextDecoder();
+        let buf = '';
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          let i: number;
+          while ((i = buf.indexOf('\n\n')) >= 0) {
+            const block = buf.slice(0, i);
+            buf = buf.slice(i + 2);
+            const data = block.split('\n').filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim()).join('\n');
+            if (!data) continue;
+            let env: { seq?: number; mode?: string | null; cue?: Record<string, unknown> };
+            try { env = JSON.parse(data); } catch { continue; }
+            const c = env.cue;
+            if (typeof env.seq === 'number') last = Math.max(last, env.seq);
+            if (!c || typeof c.type !== 'string') continue;
+            if (cues.some((r) => r.session === s.id && r.seq === env.seq)) continue;
+            const row: CueRow = { atMs: Date.now(), session: s.id, seq: env.seq ?? -1, mode: env.mode ?? null, type: c.type };
+            if (typeof c.text === 'string' && c.type !== 'open_web') row.text = c.text;
+            if (typeof c.reason === 'string') row.reason = c.reason;
+            if (c.type === 'map') row.extra = { version: c.version, confirmed: c.confirmed, map: c.map };
+            if (c.type === 'warn') row.extra = { guardrailId: c.guardrailId };
+            if (c.type === 'ask') row.extra = { topic: c.topic };
+            cues.push(row);
+            const what = row.text ? `"${row.text.slice(0, 160)}"` : row.reason ? `reason="${row.reason}"` : c.type === 'map' ? `v${String(c.version)} confirmed=${String(c.confirmed)}` : '';
+            if (!['presence'].includes(c.type)) log(`CUE ${short(s.id)} #${row.seq} ${row.mode ?? '-'} ${c.type} ${what}`);
+          }
         }
+        log(`cue stream ${short(s.id)} ended`);
+      } catch (error) {
+        if ((error as Error).name === 'AbortError') return;
+        log(`cue stream error ${(error as Error).name}`);
       }
-    } catch (error) {
-      if ((error as Error).name !== 'AbortError') log('cue stream error', (error as Error).name);
+      await sleep(1000);
     }
   })();
 };
 
+/**
+ * Every conductor event POST, the page's and the script's, goes out through this one queue from Node: the seqs are
+ * assigned in sending order (so the server never sees them out of order) and a POST that hangs is retried.
+ */
+let postChain: Promise<unknown> = Promise.resolve();
+type Envelope = { seq: number; atMs: number; event: unknown };
+const sendEvents = (id: string, authorization: string, events: Envelope[]): Promise<{ status: number; headers: Record<string, string>; body: string }> => {
+  const run = postChain.then(async () => {
+    for (const env of events) {
+      const seq = (seqs.get(id) ?? 0) + 1;
+      seqs.set(id, seq);
+      env.seq = seq;
+    }
+    const payload = JSON.stringify({ events });
+    for (let attempt = 1; ; attempt++) {
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), 12_000);
+      try {
+        const res = await fetch(`${API}/api/agent/conductor/${id}/events`, {
+          method: 'POST', signal: ac.signal,
+          headers: { Origin: ORIGIN, Accept: 'application/json', 'Content-Type': 'application/json', Authorization: authorization },
+          body: payload,
+        });
+        const body = await res.text();
+        const headers: Record<string, string> = { 'content-type': res.headers.get('content-type') ?? 'application/json' };
+        for (const name of ['access-control-allow-origin', 'access-control-allow-credentials', 'vary']) {
+          const value = res.headers.get(name);
+          if (value) headers[name] = value;
+        }
+        if (res.status >= 500 && attempt < 4) throw new Error(`HTTP ${res.status}`);
+        return { status: res.status, headers, body };
+      } catch (error) {
+        if (attempt >= 4) return { status: 503, headers: { 'content-type': 'application/json', 'access-control-allow-origin': ORIGIN }, body: '{"ok":false}' };
+        log(`events POST retry ${attempt} (${(error as Error).name})`);
+        await sleep(600 * attempt);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+  });
+  postChain = run.catch(() => undefined);
+  return run;
+};
+
 /** Posts conductor events to a session as the page would, on the shared seq series. */
 const inject = async (s: Session, events: Record<string, unknown>[]): Promise<void> => {
-  const clock = clocks.get(s.id);
-  const atMs = clock ? Math.max(0, Math.round(clock.atMs + (Date.now() - clock.wall))) : 0;
-  const batch = events.map((event) => {
-    const seq = (seqs.get(s.id) ?? 0) + 1;
-    seqs.set(s.id, seq);
-    return { seq, atMs, event };
-  });
-  const res = await fetch(`${API}/api/agent/conductor/${s.id}/events`, {
-    method: 'POST', headers: headers(s, { 'Content-Type': 'application/json' }), body: JSON.stringify({ events: batch }),
-  });
+  const atMs = nowMs(s);
+  const res = await sendEvents(s.id, `Bearer ${s.token}`, events.map((event) => ({ seq: 0, atMs, event })));
   log(`inject ${short(s.id)} [${events.map((e) => String(e.type)).join(', ')}] -> ${res.status}`);
 };
 
@@ -267,20 +311,19 @@ const main = async (): Promise<void> => {
     }
     return route.fallback();
   });
-  // One increasing seq series per session for the page's events and the script's.
-  await context.route(/\/api\/agent\/conductor\/[^/]+\/events(\?.*)?$/, (route) => {
+  // The page's conductor events go out through the script's sender: one increasing seq series per session, in order.
+  await context.route(/\/api\/agent\/conductor\/[^/]+\/events(\?.*)?$/, async (route) => {
     const req = route.request();
     if (req.method() !== 'POST') return route.fallback();
     const id = decodeURIComponent(new URL(req.url()).pathname.split('/')[4] ?? '');
-    let body: { events?: { seq: number; atMs: number }[] };
+    let body: { events?: Envelope[] };
     try { body = JSON.parse(req.postData() ?? ''); } catch { return route.fallback(); }
-    for (const env of body.events ?? []) {
-      const seq = (seqs.get(id) ?? 0) + 1;
-      seqs.set(id, seq);
-      env.seq = seq;
-      clocks.set(id, { atMs: env.atMs, wall: Date.now() });
-    }
-    return route.continue({ postData: JSON.stringify(body) });
+    const events = body.events ?? [];
+    const lastEnv = events[events.length - 1];
+    if (lastEnv) clocks.set(id, { atMs: lastEnv.atMs, wall: Date.now() });
+    const authorization = (await req.allHeaders())['authorization'] ?? '';
+    const res = await sendEvents(id, authorization, events);
+    return route.fulfill({ status: res.status, headers: res.headers, body: res.body }).catch(() => undefined);
   });
 
   const page = await context.newPage();
@@ -315,6 +358,12 @@ const main = async (): Promise<void> => {
       try {
         await page.goto(APP, { waitUntil: 'load', timeout: 30_000 });
         await page.getByRole('button', { name: 'Start Show' }).waitFor({ state: 'visible', timeout: 25_000 });
+        await sleep(1500);
+        // The app's stylesheet has hundreds of rules; a page whose CSS failed to load has next to none.
+        const styled = await page.evaluate(() => [...document.styleSheets].reduce((n, sheet) => {
+          try { return n + sheet.cssRules.length; } catch { return n; }
+        }, 0) > 150);
+        if (!styled) throw new Error('the page loaded without its styles');
         break;
       } catch (error) {
         if (attempt >= 6) throw error;
@@ -335,6 +384,9 @@ const main = async (): Promise<void> => {
     if (!show) throw new Error('Show did not start a session');
     await sleep(3000);
     await dismissBanner(page);
+    const hide = page.getByRole('button', { name: 'Hide' }).first();
+    if (await hide.isVisible().catch(() => false)) await click(page, hide, 'Hide screen panel');
+    await page.evaluate(() => window.scrollTo({ top: 0 }));
     await inject(show, [
       { type: 'share', state: 'capturing', reason: null },
       observation(show,
@@ -358,6 +410,7 @@ const main = async (): Promise<void> => {
         null),
     ]);
     mark('show-change');
+    await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'smooth' }));
     const ask = await waitCue(show, ['ask'], cueIndex, 90_000);
     if (ask) mark('show-ask');
     await sleep(6000);
@@ -378,7 +431,7 @@ const main = async (): Promise<void> => {
     const send = page.getByRole('button', { name: 'Send demo email' }).first();
     await glideTo(page, send);
     mark('show-change2');
-    const ask2 = await waitCue(show, ['ask'], cueIndex2, 45_000);
+    const ask2 = await waitCue(show, ['ask'], cueIndex2, 25_000);
     if (ask2) {
       mark('show-ask2');
       await sleep(5000);
@@ -509,6 +562,12 @@ const main = async (): Promise<void> => {
     mark('teach-allow-end');
 
     // ---- Off the record ------------------------------------------------------------------------------------------
+    // Off the record sits in the header's More menu (a button of its own in older builds).
+    const more = page.locator('summary.as-menu__button').first();
+    if (await more.isVisible().catch(() => false)) {
+      await click(page, more, 'More');
+      await sleep(900);
+    }
     await click(page, page.getByRole('button', { name: 'Off the record' }).first(), 'Off the record');
     mark('off');
     await sleep(5000);
