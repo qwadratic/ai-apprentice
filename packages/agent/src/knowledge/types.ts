@@ -154,7 +154,8 @@ export interface WorkMapData {
   /** When the version was sealed; null for the working draft. */
   sealedAtMs: number | null;
   /** The expert's words that confirmed it. */
-  confirmation: { quote: string | null; atMs: number } | null;
+  /** The expert's words that confirmed it, and the digest of the teach-back they confirmed (see teachBackDigest). */
+  confirmation: { quote: string | null; atMs: number; statedDigest: string } | null;
   steps: MapStepData[];
   guardrails: MapGuardrailData[];
   unknowns: string[];

@@ -105,6 +105,17 @@ const REASONS: ReasonCase[] = [
   { text: "Their mail client can't open images.", expect: "none", veto: true },
   { text: "Not sure, but his firewall blocks attachments.", expect: "none", saidUnknown: true, veto: true },
   { text: "He needs it, actually no, I mean she needs it.", expect: "none", veto: true },
+  // Second-hand, outdated or past reasons are not a rule for today.
+  { text: "His phone blocks pictures, or so I heard.", expect: "none", veto: true },
+  { text: "As far as I know, his phone blocks pictures.", expect: "none", veto: true },
+  { text: "At least his phone blocks pictures.", expect: "none", veto: true },
+  { text: "His phone used to block pictures.", expect: "none", veto: true },
+  { text: "His old phone blocked pictures.", expect: "none", veto: true },
+  { text: "In 2019 his phone blocked pictures.", expect: "none", veto: true },
+  { text: "He now has a new phone that blocks pictures.", expect: "none", veto: true },
+  { text: "I heard his phone blocks pictures.", expect: "none", veto: true },
+  { text: "That was the policy last year.", expect: "none", veto: true },
+  { text: "His previous phone could not show images.", expect: "none", veto: true },
   // Plain, affirmative statements are kept.
   { text: "He asked for it in writing, his phone blocks pictures in our emails.", expect: "reason", mentions: "phone" },
   { text: "It's his phone. It blocks pictures in our emails.", expect: "reason", mentions: "phone" },
@@ -343,9 +354,21 @@ const SCOPES: ScopeCase[] = [
   { text: "Customer twelve and customer three as well.", joins: ["customer_12", "customer_03"] },
   { text: "Customer nine is the same.", joins: ["customer_09"] },
   { text: "Same for customer twelve.", joins: ["customer_12"] },
-  { text: "Every customer gets it.", all: true },
-  { text: "It is for everyone.", all: true },
-  { text: "All customers need it.", all: true },
+  // An answer to the scope question never widens to everyone: the heuristic cannot tell the rule from the default, so the
+  // expert has to say it in a correction of the teach-back, which then states "for every customer" for them to confirm.
+  { text: "Every customer gets it." },
+  { text: "It is for everyone." },
+  { text: "All customers need it." },
+  { text: "Every customer gets the picture." },
+  { text: "Everyone else gets the picture." },
+  { text: "Every other customer still gets the template." },
+  // A customer with a condition or a time qualifier is not an inclusion.
+  { text: "Customer twelve when the order is large." },
+  { text: "Customer nine for big orders." },
+  { text: "Customer three on Fridays." },
+  { text: "Customer nine last year too.", veto: true },
+  { text: "I heard customer nine too.", veto: true },
+  { text: "Customer twelve once, back when they moved.", veto: true },
   // As a correction of the teach-back.
   { text: "Customer twelve is the same.", topic: "correction", joins: ["customer_12"] },
   { text: "Customer twelve too.", topic: "correction", joins: ["customer_12"] },
@@ -417,6 +440,15 @@ const FIELDS: Array<{ text: string; expect: FactKey[] }> = [
   { text: "The address, not the delivery window.", expect: ["deliveryAddress"] },
   { text: "Everything I need for the delivery.", expect: [] },
   { text: "Nothing special.", expect: [] },
+  // A field next to "on the ticket", "he knows", "stays the same" or "of our warehouse" is not required in the email.
+  { text: "The delivery address is on the ticket.", expect: [] },
+  { text: "The address is on the ticket, the order number goes in the email.", expect: ["orderId"] },
+  { text: "He knows the address.", expect: [] },
+  { text: "The delivery window stays the same.", expect: [] },
+  { text: "The address of our warehouse.", expect: [] },
+  { text: "The address of the supplier and the order number.", expect: [] },
+  { text: "The order number, he already has the delivery address.", expect: ["orderId"] },
+  { text: "The delivery address is already in the system.", expect: [] },
 ];
 
 test("fields: a field is required only when its full name or exact synonym is named in a clause that wants it", async () => {
@@ -426,6 +458,31 @@ test("fields: a field is required only when its full name or exact synonym is na
     assert.deepEqual(heuristicExtract({ ...input, topic: "essentials", text }).requiredFacts, [], text);
   }
   assert.deepEqual(heuristicExtract({ ...input, topic: "essentials", text: "The address and the delivery window." }).requiredFacts, ["deliveryAddress", "deliveryWindow"]);
+});
+
+test("fields: required only from the essentials answer or from a correction that adds them to the email", () => {
+  const said = (topic: Parameters<typeof heuristicExtract>[0]["topic"], text: string): FactKey[] => heuristicExtract({ ...input, topic, text }).requiredFacts;
+  // The essentials question: a plain statement of what the email carries.
+  assert.deepEqual(said("essentials", "The delivery address and the delivery window."), ["deliveryAddress", "deliveryWindow"]);
+  // No other question makes a field required, however it is worded.
+  for (const topic of ["reason", "why_stop", "scope", "exception", "guardrail", "duration"] as const) {
+    assert.deepEqual(said(topic, "The delivery address and the delivery window."), [], topic);
+    assert.deepEqual(said(topic, "Put the order number in the email."), [], topic);
+  }
+  // A correction needs an add-to-the-email statement.
+  assert.deepEqual(said("correction", "Put the order number in the email."), ["orderId"]);
+  assert.deepEqual(said("correction", "Please include the order number."), ["orderId"]);
+  assert.deepEqual(said("correction", "The order number goes in as well."), ["orderId"]);
+  for (const text of [
+    "The order number is on the ticket.",
+    "He knows the order number.",
+    "The order number stays the same.",
+    "The order number of our warehouse.",
+    "The order number.",
+    "Also the order number.",
+    "Put the order number on the ticket.",
+    "Put the order number in the email, but he knows it.",
+  ]) assert.deepEqual(said("correction", text), [], text);
 });
 
 // ---------------------------------------------------------------------------

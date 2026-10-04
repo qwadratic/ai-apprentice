@@ -8,6 +8,7 @@ import {
   buildPrediction,
   checkpoint,
   checkpointWithState,
+  confirmationOf,
   evaluatePrediction,
   getPersona,
   latestConfirmed,
@@ -91,7 +92,7 @@ test("T5: confirming a later version makes it the one the tutor applies", async 
   let next = reduceMap(state, { type: "correct", extraction });
   assert.equal(must(latestConfirmed(next)).version, 2, "an unconfirmed correction does not govern yet");
   assert.equal(run("t3", must(latestConfirmed(next))).status, "clear");
-  next = reduceMap(next, { type: "confirm", atMs: 100000, quote: "Yes." });
+  next = reduceMap(next, confirmationOf(next, 100000, "Yes."));
   const latest = must(latestConfirmed(next));
   assert.equal(latest.version, 3);
   assert.equal(run("t3", latest).status, "warn", "customer_03 is covered once the expert widened the scope");
@@ -142,7 +143,7 @@ test("a rule without a reason, and a retracted rule, are unknown", async () => {
     entityRef: "customer_07",
   });
   const conflicted = reduceMap(base, { type: "answer", extraction });
-  const confirmed = reduceMap(conflicted, { type: "confirm", atMs: 91000, quote: "Yes." });
+  const confirmed = reduceMap(conflicted, confirmationOf(conflicted, 91000, "Yes."));
   const map = must(latestConfirmed(confirmed));
   assert.equal(map.guardrails.find((x) => x.id === "g1")?.status, "conflicted");
   const got = run("t1", map);
