@@ -41,20 +41,26 @@ export class ScreenSessionHub {
   readonly #sessions = new Map<string, ScreenSessionHandle>();
   readonly #createService: SessionServiceFactory; readonly #parseStatus: ScreenStatusParser;
   readonly #now: () => number; readonly #maxSessions: number; readonly #maxEvents: number;
+  readonly #abandonedMs: number; readonly #stalePausedMs: number;
+  // A capturing client polls every second, so a capturing session untouched for abandonedMs belongs to a
+  // closed or reloaded tab; a paused one does not poll, so it is reclaimed only after stalePausedMs.
+  // Both are reclaimed only when the hub is full.
   constructor(createService: SessionServiceFactory, parseStatus: ScreenStatusParser,
-    now: () => number = Date.now, maxSessions = 8, maxEvents = 128) {
-    if (!Number.isSafeInteger(maxSessions) || maxSessions < 1 || !Number.isSafeInteger(maxEvents) || maxEvents < 2) {
+    now: () => number = Date.now, maxSessions = 8, maxEvents = 128, abandonedMs = 60_000, stalePausedMs = 600_000) {
+    if (!Number.isSafeInteger(maxSessions) || maxSessions < 1 || !Number.isSafeInteger(maxEvents) || maxEvents < 2 ||
+        !Number.isSafeInteger(abandonedMs) || abandonedMs < 1 || !Number.isSafeInteger(stalePausedMs) || stalePausedMs < 1) {
       throw new TypeError('Invalid session limits');
     }
     this.#createService = createService; this.#parseStatus = parseStatus; this.#now = now;
     this.#maxSessions = maxSessions; this.#maxEvents = maxEvents;
+    this.#abandonedMs = abandonedMs; this.#stalePausedMs = stalePausedMs;
   }
   start(sessionId: string, sessionEpochMs: number, clientGeneration: number): ScreenSessionStartResult {
     if (!sessionId || sessionId.length > 200 || !Number.isSafeInteger(sessionEpochMs) || sessionEpochMs < 0 || clientGeneration !== 1) {
       throw new TypeError('Invalid session start');
     }
     const existing = this.#sessions.get(sessionId); existing?.service.stop();
-    if (!existing && this.#sessions.size >= this.#maxSessions) this.#evictStopped();
+    if (!existing && this.#sessions.size >= this.#maxSessions) this.#evictOne();
     if (!existing && this.#sessions.size >= this.#maxSessions) throw new SessionTransportError('session_limit');
     const generation = 1; const sessionToken = randomBytes(32).toString('base64url');
     let record: ScreenSessionHandle;
@@ -128,9 +134,15 @@ export class ScreenSessionHub {
     if (generation !== record.generation) throw new SessionTransportError('generation_mismatch',
       {generation: record.generation, nextCursor: record.cursor});
   }
-  #evictStopped(): void {
-    const stopped = [...this.#sessions.values()].filter(record => record.state === 'stopped').sort((a, b) => a.touchedAt - b.touchedAt)[0];
-    if (stopped) this.#sessions.delete(stopped.sessionId);
+  #evictOne(): void {
+    const now = this.#now();
+    const byAge = [...this.#sessions.values()].sort((a, b) => a.touchedAt - b.touchedAt);
+    const victim = byAge.find(record => record.state === 'stopped') ??
+      byAge.find(record => record.state !== 'paused' && now - record.touchedAt >= this.#abandonedMs) ??
+      byAge.find(record => record.state === 'paused' && now - record.touchedAt >= this.#stalePausedMs);
+    if (!victim) return;
+    if (victim.state !== 'stopped') victim.service.stop();
+    this.#sessions.delete(victim.sessionId);
   }
 }
 function tokenHash(token: string): Buffer { return createHash('sha256').update(token).digest(); }

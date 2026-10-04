@@ -188,6 +188,29 @@ test('bounded updates report cursor expiry instead of silently skipping observat
   assert.throws(() => hub.updates(session, 1, 0), {code: 'cursor_expired'});
 });
 
+test('a full hub reclaims abandoned capturing sessions and stale paused ones, never live ones', () => {
+  let now = 100_000; const stopped: string[] = [];
+  const hub = new ScreenSessionHub(({sessionId}) => ({start() {}, pause() {}, resume() {}, stop() { stopped.push(sessionId); },
+    snapshot: () => ({state: 'capturing', sessionId, generation: 1, active: 0, queued: 0, sequence: 0}),
+    offer: () => 'accepted', evidence: createMemoryEvidenceStore()}), parseStatus, () => now, 2, 8, 60_000, 600_000);
+  const a = hub.start('a', now, 1); const b = hub.start('b', now, 1);
+  now += 30_000; hub.authenticate('b', b.sessionToken);
+  assert.throws(() => hub.start('c', now, 1), {code: 'session_limit'});
+  now += 31_000; // a is 61 s idle and capturing: a closed tab; b polled 31 s ago
+  const c0 = hub.start('c', now, 1);
+  assert.deepEqual(stopped, ['a']);
+  assert.throws(() => hub.authenticate('a', a.sessionToken), {code: 'session_not_found'});
+  const c = hub.authenticate('c', c0.sessionToken);
+  hub.lifecycle(c, c.generation, 'pause');
+  now += 120_000; hub.authenticate('b', b.sessionToken); // b keeps polling; c is paused, 2 min idle
+  assert.throws(() => hub.start('d', now, 1), {code: 'session_limit'});
+  now += 600_000; hub.authenticate('b', b.sessionToken);
+  hub.start('d', now, 1);
+  assert.deepEqual(stopped, ['a', 'c']);
+  assert.throws(() => hub.authenticate('c', c0.sessionToken), {code: 'session_not_found'});
+  assert.equal(hub.authenticate('b', b.sessionToken).state, 'capturing');
+});
+
 test('mount exposes start, frame, poll, lifecycle and scoped Evidence routes', () => {
   const routes: string[] = []; const runner: VisionRunner = {async vision() { throw new Error('unused'); }};
   mount({}, {register: (_app, route) => routes.push(`${route.method} ${route.path}`), hub: makeHub(runner), allowOrigin: () => true});
