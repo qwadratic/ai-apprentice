@@ -1,9 +1,11 @@
 ---
 id: TASK-3.54
 title: 'Demo options to choose from: 2-3 ready scenarios with scripts in two languages'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@qwadratic'
 created_date: '2026-10-04 06:07'
+updated_date: '2026-10-04 06:42'
 labels:
   - stream-b
 dependencies: []

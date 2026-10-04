@@ -3,9 +3,9 @@ id: TASK-3.52
 title: 'Generic vision: screen_activity observations with regions for any app'
 status: In Progress
 assignee:
-  - '@kigulx'
+  - '@qwadratic'
 created_date: '2026-10-04 06:01'
-updated_date: '2026-10-04 06:44'
+updated_date: '2026-10-04 07:00'
 labels:
   - stream-b
 dependencies: []
@@ -22,9 +22,9 @@ Ivan's demo runs on any app (an email, a table), on the web and on macOS. The vi
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The vision schema and parser accept screen_activity; contracts know the kind
+- [x] #1 The vision schema and parser accept screen_activity; contracts know the kind
 - [ ] #2 An unknown app is described instead of incomplete; existing kinds are unchanged
-- [ ] #3 Tests cover the parse and the conductor receives it
+- [x] #3 Tests cover the parse and the conductor receives it
 <!-- AC:END -->
 
 ## Definition of Done
@@ -37,7 +37,7 @@ Ivan's demo runs on any app (an email, a table), on the web and on macOS. The vi
 ## Implementation Plan
 
 <!-- SECTION:PLAN:BEGIN -->
-1. Add the already agreed screen_activity facts and validation without changing legacy observation kinds. 2. Extend the masked-frame vision schema, prompt and parser with generic regions and visible-only descriptions. 3. Verify service delivery into conductor parsing and question context, including malformed output and privacy lifecycle regressions. 4. Run focused tests and typecheck, document limits, and prepare a dedicated PR after independent review.
+1. Add the agreed screen_activity contract without changing legacy kinds. 2. Extend masked-frame vision schema, prompt and parser with visible facts and normalized regions. 3. Verify service delivery, conductor question context, evidence and legacy compatibility. 4. Run focused tests and complete checks, obtain independent review and publish the dedicated PR.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -46,4 +46,6 @@ Ivan's demo runs on any app (an email, a table), on the web and on macOS. The vi
 4 Oct 06:30 UTC: not started. The contract is in the Hive integration thread and TASK-3.41 notes; the conductor already parses screen_activity (apps/api/agent/conductor/protocol.ts).
 
 Kirill explicitly assigned TASK-3.52 to a new Codex orchestrator in the status chat on 4 Oct. Stream A resumes its vision/contracts implementation; preserve the existing additive screen_activity proposal and coordinate with B rather than duplicating TASK-3.53. Use an isolated worktree. Slack is forbidden.
+
+User explicitly approved completing the A implementation and the two narrow B compatibility fixes after remote main concurrently reassigned the task. Preserved remote assignee metadata while preparing this PR. Local verification before integrating TASK-3.53: npm run check passed (667 passed, 3 browser checks skipped); separate keyframe/board suite 21 passed. Independent review approved after adding provider-facing coordinate semantics. Live Google/provider accuracy remains unverified.
 <!-- SECTION:NOTES:END -->

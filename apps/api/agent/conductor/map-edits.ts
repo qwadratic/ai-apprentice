@@ -51,14 +51,17 @@ export function applyEdits(map: ConductorMap, ops: readonly EditOperation[], utt
         if (!op.value) break;
         const id = nextId('s', next.steps.map((s) => s.id));
         const at = op.targetId ? next.steps.findIndex((s) => s.id === op.targetId) + 1 : next.steps.length;
-        next.steps.splice(at > 0 ? at : next.steps.length, 0, { id, kind: 'action', goal: op.value2 ?? op.value, action: op.value, decision: null, evidenceIds: [] });
+        const neighbour = op.targetId ? next.steps.find((s) => s.id === op.targetId) : next.steps[next.steps.length - 1];
+        next.steps.splice(at > 0 ? at : next.steps.length, 0, { id, processId: neighbour?.processId ?? null, kind: 'action', goal: op.value2 ?? op.value, action: op.value, decision: null, evidenceIds: [] });
         applied++;
         break;
       }
       case 'add_rule': {
         if (!op.value || !op.value2) break;
         const id = nextId('g', next.guardrails.map((g) => g.id));
-        next.guardrails.push({ id, condition: op.value, requiredAction: op.value2, reason: null, quote: words(op.quote), quoteAtMs: atMs, escalateTo: null, exceptions: [], evidenceIds: [] });
+        // A rule added by voice belongs to the only process when there is one; with several, the library keeps it with the first.
+        const only = next.processes?.length === 1 ? next.processes[0] : undefined;
+        next.guardrails.push({ id, processId: only?.id ?? null, condition: op.value, requiredAction: op.value2, reason: null, quote: words(op.quote), quoteAtMs: atMs, escalateTo: null, exceptions: [], evidenceIds: [] });
         applied++;
         break;
       }

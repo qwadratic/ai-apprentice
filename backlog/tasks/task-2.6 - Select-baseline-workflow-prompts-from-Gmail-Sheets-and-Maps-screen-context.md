@@ -1,10 +1,11 @@
 ---
 id: TASK-2.6
 title: 'Select baseline workflow prompts from Gmail, Sheets and Maps screen context'
-status: To Do
+status: In Progress
 assignee:
   - '@kigulx'
 created_date: '2026-10-04 06:39'
+updated_date: '2026-10-04 06:54'
 labels:
   - stream-a
   - shared
@@ -50,3 +51,15 @@ Use only available screen evidence or already authorised metadata. Never require
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Implement an independent screen-owned baseline profile module for the three requested workflows, keeping app identity separate from workflow and learned process identity. 2. Require stable observed app identity, suspend context immediately for unknown or ambiguous frames, and test switching and scope isolation. 3. Agree the B-owned integration seam with TASK-3.53 before connecting question and Review context; retain profile/evidence identity without promoting baseline guidance to expert knowledge. 4. Verify focused tests and typecheck, document real Google rehearsal and current in-memory storage limits, and deliver a separate PR.
+<!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Started the independent profile module while TASK-3.52 integration is pending; the baseline live integration depends on generic observations and B seam agreement.
+<!-- SECTION:NOTES:END -->
