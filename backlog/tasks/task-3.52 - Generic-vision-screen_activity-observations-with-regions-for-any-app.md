@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@kigulx'
 created_date: '2026-10-04 06:01'
-updated_date: '2026-10-04 06:39'
+updated_date: '2026-10-04 06:44'
 labels:
   - stream-b
 dependencies: []
@@ -33,6 +33,12 @@ Ivan's demo runs on any app (an email, a table), on the web and on macOS. The vi
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. Add the already agreed screen_activity facts and validation without changing legacy observation kinds. 2. Extend the masked-frame vision schema, prompt and parser with generic regions and visible-only descriptions. 3. Verify service delivery into conductor parsing and question context, including malformed output and privacy lifecycle regressions. 4. Run focused tests and typecheck, document limits, and prepare a dedicated PR after independent review.
+<!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
 

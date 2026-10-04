@@ -60,7 +60,29 @@ export interface InputActivityFacts {
   idleMs: number;
 }
 
-export const OBSERVATION_KINDS = ["order_view", "email_draft", "ticket", "input_activity"] as const;
+export type ScreenActivityBox = [x: number, y: number, width: number, height: number];
+
+export interface ScreenActivityRegion {
+  id: string;
+  label: string;
+  /** Coordinates normalised to the processed frame. */
+  box: ScreenActivityBox;
+}
+
+/** Generic facts read from any visible app or screen. */
+export interface ScreenActivityFacts {
+  app: string | null;
+  surface: string;
+  summary: string;
+  change: string | null;
+  /** Visible entities as readable labels; these are not identity references. */
+  entities: string[];
+  pendingAction: string | null;
+  pendingRegionId: string | null;
+  regions: ScreenActivityRegion[];
+}
+
+export const OBSERVATION_KINDS = ["order_view", "email_draft", "ticket", "input_activity", "screen_activity"] as const;
 export type ObservationKind = (typeof OBSERVATION_KINDS)[number];
 
 // ---------------------------------------------------------------------------
@@ -88,7 +110,8 @@ export type ScreenObservation =
   | (ObservationBase & { kind: "order_view"; facts: OrderFacts })
   | (ObservationBase & { kind: "email_draft"; facts: EmailDraftFacts })
   | (ObservationBase & { kind: "ticket"; facts: TicketFacts })
-  | (ObservationBase & { kind: "input_activity"; facts: InputActivityFacts });
+  | (ObservationBase & { kind: "input_activity"; facts: InputActivityFacts })
+  | (ObservationBase & { kind: "screen_activity"; facts: ScreenActivityFacts });
 
 export const SCREEN_STATES = ["capturing", "paused", "stopped", "error"] as const;
 export type ScreenState = (typeof SCREEN_STATES)[number];

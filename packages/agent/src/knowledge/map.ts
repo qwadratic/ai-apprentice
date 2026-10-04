@@ -164,7 +164,7 @@ function addStep(
 }
 
 function reduceObservation(d: DraftData, obs: ScreenObservation): void {
-  if (obs.kind === "input_activity") return;
+  if (obs.kind === "input_activity" || obs.kind === "screen_activity") return;
   if (obs.kind === "order_view") {
     const f = obs.facts;
     const same = d.order !== null && d.order.orderId === f.orderId && d.order.customerRef === f.customerRef;

@@ -190,3 +190,44 @@ p95. This package has not repeated a real provider call. Real runner accuracy an
 latency, browser masking equivalence, SQLite persistence, retention and host
 framework wiring remain integration checks and must be reported separately from
 the mock suite.
+
+## Generic screens (TASK-3.52)
+
+For an arbitrary shared app, vision returns `screen_activity` with
+`{app, surface, summary, change, entities, pendingAction, pendingRegionId, regions}`.
+An unrecognised app has `app: null`; readable content still produces an observation.
+An unreadable frame remains incomplete. The existing order, email and ticket
+kinds remain available for the corresponding explicitly targeted workspace surfaces.
+
+Regions are at most eight `{id, label, box: [x, y, width, height]}` entries in
+normalised coordinates of the processed frame. A pending region must name an
+emitted region. The app, summary and region text use the conductor's size limits.
+The model receives one processed frame, so `change` remains null unless there is
+visible evidence of a change; the conductor also detects changed summaries.
+Only visible app branding or other visible identifiers may identify an app;
+there is no DOM access to a different tab and masked content must not be inferred.
+
+Generic observations always have null `entityRef` and `sourceRevision`. Their
+visible entities are descriptive strings, not established customer identities.
+They cannot authorise the demo workspace's Send checkpoint. The screen hub sends
+them through the existing server observation subscription to the conductor,
+which prepares questions at pauses and resolves region/evidence cues. Its current
+projection uses app, surface, summary, change, pendingAction and regions;
+`entities` and `pendingRegionId` remain in canonical observations but are not
+separate question-input fields. The model should include question-relevant
+visible facts in the summary and label each relevant region.
+
+Run `node --test apps/api/screen/screen-activity.test.ts` after building contracts
+for the processed-frame-to-question integration checks. Provider responses and
+processed test images are synthetic; this does not certify live vision accuracy.
+For a manual rehearsal, share a real Gmail, Sheets or Maps window with the normal
+masking controls, perform visible work, and pause. Inspect the observation's app,
+summary, evidence and region cue. Try an unrecognised readable app, then a masked
+or unreadable frame; check that off-record stops observation delivery. This task
+adds generic observation support only; baseline workflow selection is TASK-2.6.
+Do not claim to block Gmail Send or Google Sheets autosave.
+
+Confirmed Work Maps currently live in the API process's `MapRegistry`; they do
+not survive an API restart. The existing `mapFrom: null` lookup may choose the
+latest confirmed map. This change does not add durable knowledge storage or
+complete the stage conversation persistence tracked by TASK-3.48.

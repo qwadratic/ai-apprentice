@@ -1,4 +1,4 @@
-import type { ActionCheckpoint, CheckpointReply, ScreenEvidence, ScreenObservation, ScreenStatus, SessionStart } from './types.ts';
+import type { ActionCheckpoint, CheckpointReply, ScreenActivityFacts, ScreenEvidence, ScreenObservation, ScreenStatus, SessionStart } from './types.ts';
 export class ContractValidationError extends Error {
   constructor(message: string) { super(message); this.name = 'ContractValidationError'; }
 }
@@ -15,6 +15,13 @@ function string(value: unknown, path: string, nonempty = false): void {
   if (typeof value !== 'string' || (nonempty && !value.trim())) fail(path);
 }
 function nullableString(value: unknown, path: string): void { if (value !== null) string(value, path, true); }
+function boundedString(value: unknown, path: string, max: number): void {
+  string(value, path, true);
+  if ((value as string).length > max) fail(path);
+}
+function nullableBoundedString(value: unknown, path: string, max: number): void {
+  if (value !== null) boundedString(value, path, max);
+}
 function integer(value: unknown, path: string, min = 0): void {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < min) fail(path);
 }
@@ -28,6 +35,36 @@ function version(value: Record<string, unknown>): void { choice(value.schemaVers
 function revisions(value: unknown, path: string): void {
   const v = record(value, path); keys(v, ['order', 'email']);
   string(v.order, `${path}.order`, true); string(v.email, `${path}.email`, true);
+}
+const REGION_ID = /^[A-Za-z0-9._:-]{1,32}$/;
+
+/** Parse the generic vision facts shared by the vision service and ScreenBridge. */
+export function parseScreenActivityFacts(value: unknown): ScreenActivityFacts {
+  const f = record(value, 'screen_activity facts');
+  keys(f, ['app', 'surface', 'summary', 'change', 'entities', 'pendingAction', 'pendingRegionId', 'regions']);
+  nullableBoundedString(f.app, 'app', 80);
+  boundedString(f.surface, 'surface', 120);
+  boundedString(f.summary, 'summary', 400);
+  nullableBoundedString(f.change, 'change', 300);
+  nullableBoundedString(f.pendingAction, 'pendingAction', 80);
+  if (!Array.isArray(f.entities)) fail('entities');
+  f.entities.forEach((entity) => string(entity, 'entities', true));
+  if (new Set(f.entities).size !== f.entities.length) fail('entities duplicates');
+  if (!Array.isArray(f.regions) || f.regions.length > 8) fail('regions');
+  const regionIds = new Set<string>();
+  for (const region of f.regions) {
+    const r = record(region, 'region');
+    keys(r, ['id', 'label', 'box']);
+    if (typeof r.id !== 'string' || !REGION_ID.test(r.id)) fail('region.id');
+    if (regionIds.has(r.id)) fail('region.id duplicates');
+    regionIds.add(r.id);
+    boundedString(r.label, 'region.label', 120);
+    if (!Array.isArray(r.box) || r.box.length !== 4 || !r.box.every((n) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1)) fail('region.box');
+    const [x, y, width, height] = r.box as number[];
+    if (x! + width! > 1.0001 || y! + height! > 1.0001) fail('region.box');
+  }
+  if (f.pendingRegionId !== null && (typeof f.pendingRegionId !== 'string' || !REGION_ID.test(f.pendingRegionId) || !regionIds.has(f.pendingRegionId))) fail('pendingRegionId');
+  return structuredClone(f) as unknown as ScreenActivityFacts;
 }
 export function parseSessionStart(value: unknown): SessionStart {
   const v = record(value, 'session'); keys(v, ['sessionId', 'sessionEpochMs']);
@@ -71,6 +108,10 @@ export function parseScreenObservation(value: unknown): ScreenObservation {
       if (typeof f.typing !== 'boolean') fail('typing'); integer(f.idleMs, 'idleMs'); integer(f.lastInputAtMs, 'lastInputAtMs');
       if (f.idleMs !== (v.timestampMs as number) - (f.lastInputAtMs as number)) fail('idleMs/lastInputAtMs mismatch');
       if (v.source !== 'workspace' || v.frameId !== null || v.sourceRevision !== null || v.entityRef !== null || (v.evidenceIds as string[]).length) fail('input_activity workspace provenance');
+      break;
+    case 'screen_activity':
+      parseScreenActivityFacts(f);
+      if (v.entityRef !== null || v.sourceRevision !== null) fail('screen_activity generic provenance');
       break;
     default: fail('kind');
   }
