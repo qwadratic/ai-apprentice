@@ -102,6 +102,7 @@ export const CaptionedClip: React.FC<CaptionedClipScript> = ({
   badge,
   captions,
   highlights = [],
+  zoom = [],
 }) => {
   const frame = useCurrentFrame();
   const { fps, width, height } = useVideoConfig();
@@ -114,6 +115,17 @@ export const CaptionedClip: React.FC<CaptionedClipScript> = ({
 
   const t = frame / fps;
   const active = captions.find((c) => t >= c.fromSec && t < c.toSec);
+  // The zoom: the active window's scale and origin, eased in and out over 0.6 s.
+  const z = zoom.find((w) => t >= w.fromSec - 0.6 && t < w.toSec + 0.6);
+  const zoomIn = z
+    ? Math.min(
+        interpolate(t, [z.fromSec - 0.6, z.fromSec], [0, 1], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }),
+        interpolate(t, [z.toSec, z.toSec + 0.6], [1, 0], { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }),
+      )
+    : 0;
+  const ease = zoomIn < 0.5 ? 2 * zoomIn * zoomIn : 1 - Math.pow(-2 * zoomIn + 2, 2) / 2;
+  const scale = z ? 1 + (z.scale - 1) * ease : 1;
+  const origin = z ? `${z.x * 100}% ${z.y * 100}%` : '50% 50%';
   const captionOpacity = active ? fadeWindow(frame, active.fromSec * fps, active.toSec * fps, 6) : 0;
 
   return (
@@ -131,17 +143,19 @@ export const CaptionedClip: React.FC<CaptionedClipScript> = ({
           boxShadow: full ? undefined : '0 30px 80px rgba(0,0,0,0.5), 0 0 0 2px #ffffff22',
         }}
       >
-        <OffthreadVideo
-          src={isUrl(src) ? src : staticFile(src)}
-          trimBefore={Math.round(startFromSec * fps)}
-          playbackRate={playbackRate}
-          muted
-          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-        />
-        <div style={{ position: 'absolute', inset: 0 }}>
-          {highlights.map((h, i) => (
-            <Highlight key={i} h={h} />
-          ))}
+        <div style={{ position: 'absolute', inset: 0, transform: `scale(${scale})`, transformOrigin: origin }}>
+          <OffthreadVideo
+            src={isUrl(src) ? src : staticFile(src)}
+            trimBefore={Math.round(startFromSec * fps)}
+            playbackRate={playbackRate}
+            muted
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          />
+          <div style={{ position: 'absolute', inset: 0 }}>
+            {highlights.map((h, i) => (
+              <Highlight key={i} h={h} />
+            ))}
+          </div>
         </div>
       </div>
 

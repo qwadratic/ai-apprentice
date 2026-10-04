@@ -46,6 +46,8 @@ type Walkthrough = {
   url?: string;
   viewport?: { width: number; height: number };
   permissions?: string[];
+  /** URL substrings whose requests are aborted, e.g. the voice signed-URL endpoint so no voice conversation opens. */
+  block?: string[];
   steps: Step[];
 };
 
@@ -226,8 +228,13 @@ const main = async (): Promise<void> => {
     permissions: walkthrough.permissions ?? [],
   });
   await context.addInitScript(CURSOR_SCRIPT);
-  if (cache.size > 0) {
+  const blocked = walkthrough.block ?? [];
+  if (cache.size > 0 || blocked.length > 0) {
     await context.route('**/*', (route) => {
+      if (blocked.some((part) => route.request().url().includes(part))) {
+        console.log(`  blocked ${route.request().method()} ${new URL(route.request().url()).pathname}`);
+        return route.abort('blockedbyclient');
+      }
       // The page itself always comes from the network (it is small); scripts, styles, fonts and images are replayed.
       const replay = route.request().method() === 'GET' && route.request().resourceType() !== 'document';
       const hit = replay ? cache.get(route.request().url()) : undefined;

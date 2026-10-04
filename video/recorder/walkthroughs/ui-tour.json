@@ -1,0 +1,18 @@
+{
+  "description": "A tour of the live web app without a session: the rail Show, Reflect and Pass it on, the options with the synthetic sample switch, Off the record and the debug drawer. Nothing is started on the backend.",
+  "url": "https://qwadratic.github.io/clipa/",
+  "permissions": ["microphone"],
+  "block": ["/api/agent/elevenlabs/", "elevenlabs.io"],
+  "steps": [
+    { "do": "goto", "ready": { "role": "button", "name": "Start Show" }, "wait": 2500, "marker": "open" },
+    { "do": "hover", "role": "tab", "name": "Show", "wait": 1500, "marker": "rail" },
+    { "do": "click", "role": "tab", "name": "Reflect", "wait": 3500, "marker": "reflect" },
+    { "do": "click", "role": "tab", "name": "Pass it on", "wait": 3500, "marker": "passiton" },
+    { "do": "click", "role": "tab", "name": "Show", "wait": 1500, "marker": "show" },
+    { "do": "click", "text": "Options and limits", "wait": 2500, "marker": "options" },
+    { "do": "click", "role": "button", "name": "Off the record", "wait": 3000, "marker": "off" },
+    { "do": "click", "role": "button", "name": "Back on record", "wait": 2000, "marker": "back", "optional": true },
+    { "do": "click", "role": "button", "name": "Debug", "wait": 3000, "marker": "debug" },
+    { "do": "click", "role": "button", "name": "Debug", "wait": 1000, "marker": "end" }
+  ]
+}

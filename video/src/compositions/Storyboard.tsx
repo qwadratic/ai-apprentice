@@ -4,7 +4,9 @@ import { fade } from '@remotion/transitions/fade';
 import { useVideoConfig } from 'remotion';
 import type { SceneScript, StoryboardScript } from '../script';
 import { secondsToFrames } from '../theme';
+import { Architecture } from './Architecture';
 import { CaptionedClip } from './CaptionedClip';
+import { Facts } from './Facts';
 import { ClipaIntro } from './ClipaIntro';
 import { ClipaOutro } from './ClipaOutro';
 import { LayersDiagram } from './LayersDiagram';
@@ -22,6 +24,10 @@ const Scene: React.FC<{ scene: SceneScript }> = ({ scene }) => {
       return <ClipaOutro {...scene} />;
     case 'layers':
       return <LayersDiagram {...scene} />;
+    case 'architecture':
+      return <Architecture {...scene} />;
+    case 'facts':
+      return <Facts {...scene} />;
   }
 };
 

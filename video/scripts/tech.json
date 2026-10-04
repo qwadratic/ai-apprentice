@@ -1,0 +1,484 @@
+{
+  "transitionSec": 0.5,
+  "scenes": [
+    {
+      "type": "title",
+      "durationSec": 5,
+      "kicker": "Technical walkthrough",
+      "title": "How Clipa is built",
+      "subtitle": "Screen and voice in, a confirmed Work Map out, then coaching",
+      "footer": "Hack-Nation 7 · Challenge 01 · All data in this video is synthetic",
+      "showClipa": true
+    },
+    {
+      "type": "architecture",
+      "durationSec": 24,
+      "kicker": "Architecture",
+      "title": "Two faces, one server, one voice",
+      "groups": [
+        {
+          "x": 40,
+          "y": 210,
+          "w": 370,
+          "h": 530,
+          "label": "Faces",
+          "atSec": 0.3
+        },
+        {
+          "x": 560,
+          "y": 210,
+          "w": 1320,
+          "h": 530,
+          "label": "exe.dev VM",
+          "atSec": 2.5
+        }
+      ],
+      "nodes": [
+        {
+          "x": 60,
+          "y": 250,
+          "w": 330,
+          "h": 180,
+          "title": "Web app",
+          "sub": "React + Vite on GitHub Pages · getDisplayMedia · masks in the browser",
+          "atSec": 0.6
+        },
+        {
+          "x": 60,
+          "y": 530,
+          "w": 330,
+          "h": 180,
+          "title": "macOS app",
+          "sub": "Swift menu bar + overlay · ScreenCaptureKit, changed frames only",
+          "atSec": 1.4
+        },
+        {
+          "x": 600,
+          "y": 250,
+          "w": 300,
+          "h": 180,
+          "title": "API",
+          "sub": "Node 22 + TypeScript · screen, agent, recording, ops",
+          "atSec": 3
+        },
+        {
+          "x": 1010,
+          "y": 250,
+          "w": 310,
+          "h": 180,
+          "title": "Vision queue",
+          "sub": "one job per surface, latest wins",
+          "atSec": 6.5
+        },
+        {
+          "x": 1010,
+          "y": 530,
+          "w": 310,
+          "h": 180,
+          "title": "Model runner",
+          "sub": "Claude Agent SDK or Codex CLI",
+          "atSec": 7.5
+        },
+        {
+          "x": 1430,
+          "y": 250,
+          "w": 420,
+          "h": 180,
+          "title": "Clipa Conductor",
+          "sub": "events in, cues out (SSE)",
+          "atSec": 12.5,
+          "tone": "teal"
+        },
+        {
+          "x": 1430,
+          "y": 530,
+          "w": 420,
+          "h": 180,
+          "title": "LLM tasks",
+          "sub": "question · map · map edit · teach-back · guardrail check · process match",
+          "atSec": 13.5
+        },
+        {
+          "x": 60,
+          "y": 800,
+          "w": 330,
+          "h": 130,
+          "title": "ElevenLabs Agents",
+          "sub": "interviewer and tutor voice",
+          "atSec": 18.5,
+          "tone": "amber"
+        }
+      ],
+      "edges": [
+        {
+          "from": [
+            390,
+            340
+          ],
+          "to": [
+            600,
+            340
+          ],
+          "label": "masked frames",
+          "labelAt": [
+            495,
+            300
+          ],
+          "atSec": 4
+        },
+        {
+          "from": [
+            390,
+            600
+          ],
+          "to": [
+            600,
+            410
+          ],
+          "atSec": 4.6
+        },
+        {
+          "from": [
+            900,
+            340
+          ],
+          "to": [
+            1010,
+            340
+          ],
+          "atSec": 6.8
+        },
+        {
+          "from": [
+            1165,
+            430
+          ],
+          "to": [
+            1165,
+            530
+          ],
+          "label": "vision",
+          "labelAt": [
+            1105,
+            480
+          ],
+          "atSec": 8
+        },
+        {
+          "from": [
+            1320,
+            340
+          ],
+          "to": [
+            1430,
+            340
+          ],
+          "label": "typed observations",
+          "labelAt": [
+            1395,
+            480
+          ],
+          "atSec": 9.5
+        },
+        {
+          "from": [
+            1640,
+            430
+          ],
+          "to": [
+            1640,
+            530
+          ],
+          "both": true,
+          "atSec": 14
+        },
+        {
+          "from": [
+            1430,
+            620
+          ],
+          "to": [
+            1320,
+            620
+          ],
+          "atSec": 14.5
+        },
+        {
+          "from": [
+            1640,
+            250
+          ],
+          "via": [
+            [
+              1640,
+              150
+            ],
+            [
+              225,
+              150
+            ]
+          ],
+          "to": [
+            225,
+            250
+          ],
+          "label": "cues over SSE: ask · point · warn · map",
+          "labelAt": [
+            940,
+            150
+          ],
+          "atSec": 15.5,
+          "tone": "teal"
+        },
+        {
+          "from": [
+            225,
+            710
+          ],
+          "to": [
+            225,
+            800
+          ],
+          "both": true,
+          "label": "voice",
+          "labelAt": [
+            305,
+            755
+          ],
+          "atSec": 19,
+          "tone": "amber"
+        }
+      ],
+      "captions": [
+        {
+          "fromSec": 0.5,
+          "toSec": 6,
+          "text": "Two faces, the web app and a macOS app, and one server on a VM."
+        },
+        {
+          "fromSec": 6.2,
+          "toSec": 12.2,
+          "text": "Every changed frame becomes one typed observation."
+        },
+        {
+          "fromSec": 12.4,
+          "toSec": 18.2,
+          "text": "The Conductor decides when Clipa speaks and streams cues back."
+        },
+        {
+          "fromSec": 18.4,
+          "toSec": 23.8,
+          "text": "Voice: ElevenLabs Agents. The key stays on the server."
+        }
+      ]
+    },
+    {
+      "type": "facts",
+      "durationSec": 16,
+      "kicker": "ScreenBridge v1",
+      "title": "One contract for any app",
+      "items": [
+        {
+          "text": "Frames are masked in the browser before they leave it",
+          "atSec": 0.5
+        },
+        {
+          "text": "Each changed frame becomes one typed observation",
+          "atSec": 3
+        },
+        {
+          "text": "Kinds: order_view, email_draft, ticket, and a generic screen_activity",
+          "atSec": 5.5
+        },
+        {
+          "text": "Region boxes [x, y, w, h], normalised 0..1, so Clipa can point",
+          "atSec": 8
+        }
+      ],
+      "code": {
+        "title": "screen_activity · as the conductor saw it in our run (synthetic)",
+        "atSec": 1.5,
+        "text": "{\n  \"kind\": \"screen_activity\",\n  \"facts\": {\n    \"app\": \"Demo workspace\",\n    \"surface\": \"Order → email → ticket\",\n    \"summary\": \"The draft to customer_07 has the\n      delivery address and time in the text\n      and the delivery image attached.\",\n    \"change\": \"Address and time copied from\n      the order into the email text.\",\n    \"pendingAction\": \"Send demo email\",\n    \"regions\": [{ \"label\": \"Message\",\n                  \"box\": [0.31, 0.52, 0.42, 0.18] }]\n  }\n}"
+      },
+      "captions": [
+        {
+          "fromSec": 11,
+          "toSec": 15.8,
+          "text": "Masks protect the screen, not speech."
+        }
+      ]
+    },
+    {
+      "type": "clip",
+      "durationSec": 16,
+      "src": "recordings/journey.mp4",
+      "startFromSec": 14,
+      "layout": "framed",
+      "heading": "The Conductor · live API",
+      "badge": "Simulated input: screen events and answers posted as text · synthetic data",
+      "captions": [
+        {
+          "fromSec": 0.3,
+          "toSec": 5,
+          "text": "One server loop decides when Clipa speaks, for web and Mac alike."
+        },
+        {
+          "fromSec": 5.2,
+          "toSec": 10.4,
+          "text": "It never speaks while you type or talk."
+        },
+        {
+          "fromSec": 10.6,
+          "toSec": 15.8,
+          "text": "It prepares the question as the screen settles, and asks at the pause."
+        }
+      ]
+    },
+    {
+      "type": "facts",
+      "durationSec": 11,
+      "kicker": "Conductor rules",
+      "title": "Ask less, and later",
+      "items": [
+        {
+          "text": "A pause: 1.8 s without typing, talking or a screen change",
+          "atSec": 0.4
+        },
+        {
+          "text": "The screen settles 0.5 s after a change; the question is prepared then",
+          "atSec": 2.2
+        },
+        {
+          "text": "At least 15 s between questions",
+          "atSec": 4
+        },
+        {
+          "text": "Reflect: at most 2 open points, a teach-back of about 60 words",
+          "atSec": 5.8
+        },
+        {
+          "text": "A reworded description of the same screen is not a change",
+          "atSec": 7.6
+        }
+      ]
+    },
+    {
+      "type": "clip",
+      "durationSec": 14,
+      "src": "recordings/journey.mp4",
+      "startFromSec": 90,
+      "layout": "framed",
+      "heading": "Reflect · live API",
+      "badge": "Simulated input: answers posted as text · synthetic data",
+      "captions": [
+        {
+          "fromSec": 0.3,
+          "toSec": 6.8,
+          "text": "When Show ends, the Work Map is built from the session."
+        },
+        {
+          "fromSec": 7,
+          "toSec": 13.8,
+          "text": "Steps tied to screen moments, rules in the expert's words."
+        }
+      ]
+    },
+    {
+      "type": "clip",
+      "durationSec": 14,
+      "src": "recordings/journey.mp4",
+      "startFromSec": 200,
+      "layout": "framed",
+      "heading": "Pass it on · live API",
+      "badge": "Simulated input: screen events posted as text · synthetic data",
+      "captions": [
+        {
+          "fromSec": 0.3,
+          "toSec": 6.8,
+          "text": "Every pending action is checked against confirmed rules only."
+        },
+        {
+          "fromSec": 7,
+          "toSec": 13.8,
+          "text": "The tutor warns before the mistake. It never blocks another app."
+        }
+      ]
+    },
+    {
+      "type": "facts",
+      "durationSec": 15,
+      "kicker": "How it was built",
+      "title": "Two people, their agents, one day",
+      "items": [
+        {
+          "text": "Contracts first: ScreenBridge v1 between two parallel streams",
+          "atSec": 0.4
+        },
+        {
+          "text": "More than 700 automated tests (web 247, agent 190, API 96, screen 164, contracts 24)",
+          "atSec": 2.6
+        },
+        {
+          "text": "CI on every pull request; every merge deploys with a health check and automatic rollback",
+          "atSec": 5
+        },
+        {
+          "text": "An engine-agnostic model runner: Claude Agent SDK or Codex CLI",
+          "atSec": 7.4
+        },
+        {
+          "text": "When our Claude quota ran out before the pitch, we switched to Codex without touching the product",
+          "atSec": 9.8
+        }
+      ],
+      "footer": "Test counts: main, 4 Oct 07:40 UTC"
+    },
+    {
+      "type": "facts",
+      "durationSec": 13,
+      "kicker": "Honest limits",
+      "title": "What this demo is, and is not",
+      "items": [
+        {
+          "text": "A teammate plays the expert; all data is synthetic",
+          "atSec": 0.4
+        },
+        {
+          "text": "Off the record stops screen, voice and model calls; it does not recall what was already sent",
+          "atSec": 2.2
+        },
+        {
+          "text": "Confirmed maps live in server memory: one team, one demo server",
+          "atSec": 4.4
+        },
+        {
+          "text": "On Codex, vision takes about 11 s per frame and a question about 13 s after a pause",
+          "atSec": 6.6
+        },
+        {
+          "text": "In these recordings the voice is off: answers and screen events are posted to the live API as text",
+          "atSec": 8.8
+        }
+      ]
+    },
+    {
+      "type": "clipa-outro",
+      "durationSec": 6,
+      "headline": "Next: a company memory that only asks about what changed",
+      "lines": [
+        "Show. Reflect. Pass it on."
+      ],
+      "links": [
+        {
+          "label": "Demo",
+          "url": "qwadratic.github.io/clipa"
+        },
+        {
+          "label": "Code",
+          "url": "github.com/qwadratic/clipa"
+        }
+      ],
+      "note": "All data in this video is synthetic."
+    }
+  ]
+}

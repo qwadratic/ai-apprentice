@@ -41,6 +41,8 @@ export type CaptionedClipScript = {
   badge?: string;
   captions: CaptionScript[];
   highlights?: HighlightScript[];
+  /** Zoom into a point of the picture: x, y are fractions (0 to 1), scale is the magnification. Eases in and out over 0.6 s. */
+  zoom?: { fromSec: number; toSec: number; x: number; y: number; scale: number }[];
 };
 
 export type ClipaIntroScript = {
@@ -72,8 +74,58 @@ export type LayersDiagramScript = {
   footer?: string;
 };
 
+export type ArchNodeScript = {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  title: string;
+  sub?: string;
+  /** When the node appears, in seconds from the scene start. */
+  atSec: number;
+  tone?: 'plain' | 'teal' | 'amber';
+};
+
+export type ArchEdgeScript = {
+  from: [number, number];
+  to: [number, number];
+  via?: [number, number][];
+  label?: string;
+  labelAt?: [number, number];
+  atSec: number;
+  /** Arrow heads at both ends. */
+  both?: boolean;
+  tone?: 'teal' | 'amber';
+};
+
+/** A box-and-arrow diagram; coordinates are pixels on the 1920x1080 frame. */
+export type ArchitectureScript = {
+  durationSec: number;
+  title: string;
+  kicker?: string;
+  footer?: string;
+  groups?: { x: number; y: number; w: number; h: number; label: string; atSec: number }[];
+  nodes: ArchNodeScript[];
+  edges?: ArchEdgeScript[];
+  captions?: CaptionScript[];
+};
+
+/** A title, facts that appear one by one, an optional code panel and timed captions. */
+export type FactsScript = {
+  durationSec: number;
+  title: string;
+  kicker?: string;
+  items: { text: string; atSec: number }[];
+  code?: { title: string; text: string; atSec: number };
+  footer?: string;
+  captions?: CaptionScript[];
+  showClipa?: boolean;
+};
+
 export type SceneScript =
   | ({ type: 'title' } & TitleCardScript)
+  | ({ type: 'architecture' } & ArchitectureScript)
+  | ({ type: 'facts' } & FactsScript)
   | ({ type: 'clip' } & CaptionedClipScript)
   | ({ type: 'clipa-intro' } & ClipaIntroScript)
   | ({ type: 'clipa-outro' } & ClipaOutroScript)
