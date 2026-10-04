@@ -1,10 +1,11 @@
 ---
 id: TASK-4.5
 title: VM serves apps/api (agent and ops modules) instead of infra/placeholder-api
-status: To Do
+status: In Progress
 assignee:
   - '@qwadratic'
 created_date: '2026-10-04 01:12'
+updated_date: '2026-10-04 01:16'
 labels:
   - shared
   - infra
