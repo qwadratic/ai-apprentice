@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import './shell.css';
 import { Banner } from './components/Banner.tsx';
 import { DebugDrawer } from './components/DebugDrawer.tsx';
@@ -35,6 +35,12 @@ function ModePanels() {
   );
 }
 
+/** The main area carries the mode, so each mode gets its own layout (shell.css) while every slot stays mounted. */
+function ModeLayout({ children }: { children: ReactNode }) {
+  const mode = useShellState((s) => s.mode);
+  return <main className="as-main" data-mode={mode}>{children}</main>;
+}
+
 /** The product page: mode switcher, status bar, workspace area on the left, Clipa and the mode view on the right. */
 export function AppShell() {
   const [runtime] = useState(createRuntime);
@@ -62,7 +68,7 @@ export function AppShell() {
         <Header debugOpen={debugOpen} onToggleDebug={() => setDebugOpen((v) => !v)} />
         <StatusBar />
         <Banner />
-        <main className="as-main">
+        <ModeLayout>
           <div className="as-left">
             <ScreenSlot collapsed={screenCollapsed} onToggle={() => setScreenCollapsed((v) => !v)} />
             <WorkspaceSlot adapter={runtime.workspace} />
@@ -75,7 +81,7 @@ export function AppShell() {
             <ModePanels />
             <ReplaySlot />
           </div>
-        </main>
+        </ModeLayout>
         <DebugDrawer open={debugOpen} onClose={() => setDebugOpen(false)} />
       </div>
     </ShellContext.Provider>
