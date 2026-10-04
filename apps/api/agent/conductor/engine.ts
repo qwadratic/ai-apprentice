@@ -1098,10 +1098,10 @@ export class Conductor {
     if (first) this.thought(`Checking: ${first.condition}…`);
     this.pose('think');
     const out = await this.run<GuardrailCheckOutput>('guardrail_check', { guardrails, observations, transcript: this.transcript(8, 1000, true), language: this.language });
-    if (revision !== this.contextRevision || this.offRecord || this.liveMode !== 'teach') return;
-    const warning = out?.status === 'warn' && !!out.guardrailId && !!out.message;
-    if (!warning) this.pose('listen');
-    if (!out) return;
+    if (this.offRecord || this.liveMode !== 'teach') return;
+    const current = revision === this.contextRevision;
+    if (!(current && out?.status === 'warn' && out.guardrailId && out.message)) this.pose('listen');
+    if (!current || !out) return;
     if (out.status === 'unknown' && out.message) { this.quiet(out.message); return; }
     if (out.status !== 'warn' || !out.guardrailId || !out.message) return;
     const latest = observations[observations.length - 1];
