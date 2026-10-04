@@ -54,7 +54,9 @@ export class MapRegistry {
   }
   /**
    * Every process Clipa has learned, newest map first (the map of `prefer` first when named): what she can recognise on
-   * screen and follow. A map without named processes counts as one process.
+   * screen and follow. A map without named processes counts as one process; a step or rule that names no known process
+   * belongs to the first one, so no rule is ever lost. Rules of the first map keep their own ids (g1 ..), the warning
+   * then names the rule as the expert's map shows it; older maps' rules are prefixed (m2-g1 ..) to stay unique.
    */
   library(prefer: string | null = null): LearnedProcess[] {
     const maps = [...this.bySession.values()].sort((a, b) => b.confirmedAt - a.confirmedAt);
@@ -62,17 +64,19 @@ export class MapRegistry {
     const out: LearnedProcess[] = [];
     maps.slice(0, 6).forEach((entry, m) => {
       const map = entry.map;
-      const processes = map.processes?.length ? map.processes : [{ id: 'p1', title: map.steps[0]?.goal ?? 'The expert\'s task', summary: '' }];
-      for (const p of processes) {
-        const mine = (pid: string | null): boolean => processes.length === 1 || pid === p.id;
+      const named = Array.isArray(map.processes) ? map.processes : [];
+      const processes = named.length ? named : [{ id: 'p1', title: map.steps[0]?.goal ?? 'The expert\'s task', summary: '' }];
+      const known = new Set(processes.map((p) => p.id));
+      processes.forEach((p, i) => {
+        const mine = (pid: string | null | undefined): boolean => (typeof pid === 'string' && known.has(pid) ? pid === p.id : i === 0);
         out.push({
           key: `m${m + 1}-${p.id}`, title: p.title, summary: p.summary,
-          steps: map.steps.filter((x) => mine(x.processId ?? null)).map((x) => x.action),
-          rules: map.guardrails.filter((g) => mine(g.processId ?? null)).map((g) => ({
-            id: `m${m + 1}-${g.id}`, condition: g.condition, requiredAction: g.requiredAction, reason: g.reason, quote: g.quote, evidenceIds: g.evidenceIds,
+          steps: map.steps.filter((x) => mine(x.processId)).map((x) => x.action),
+          rules: map.guardrails.filter((g) => mine(g.processId)).map((g) => ({
+            id: m === 0 ? g.id : `m${m + 1}-${g.id}`, condition: g.condition, requiredAction: g.requiredAction, reason: g.reason, quote: g.quote, evidenceIds: g.evidenceIds,
           })),
         });
-      }
+      });
     });
     return out.slice(0, 12);
   }
@@ -385,6 +389,7 @@ export class Conductor {
     this.inflight?.abort();
     this.inflight = null;
     this.prefetch = null;
+    this.pendingSay = null;
     this.cancelActive();
     if (reason === 'off_record') return;
     if (mode === 'learn' && this.persona === 'expert') { this.handOver('review', 'review'); this.prefetchMap(); }
@@ -521,7 +526,9 @@ export class Conductor {
     return this.deps.maps.library(this.mapFrom).length > 0;
   }
 
+  /** process_match: silent on any failure or doubt (no line is said); a late answer for an ended stage is dropped. */
   private async recognize(): Promise<void> {
+    const mode = this.liveMode;
     const library = this.deps.maps.library(this.mapFrom);
     const observations = this.genericObservations(6);
     const latest = [...this.observations].reverse().find((o) => o.kind !== 'input_activity');
@@ -532,7 +539,7 @@ export class Conductor {
       processes: library.map((p) => ({ id: p.key, title: p.title.slice(0, 120), summary: p.summary.slice(0, 300), steps: p.steps.slice(0, 10).map((x) => x.slice(0, 300)), rules: p.rules.slice(0, 8).map((r) => `when ${r.condition}, ${r.requiredAction}`.slice(0, 400)) })),
       observations,
     });
-    if (this.offRecord || !out || out.processId === null || out.confidence < RULES.processConfidence) return;
+    if (this.offRecord || this.liveMode !== mode || !out || out.processId === null || out.confidence < RULES.processConfidence) return;
     const match = library.find((p) => p.key === out.processId);
     if (!match || match.key === this.recognized?.key) return;
     this.recognized = match;
@@ -558,6 +565,9 @@ export class Conductor {
       const r = await this.deps.llm(task, body, controller.signal);
       if (controller.signal.aborted || !r.ok) return null;
       return r.output as T;
+    } catch {
+      // A thrown call is a failed call: the caller falls back, and nothing rejects into the void (a crash on a live server).
+      return null;
     } finally {
       if (this.inflight === controller) this.inflight = null;
     }
@@ -634,16 +644,18 @@ export class Conductor {
   }
 
   /** As soon as Show ends, the map is built in the background, so Reflect opens with it ready. */
+  // If it fails, Reflect builds the map itself as before; if it is slow, Reflect waits for it (a second build would only
+  // queue behind it). A confirmed map stays as it is, as before.
   private prefetchMap(): void {
     const observations = this.genericObservations(40);
-    if (observations.length === 0 || this.mapPrefetch) return;
+    if (observations.length === 0 || this.mapPrefetch || this.review.phase === 'confirmed') return;
     this.mapPrefetch = (async () => {
       const map = await this.run<MapSynthesisOutput>('map_synthesis', { observations, transcript: this.transcript(60, 600), correction: null, previousTeachBack: null });
       if (map && !this.offRecord && this.review.phase !== 'confirmed') {
         this.review = { phase: 'idle', map: { ...map, comments: [] }, version: this.review.version, gapIndex: 0, awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false };
         this.freshMap = true;
       }
-    })().finally(() => { this.mapPrefetch = null; });
+    })().catch(() => undefined).finally(() => { this.mapPrefetch = null; });
   }
 
   private async startReview(): Promise<void> {
