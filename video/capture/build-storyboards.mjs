@@ -181,12 +181,4 @@ const total = scenes.reduce((s, x) => s + x.durationSec, 0) - 0.5 * (scenes.leng
 console.log(`demo.json: ${scenes.length} scenes, ${total.toFixed(1)} s`);
 console.log('quoted live lines:', JSON.stringify({ ask1: clean(ask1?.text), ask2: clean(ask2?.text), gap: clean(gap?.text), teachback: clean(teachback?.text, 400), warn: clean(warn?.text, 300) }, null, 2));
 
-// The tech video's three product clips.
-const tech = JSON.parse(readFileSync('scripts/tech.json', 'utf8'));
-const clips = tech.scenes.filter((s) => s.type === 'clip');
-if (clips[0]) Object.assign(clips[0], { startFromSec: Number(((m['show-typing'] ?? 14) - 1).toFixed(2)), playbackRate: 1.2 });
-if (clips[1]) clips[1].startFromSec = Number(((m['reflect-map'] ?? m.reflect ?? 90) - 3).toFixed(2));
-if (clips[2]) Object.assign(clips[2], { startFromSec: Number(((m['teach-send'] ?? 200) - 2).toFixed(2)), playbackRate: 1.3 });
-writeFileSync('scripts/tech.json', `${JSON.stringify(tech, null, 2)}\n`);
-const techTotal = tech.scenes.reduce((s, x) => s + x.durationSec, 0) - 0.5 * (tech.scenes.length - 1);
-console.log(`tech.json: ${tech.scenes.length} scenes, ${techTotal.toFixed(1)} s`);
+// The tech video has its own builder: capture/build-tech.mjs.

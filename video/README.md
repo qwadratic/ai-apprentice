@@ -104,7 +104,8 @@ How it works, and why:
 
 ```sh
 NODE_USE_ENV_PROXY=1 npx tsx recorder/journey.ts   # one take of Show -> Reflect -> Pass it on on the live app and API
-node capture/build-storyboards.mjs                 # scripts/demo.json and the clip times in scripts/tech.json, from the take
+node capture/build-storyboards.mjs                 # scripts/demo.json, from the take
+node capture/build-tech.mjs                        # scripts/tech.json (about 60 s) and scripts/tech-voiceover.json, from the take
 npm run render -- Sample --script scripts/demo.json --out out/clipa-demo.mp4
 npm run render -- Sample --script scripts/tech.json --out out/clipa-tech.mp4
 bash capture/finalize.sh out/clipa-demo.mp4 ../apps/web/public/videos/clipa-demo.mp4
