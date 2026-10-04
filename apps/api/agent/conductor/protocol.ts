@@ -48,6 +48,8 @@ export type ClientEvent =
   | { type: 'ui'; action: 'confirm' | 'correct' | 'answer_gap' | 'ask_about' | 'finish'; targetId: string | null; text: string | null }
   | { type: 'cue_done'; cueId: string; outcome: 'spoken' | 'shown' | 'skipped' | 'interrupted' }
   | { type: 'off_record'; on: boolean }
+  // Additive (v1.4): the web's "Lead me through" switch. A client that never sends it leaves auto mode on.
+  | { type: 'auto'; on: boolean }
   | { type: 'observation'; observation: SeenObservation };
 
 export interface ClientEnvelope { seq: number; atMs: number; event: ClientEvent }
@@ -72,8 +74,13 @@ export type Cue =
   | { type: 'thought'; text: string }
   /** The person should look somewhere else (an ask about a region, a warning, the next stage): Clipa flashes and goes there. */
   | { type: 'attention'; target: Target | null }
-  /** The person asked for a stage by voice: the face opens it the way a click on its stage does. */
-  | { type: 'stage'; mode: Mode };
+  /**
+   * The face opens a stage the way a click on its stage does. With `start` (additive, v1.4) it also starts it the way Start
+   * does, ending the stage that runs; a face that does not know `start` only opens it.
+   */
+  | { type: 'stage'; mode: Mode; start?: boolean }
+  /** Additive (v1.4), web only: the face ends the running session the way End does (the person said stop, or Pass it on is done). */
+  | { type: 'end'; reason: 'off' | 'done' };
 
 export interface CueEnvelope { seq: number; cueId: string; atMs: number; mode: Mode | null; persona: Persona; for: Audience; cue: Cue; expiresAtMs: number | null }
 
@@ -186,6 +193,8 @@ function parseEvent(v: unknown, f: string): P<ClientEvent> {
         ? { ok: true, value: { type: 'cue_done', cueId: v.cueId, outcome: v.outcome } } : bad(f);
     case 'off_record':
       return typeof v.on === 'boolean' ? { ok: true, value: { type: 'off_record', on: v.on } } : bad(f);
+    case 'auto':
+      return typeof v.on === 'boolean' ? { ok: true, value: { type: 'auto', on: v.on } } : bad(f);
     case 'observation': {
       const o = parseObservation(v.observation);
       return o.ok ? { ok: true, value: { type: 'observation', observation: o.value } } : bad(`${f}.${o.field}`);

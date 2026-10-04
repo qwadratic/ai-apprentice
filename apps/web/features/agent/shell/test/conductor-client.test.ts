@@ -40,6 +40,15 @@ test('the SSE parser joins chunks, handles CRLF split across chunks, multi-line 
   ]);
 });
 
+test('stage and end cues: start only when true, an end reason is kept short', () => {
+  assert.deepEqual(parseCueEnvelope(cue(1, { type: 'stage', mode: 'review', start: true }))?.cue, { type: 'stage', mode: 'review', start: true });
+  assert.deepEqual(parseCueEnvelope(cue(2, { type: 'stage', mode: 'teach', start: 'yes' }))?.cue, { type: 'stage', mode: 'teach' });
+  assert.equal(parseCueEnvelope(cue(3, { type: 'stage', mode: 'bogus', start: true })), null);
+  assert.deepEqual(parseCueEnvelope(cue(4, { type: 'end', reason: 'off' }))?.cue, { type: 'end', reason: 'off' });
+  assert.deepEqual(parseCueEnvelope(cue(5, { type: 'end' }))?.cue, { type: 'end', reason: '' });
+  assert.deepEqual(sanitizeEvent({ type: 'auto', on: false }), { type: 'auto', on: false });
+});
+
 test('cue envelopes are parsed leniently: unknown cue types and bad boxes do not throw', () => {
   assert.equal(parseCueEnvelope({ seq: 1, cueId: 'c1', cue: { type: 'dance' } }), null);
   const env = parseCueEnvelope(cue(2, { type: 'ask', questionId: 'q1', text: 'Why?', topic: 'reason', regions: [{ regionId: 'r1', label: 'Total', box: [0.1, 0.2, 0.3, 0.4], evidenceId: 'e1' }, { regionId: 'r2', label: 'bad', box: [2, 0, 1, 1], evidenceId: null }], evidenceIds: ['e1'] }));

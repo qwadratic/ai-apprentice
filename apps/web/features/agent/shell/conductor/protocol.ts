@@ -30,7 +30,9 @@ export type ClientEvent =
   | { type: 'transcript'; role: 'expert' | 'agent'; text: string }
   | { type: 'ui'; action: UiAction; targetId: string | null; text: string | null }
   | { type: 'cue_done'; cueId: string; outcome: CueOutcome }
-  | { type: 'off_record'; on: boolean };
+  | { type: 'off_record'; on: boolean }
+  /** The header's "Lead me through" switch (additive): off, Clipa only proposes the next stage. Never sent means on. */
+  | { type: 'auto'; on: boolean };
 
 export interface ClientEnvelope { seq: number; atMs: number; event: ClientEvent }
 
@@ -53,8 +55,10 @@ export type Cue =
   | { type: 'thought'; text: string }
   /** Clipa flashes and goes to the target (null: she flashes where she is). */
   | { type: 'attention'; target: Target | null }
-  /** The person asked for a stage by voice: the page opens it like a click on the rail. */
-  | { type: 'stage'; mode: ConductorMode };
+  /** The page opens a stage like a click on the rail; with `start` it also starts it like Start (ending the running stage). */
+  | { type: 'stage'; mode: ConductorMode; start?: boolean }
+  /** The page ends the running session like End: the person said stop, or Pass it on is done. */
+  | { type: 'end'; reason: string };
 
 export interface CueEnvelope {
   seq: number;
@@ -179,7 +183,10 @@ export function parseCue(v: unknown): Cue | null {
     case 'attention':
       return { type: 'attention', target: parseTarget(v.target) };
     case 'stage':
-      return oneOf(v.mode, MODES) ? { type: 'stage', mode: v.mode } : null;
+      if (!oneOf(v.mode, MODES)) return null;
+      return v.start === true ? { type: 'stage', mode: v.mode, start: true } : { type: 'stage', mode: v.mode };
+    case 'end':
+      return { type: 'end', reason: text(v.reason, 40) ?? '' };
     default:
       return null;
   }

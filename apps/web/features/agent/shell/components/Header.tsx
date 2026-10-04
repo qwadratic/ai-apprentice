@@ -15,11 +15,12 @@ interface HeaderProps {
   headerRef?: Ref<HTMLElement>;
 }
 
-/** The header: the Clipa wordmark, the journey rail (the mode switcher), the macOS download, Off the record, Clipa's tone and Debug. */
+/** The header: the Clipa wordmark, the journey rail (the mode switcher), the macOS download, Off the record, Lead me through, Clipa's tone and Debug. */
 export function Header({ debugOpen, onToggleDebug, headerRef }: HeaderProps) {
   const { controller } = useShell();
   const offRecord = useShellState((s) => s.offRecord);
   const [micMuted, setMicMuted] = useState(() => controller.isMicMuted());
+  const [autoLead, setAutoLead] = useState(() => controller.isAutoLead());
 
   return (
     <header className="as-header" ref={headerRef} data-off-record={offRecord ? 'true' : undefined}>
@@ -49,6 +50,16 @@ export function Header({ debugOpen, onToggleDebug, headerRef }: HeaderProps) {
             {micMuted ? 'Unmute mic' : 'Mic off'}
           </button>
         )}
+        <button
+          type="button"
+          className={`as-btn as-btn--auto${autoLead ? ' is-on' : ''}`}
+          aria-pressed={autoLead}
+          data-testid="auto-lead"
+          title={autoLead ? 'Clipa moves on to the next stage by herself when one is done.' : 'Clipa only proposes the next stage; say yes or press it.'}
+          onClick={() => { const next = !autoLead; controller.setAutoLead(next); setAutoLead(next); }}
+        >
+          {autoLead ? 'Lead me through: on' : 'Lead me through: off'}
+        </button>
         <ToneMenu />
         <button type="button" className="as-btn" aria-expanded={debugOpen} aria-controls="as-debug" onClick={onToggleDebug}>
           Debug

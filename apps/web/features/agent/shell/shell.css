@@ -317,6 +317,7 @@
 .apprentice-shell .as-btn--end:hover:not(:disabled) { background: rgba(255, 90, 79, 0.18); }
 .apprentice-shell .as-btn--off { color: var(--as-bad); border-color: var(--as-bad); font-weight: 600; }
 .apprentice-shell .as-btn--off.is-on { background: var(--as-bad-soft); }
+.apprentice-shell .as-btn--auto.is-on { background: var(--as-accent-soft); border-color: var(--as-accent); }
 
 .apprentice-shell .as-status {
   list-style: none;

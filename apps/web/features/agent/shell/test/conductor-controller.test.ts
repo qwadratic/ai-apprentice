@@ -7,13 +7,13 @@ import type { BrainDecision } from '../brain/types.ts';
 import { BATCH_MS, RECONNECT_MIN_MS } from '../conductor/client.ts';
 import { THOUGHT_MS } from '../conductor/face.ts';
 import type { Target } from '../conductor/protocol.ts';
-import { ShellController, TYPING_IDLE_MS } from '../controller.ts';
+import { AUTO_LEAD_STORAGE_KEY, ShellController, TYPING_IDLE_MS } from '../controller.ts';
 import type { ControllerDeps } from '../controller.ts';
 import { SampleObservationSource } from '../screen/sample-source.ts';
 import { conductorFetch, cue, sseCue, sseHello } from './conductor-fakes.ts';
 import { FakePresenter, FakeTimers, FakeVoice, ScriptedBrain, TOKEN, modernApi, recordingFetch, settle } from './helpers.ts';
 
-function conductorRig(options: { linkStatus?: number } = {}) {
+function conductorRig(options: { linkStatus?: number; memory?: Map<string, string> } = {}) {
   const timers = new FakeTimers();
   const clock = { base: 1_700_000_000_000, now: () => clock.base + timers.now };
   const c = conductorFetch(options.linkStatus === undefined ? {} : { linkStatus: options.linkStatus });
@@ -26,7 +26,7 @@ function conductorRig(options: { linkStatus?: number } = {}) {
   const guides: Array<{ phase: string; step: string; text: string } | null> = [];
   const flashes: Array<Target | null> = [];
   const api: AgentApi = createAgentApi({ base: 'https://api.example.invalid', fetch, now: clock.now, newId: () => 'legacy' });
-  const memory = new Map<string, string>();
+  const memory = options.memory ?? new Map<string, string>();
   const deps: ControllerDeps = {
     api, fetch, connectVoice: voice.connector,
     createBrain: () => brain,
@@ -48,8 +48,8 @@ function conductorRig(options: { linkStatus?: number } = {}) {
   return { controller, timers, voice, presenter, brain, pointed, guides, flashes, conductor: c, rest, events, sessionPosts };
 }
 
-async function booted(options: { join?: string; page?: 'review' | 'teach'; linkStatus?: number; lastCueSeq?: number } = {}) {
-  const rig = conductorRig(options.linkStatus === undefined ? {} : { linkStatus: options.linkStatus });
+async function booted(options: { join?: string; page?: 'review' | 'teach'; linkStatus?: number; lastCueSeq?: number; memory?: Map<string, string> } = {}) {
+  const rig = conductorRig({ ...(options.linkStatus === undefined ? {} : { linkStatus: options.linkStatus }), ...(options.memory ? { memory: options.memory } : {}) });
   await rig.controller.bootConductor({ join: options.join ?? null, page: options.page ?? null });
   await settle();
   rig.conductor.streams[0]?.push(sseHello(options.lastCueSeq ?? -1));
@@ -342,4 +342,64 @@ test('a stage cue opens the stage exactly like a click on the rail; nothing is a
   assert.equal(rig.controller.store.getState().mode, 'review');
   assert.equal(rig.controller.conductorStore.getState().thought, null);
   rig.controller.dispose();
+});
+
+test('a stage cue with start starts that stage like Start: the running one ends first, the same stage again is only opened', async () => {
+  const rig = await booted();
+  await rig.controller.start('learn');
+  await settle();
+  rig.conductor.streams[0]?.push(sseCue(cue(1, { type: 'stage', mode: 'learn', start: true }, { for: 'web' })));
+  await settle();
+  assert.equal(rig.controller.store.getState().session?.mode, 'learn', 'Show already runs: nothing restarts');
+  rig.conductor.streams[0]?.push(sseCue(cue(2, { type: 'stage', mode: 'review', start: true }, { for: 'web' })));
+  await settle();
+  await settle();
+  const s = rig.controller.store.getState();
+  assert.equal(s.mode, 'review');
+  assert.equal(s.phase, 'live');
+  assert.equal(s.session?.mode, 'review', 'Reflect runs now');
+  rig.timers.advance(BATCH_MS);
+  await settle();
+  const sessions = rig.events().filter((e) => e.event.type === 'session').map((e) => `${String(e.event.mode)} ${String(e.event.live)}`);
+  assert.deepEqual(sessions.slice(-3), ['learn true', 'learn false', 'review true'], 'Show ended, then Reflect started, in the journey session');
+  rig.controller.dispose();
+});
+
+test('an end cue ends the running session like End; off the record it is ignored', async () => {
+  const rig = await booted();
+  await rig.controller.start('learn');
+  await settle();
+  rig.conductor.streams[0]?.push(sseCue(cue(1, { type: 'end', reason: 'off' }, { for: 'web' })));
+  await settle();
+  await settle();
+  assert.notEqual(rig.controller.store.getState().phase, 'live', 'the session ended');
+  assert.equal(rig.voice.ended, true, 'the voice is closed');
+  rig.controller.dispose();
+});
+
+test('Lead me through: on by default, the switch is remembered per viewer and told to the conductor (off also after the hello)', async () => {
+  const memory = new Map<string, string>();
+  const rig = await booted({ memory });
+  assert.equal(rig.controller.isAutoLead(), true);
+  assert.equal(rig.events().filter((e) => e.event.type === 'auto').length, 0, 'on is the default: nothing to tell');
+  rig.controller.setAutoLead(false);
+  rig.timers.advance(BATCH_MS);
+  await settle();
+  assert.deepEqual(rig.events().filter((e) => e.event.type === 'auto').map((e) => e.event.on), [false]);
+  assert.equal(memory.get(AUTO_LEAD_STORAGE_KEY), 'off');
+  rig.controller.dispose();
+  const again = await booted({ memory });
+  assert.equal(again.controller.isAutoLead(), false, 'remembered');
+  const sent = again.events().map((e) => e.event.type);
+  assert.ok(sent.indexOf('auto') > sent.indexOf('hello'), 'told right after the hello');
+  again.controller.setAutoLead(true);
+  again.timers.advance(BATCH_MS);
+  await settle();
+  assert.equal(again.events().filter((e) => e.event.type === 'auto').at(-1)?.event.on, true);
+  assert.equal(memory.get(AUTO_LEAD_STORAGE_KEY), 'on');
+  again.controller.dispose();
+  // Blocked storage: the page still works, with auto on.
+  const blocked = conductorRig();
+  assert.equal(blocked.controller.isAutoLead(), true);
+  blocked.controller.dispose();
 });

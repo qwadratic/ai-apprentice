@@ -117,3 +117,95 @@ export function stageAsked(text: string): Mode | null {
   }
   return best?.mode ?? null;
 }
+
+// ---- voice control and the flow between stages ----------------------------------------------------------------------
+// Short final turns only, so that a sentence which merely contains a word ("I've done the terms for Lumen") never ends a
+// stage or the session. Turns are compared as lower-case words, with curly quotes and ё made plain.
+
+/** The stage names the person sees. */
+export const STAGE_NAMES: Readonly<Record<Mode, string>> = { learn: 'Show', review: 'Reflect', teach: 'Pass it on' };
+/** What the voice agent hears (never spoken) when a stage starts, so it always knows where the journey is. */
+export const STAGE_ABOUT: Readonly<Record<Mode, string>> = {
+  learn: 'the expert works on screen; ask only at natural pauses.',
+  review: 'the expert checks the map.',
+  teach: 'a new hire works on a new case; step in before one of the expert\'s rules is broken.',
+};
+/** The short line before Clipa starts a stage herself (the person asked for it, said they are done, or said yes). */
+export const STAGE_START: Readonly<Record<Mode, string>> = {
+  learn: "Okay, let's start Show.",
+  review: "Okay, let's reflect.",
+  teach: "Okay, let's pass it on.",
+};
+/** Auto mode: Show looks finished (a long quiet after real work), and Clipa moves on by herself. */
+export const SHOW_LOOKS_DONE = "Looks like that's it. Let's reflect.";
+/** Manual mode: at the same moments Clipa only proposes the next stage; a "yes" or a click starts it. */
+export const PROPOSE: Readonly<Record<'review' | 'teach', string>> = {
+  review: 'Shall we reflect? Say yes, or press Reflect.',
+  teach: 'Shall we pass it on? Say yes, or press Pass it on.',
+};
+/** Said before Clipa ends the session because the person asked her to stop. */
+export const OFF_LINE = "Okay, I'm off. Press Start when you need me.";
+
+const plainText = (text: string): string => text.toLowerCase().replace(/[‘’`´]/g, "'").replace(/ё/g, 'е');
+const words = (text: string): Array<{ w: string; start: number; end: number }> =>
+  [...plainText(text).matchAll(/[\p{L}\p{N}]+(?:'[\p{L}\p{N}]+)*/gu)].map((m) => ({ w: m[0], start: m.index, end: m.index + m[0].length }));
+const phrases = (list: readonly string[]): string[][] => list.map((p) => words(p).map((x) => x.w));
+/** Where `phrase` starts in `ws` at or after `from`, or -1. */
+function find(ws: readonly string[], phrase: readonly string[], from = 0): number {
+  for (let i = from; i + phrase.length <= ws.length; i++) if (phrase.every((p, k) => ws[i + k] === p)) return i;
+  return -1;
+}
+
+const DONE_PHRASES = phrases([
+  "that's it", 'that is it', "i'm done", 'i am done', 'done', 'all done', 'finished', "that's all",
+  'готово', 'это всё', 'вот и всё', 'ну всё', 'закончил', 'закончила', 'я закончил', 'я закончила',
+  'fertig', "das war's", 'das wars', 'das ist alles',
+]);
+/** Words that may come right before a done phrase ("okay so that's it", "I think I'm done"). */
+const DONE_LEAD = new Set(['ok', 'okay', 'so', 'and', 'well', 'alright', 'right', 'yes', 'yeah', 'think', 'guess', 'then', 'now', 'ну', 'так', 'ладно', 'и', 'вот', 'да', 'кажется', 'думаю', 'also', 'gut', 'ja', 'und', 'dann', 'glaube', 'denke']);
+/** Words that may follow a done phrase in a turn of at most five words ("that's it for now", "готово, спасибо"). */
+const DONE_TAIL = new Set(['now', 'then', 'here', 'for', 'today', 'thanks', 'thank', 'you', 'guys', 'ok', 'okay', 'сейчас', 'спасибо', 'на', 'сегодня', 'jetzt', 'danke', 'für', 'heute']);
+const DONE_SHORT_WORDS = 5;
+const DONE_END_WORDS = 8;
+
+/**
+ * The person says they are done with this stage: a done phrase in a short final turn. The whole turn has at most five words
+ * (anything after the phrase is a filler such as "for now"), or the phrase ends a turn of at most eight words. The phrase
+ * starts the turn, follows a comma or a full stop, or follows a lead-in word ("so", "I think"). A bare "всё" counts only as
+ * the whole turn (with "вот", "ну", "и").
+ */
+export function doneSaid(text: string): boolean {
+  const ws = words(text);
+  if (ws.length === 0 || ws.length > DONE_END_WORDS) return false;
+  const list = ws.map((x) => x.w);
+  if (list.at(-1) === 'все' && list.length <= 4 && list.slice(0, -1).every((w) => w === 'вот' || w === 'ну' || w === 'и')) return true;
+  const plain = plainText(text);
+  for (const phrase of DONE_PHRASES) {
+    for (let i = find(list, phrase); i >= 0; i = find(list, phrase, i + 1)) {
+      const before = i === 0 || /[,.!?;:—–-]/.test(plain.slice(ws[i - 1]!.end, ws[i]!.start)) || DONE_LEAD.has(list[i - 1]!);
+      if (!before) continue;
+      const rest = list.slice(i + phrase.length);
+      if (rest.length === 0) return true;
+      if (list.length <= DONE_SHORT_WORDS && rest.every((w) => DONE_TAIL.has(w))) return true;
+    }
+  }
+  return false;
+}
+
+/** Words that may stand beside a short command ("okay, stop please", "да, давай"). */
+const POLITE = new Set(['ok', 'okay', 'please', 'clipa', 'now', 'thanks', 'thank', 'you', 'hey', 'пожалуйста', 'спасибо', 'ну', 'клипа', 'bitte', 'danke', 'jetzt']);
+const SHORT_COMMAND_WORDS = 4;
+/** A whole short turn (at most four words) made of these phrases and polite words only, with at least one whole phrase. */
+function command(text: string, list: readonly string[][]): boolean {
+  const ws = words(text).map((x) => x.w);
+  if (ws.length === 0 || ws.length > SHORT_COMMAND_WORDS) return false;
+  const allowed = new Set(list.flat());
+  return ws.every((w) => allowed.has(w) || POLITE.has(w)) && list.some((p) => find(ws, p) >= 0);
+}
+const OFF_PHRASES = phrases(['stop', 'stop listening', 'turn off', 'switch off', 'goodbye', 'bye', 'стоп', 'хватит', 'выключись', 'выключайся', 'отключись', 'пока', 'tschüss', 'hör auf']);
+const YES_PHRASES = phrases(['yes', 'yeah', 'sure', 'ok', 'okay', "let's go", 'go ahead', 'да', 'давай', 'ага', 'ок', 'поехали', 'ja', 'los', 'gerne']);
+
+/** The person asks Clipa to switch off: a whole short turn ("stop", "goodbye", "выключись", "hör auf"). */
+export function offSaid(text: string): boolean { return command(text, OFF_PHRASES); }
+/** The person says yes to what Clipa proposed: a whole short turn ("yes", "let's go", "давай", "gerne"). */
+export function yesSaid(text: string): boolean { return command(text, YES_PHRASES); }
