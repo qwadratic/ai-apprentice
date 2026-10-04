@@ -109,7 +109,7 @@ test('the feed belongs to the running stage: items from before its Start stay ou
 });
 
 test('the newest few show; the rest fold into "+N earlier" and expand on demand, capped', () => {
-  const many = (n: number): FeedEntry[] => Array.from({ length: n }, (_, i) => ({ id: `e${i}`, kind: 'screen' as const, text: `t${i}`, atMs: n - i }));
+  const many = (n: number): FeedEntry[] => Array.from({ length: n }, (_, i) => ({ id: `e${i}`, kind: 'say' as const, text: `t${i}`, atMs: n - i }));
   const folded = foldFeed(many(8), false);
   assert.equal(folded.shown.length, FEED_VISIBLE);
   assert.equal(folded.earlier, 3);
@@ -124,6 +124,29 @@ test('the newest few show; the rest fold into "+N earlier" and expand on demand,
   assert.equal(foldFeed(many(80), true).shown.length, FEED_EXPANDED_MAX);
   assert.deepEqual(foldFeed(many(4), true), { shown: many(4), earlier: 0, canFold: false }, 'nothing to fold');
   assert.equal(foldFeed(many(8), false, 3).earlier, 5, 'a smaller window (Reflect)');
+});
+
+test('screen changes do not push the conversation out of sight: at most two of them in the folded view', () => {
+  const at = (i: number): number => 100 - i;
+  const entries: FeedEntry[] = [
+    { id: 's1', kind: 'screen', text: 'a', atMs: at(0) },
+    { id: 's2', kind: 'screen', text: 'b', atMs: at(1) },
+    { id: 's3', kind: 'screen', text: 'c', atMs: at(2) },
+    { id: 'q', kind: 'ask', text: 'Why?', atMs: at(3) },
+    { id: 's4', kind: 'screen', text: 'd', atMs: at(4) },
+    { id: 'a', kind: 'answer', text: 'Because.', atMs: at(5) },
+    { id: 'r', kind: 'rule', text: 'Text for 07', atMs: at(6) },
+    { id: 'm', kind: 'map', text: 'Ready', atMs: at(7) },
+  ];
+  const folded = foldFeed(entries, false);
+  assert.deepEqual(folded.shown.map((e) => e.id), ['s1', 's2', 'q', 'a', 'r'], 'newest first, two screen changes, then the conversation');
+  assert.equal(folded.earlier, 3);
+  assert.deepEqual(foldFeed(entries, true).shown.map((e) => e.id), entries.map((e) => e.id), 'expanded shows everything in order');
+  const screensOnly = entries.filter((e) => e.kind === 'screen');
+  assert.deepEqual(foldFeed(screensOnly, false).shown.map((e) => e.id), ['s1', 's2', 's3', 's4'], 'room left over goes to screen changes');
+  const fewTalk = foldFeed([...screensOnly, { id: 'x', kind: 'ask', text: 'Why?', atMs: 0 }, { id: 's5', kind: 'screen', text: 'e', atMs: -1 }], false);
+  assert.deepEqual(fewTalk.shown.map((e) => e.id), ['s1', 's2', 's3', 's4', 'x'], 'the window fills up, the question stays');
+  assert.equal(fewTalk.earlier, 1);
 });
 
 test('relative time is short and never negative', () => {

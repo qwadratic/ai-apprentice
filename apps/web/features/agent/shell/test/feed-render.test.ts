@@ -75,11 +75,14 @@ test('a running stage: newest on top, five items, the rest behind "+N earlier", 
   live(r);
   observe(r, 6);
   r.conductor.set({ said: [said('c1', 'ask', 'Why the address as text?', 59_000)] });
+  r.store.dispatch({ type: 'LOG', t: Date.now() - 2000, dir: 'recv', logType: 'USER', text: 'She reads mail on her phone.' });
   const html = render(r, createElement(LiveFeed, { empty: 'empty' }));
   assert.match(html, /data-running="true"/);
   assert.match(html, /<span class="as-live__dot" aria-hidden="true"><\/span>Live</);
   assert.equal(count(html, '<li class="as-live__item'), 5);
-  assert.match(html, />\+2 earlier</);
+  assert.match(html, />\+3 earlier</);
+  assert.match(html, /class="as-live__label">You said<\/span>/);
+  assert.match(html, /<q>She reads mail on her phone\.<\/q>/);
   const first = /<li class="as-live__item[^"]*" data-kind="(\w+)"/.exec(html);
   assert.equal(first?.[1], 'ask', 'the question is the newest item');
   assert.match(html, /<li class="as-live__item is-fresh" data-kind="ask"/, 'the newest item is lit');

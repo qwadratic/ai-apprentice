@@ -85,6 +85,8 @@ export function AppShell() {
   useEffect(() => {
     const { controller } = runtime;
     document.title = 'Clipa';
+    // The page is dark whatever the system theme (shell.css); Clipa's layer reads this to keep her bubble light on it.
+    document.documentElement.dataset.theme = 'dark';
     setClipaFavicon();
     const onVisibility = (): void => controller.onVisibilityChange(document.hidden);
     const onPageHide = (): void => controller.onPageHide();

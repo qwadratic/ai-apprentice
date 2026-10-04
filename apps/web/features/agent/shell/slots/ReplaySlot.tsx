@@ -30,22 +30,25 @@ export function ReplaySlot() {
   return (
     <section className="as-card as-replay" aria-labelledby="as-replay-title" data-testid="replay-slot" data-clipa-surface="replay">
       <div className="as-card__head">
-        <h2 className="as-card__title" id="as-replay-title">Replay of a screen moment</h2>
-        <button type="button" className="as-btn as-btn--small" onClick={() => controller.closeEvidence()}>Close</button>
+        <h2 className="as-card__title" id="as-replay-title">Screen moment</h2>
+        <button type="button" className="as-btn as-btn--small as-btn--quiet" onClick={() => controller.closeEvidence()}>Close</button>
       </div>
-      <p className="as-note"><strong>Not wired yet:</strong> the replay panel is stream A&apos;s (TASK-2.5). This card only resolves the evidence.</p>
-      <dl className="as-props">
-        <div><dt>evidence</dt><dd>{evidenceId}</dd></div>
-        {resolved.kind === 'loading' && <div><dt>resolving</dt><dd>...</dd></div>}
-        {resolved.kind === 'error' && <div><dt>not available</dt><dd>{resolved.message}</dd></div>}
-        {resolved.kind === 'ok' && (
-          <>
-            <div><dt>asset</dt><dd>{resolved.evidence.assetRef}</dd></div>
-            <div><dt>from</dt><dd>{formatClock(resolved.evidence.startMs)} to {formatClock(resolved.evidence.endMs)} of the session</dd></div>
-            {resolved.evidence.assetRef.startsWith('mock://') && <div><dt>note</dt><dd>A mock reference: a label, not a recording.</dd></div>}
-          </>
-        )}
-      </dl>
+      {resolved.kind === 'loading' && <p className="as-note">Finding the moment…</p>}
+      {resolved.kind === 'error' && <p className="as-note">This moment is not available: {resolved.message}</p>}
+      {resolved.kind === 'ok' && (
+        <p className="as-replay__range">
+          {formatClock(resolved.evidence.startMs)} to {formatClock(resolved.evidence.endMs)} of the session
+          {resolved.evidence.assetRef.startsWith('mock://') && <> <span className="as-tag as-tag--warn">Mock reference</span></>}
+        </p>
+      )}
+      <p className="as-note"><strong>Not wired yet:</strong> playback of the moment comes with stream A&apos;s replay panel.</p>
+      <details className="as-details">
+        <summary className="as-details__summary">Details</summary>
+        <dl className="as-props">
+          <div><dt>evidence</dt><dd>{evidenceId}</dd></div>
+          {resolved.kind === 'ok' && <div><dt>asset</dt><dd>{resolved.evidence.assetRef}</dd></div>}
+        </dl>
+      </details>
     </section>
   );
 }

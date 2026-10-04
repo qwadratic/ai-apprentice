@@ -1,8 +1,8 @@
 /*
  * Product shell styles. Everything is scoped under .apprentice-shell and uses classes (as-*), never bare element
  * selectors: nothing here may change how stream A's workspace and screen panel look (vision reads those pixels).
- * Light and dark follow prefers-color-scheme. Layout: workspace left (~60%), Clipa and the mode view right;
- * below 900px one column.
+ * The page is dark whatever the system theme (AppShell sets data-theme="dark" for Clipa's layer). Layout: the shared
+ * screen left as the hero, Clipa's line and the live feed right; below 900px one column.
  */
 .apprentice-shell {
   /* Dark by default (the demo's look): a deep teal night with Clipa's teal as the one accent. */
@@ -393,6 +393,8 @@
 .apprentice-shell .as-main[data-mode="review"] .as-mode { grid-area: mode; }
 .apprentice-shell .as-main[data-mode="review"] .as-session { grid-area: session; }
 .apprentice-shell .as-main[data-mode="review"] .as-replay { grid-area: replay; }
+.apprentice-shell .as-replay { border-color: rgba(44, 196, 184, 0.4); animation: as-alert-in 240ms ease-out both; }
+.apprentice-shell .as-replay__range { margin: 0 0 4px; font-size: 1.02rem; font-weight: 600; font-variant-numeric: tabular-nums; }
 .apprentice-shell .as-main[data-mode="teach"] { grid-template-columns: minmax(0, 1fr) minmax(340px, 440px); }
 .apprentice-shell .as-main[data-mode="teach"] .as-left .as-workspace { order: 1; }
 .apprentice-shell .as-main[data-mode="teach"] .as-left .as-screen { order: 2; }

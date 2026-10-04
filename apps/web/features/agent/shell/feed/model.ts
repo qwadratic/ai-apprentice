@@ -26,6 +26,8 @@ export const FEED_VISIBLE = 5;
 export const FEED_EXPANDED_MAX = 30;
 /** A new item is highlighted this long. */
 export const FEED_FRESH_MS = 2500;
+/** Screen changes in the folded view: the conversation must not scroll out of sight behind them. */
+export const FEED_MAX_SCREEN = 2;
 
 export interface FeedEntry {
   /** Stable key: the same thing keeps its id while the feed grows. */
@@ -139,9 +141,31 @@ export interface FoldedFeed {
 }
 
 /** The visible part: the newest few, or (expanded) a longer list; the rest is a count. */
-export function foldFeed(entries: readonly FeedEntry[], expanded: boolean, visible: number = FEED_VISIBLE): FoldedFeed {
+export function foldFeed(
+  entries: readonly FeedEntry[],
+  expanded: boolean,
+  visible: number = FEED_VISIBLE,
+  maxScreen: number = FEED_MAX_SCREEN,
+): FoldedFeed {
   if (expanded && entries.length > visible) return { shown: entries.slice(0, FEED_EXPANDED_MAX), earlier: 0, canFold: true };
-  return { shown: entries.slice(0, visible), earlier: Math.max(0, entries.length - visible), canFold: false };
+  // Screen changes come every second or two: while other items wait for room, at most `maxScreen` of them stay in view, so a
+  // question and its answer are not pushed out of sight. Room left over goes to the newer screen changes. Newest first.
+  const picked = new Set<FeedEntry>();
+  let screens = 0;
+  for (const entry of entries) {
+    if (picked.size === visible) break;
+    if (entry.kind === 'screen') {
+      if (screens === maxScreen) continue;
+      screens += 1;
+    }
+    picked.add(entry);
+  }
+  for (const entry of entries) {
+    if (picked.size === visible) break;
+    picked.add(entry);
+  }
+  const shown = entries.filter((e) => picked.has(e));
+  return { shown, earlier: entries.length - shown.length, canFold: false };
 }
 
 /** "now", "12 s", "3 min", "1 h": how long ago, short. */
