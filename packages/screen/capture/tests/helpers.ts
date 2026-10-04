@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { stripTypeScriptTypes } from 'node:module';
 import type {
   CaptureInvalidation,
+  CaptureProvenance,
   CaptureRuntime,
   DisplayCaptureOptions,
   FrameLease,
@@ -89,6 +90,7 @@ type HarnessOptions = {
   deferEncoding?: boolean;
   noManualCapture?: boolean;
   getDisplayMedia?: (request: DisplayCaptureOptions) => Promise<MediaStream>;
+  snapshotProvenance?: () => CaptureProvenance;
   onFrame?: (frame: ProcessedFrame, lease: FrameLease) => void | Promise<void>;
 };
 
@@ -176,6 +178,7 @@ export function harness(ScreenCapture: ScreenCaptureConstructor, options: Harnes
   };
   const capture = new ScreenCapture({
     runtime, frameIntervalMs: 1000, renderIntervalMs: 50,
+    snapshotProvenance: options.snapshotProvenance,
     onFrame: options.onFrame ?? ((frame, lease) => { frames.push(frame); leases.push(lease); }),
   });
   capture.onInvalidate((event: CaptureInvalidation) => invalidations.push(event));

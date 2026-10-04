@@ -76,6 +76,58 @@ test('discard encodings pending at pause; old completion cannot clear a new pend
   h.capture.dispose();
 });
 
+test('snapshot and freeze provenance before asynchronous encoding', async () => {
+  const current: { surface: 'email'; sourceRevision: string | null } = {
+    surface: 'email', sourceRevision: 'email-r1',
+  };
+  const h = harness(ScreenCapture, { deferEncoding: true, snapshotProvenance: () => current });
+  await h.start(); h.share();
+  const generation = h.capture.getSnapshot().generation;
+  await h.step();
+  current.sourceRevision = 'email-r2';
+  h.encodings.shift()!(); await flush();
+  assert.equal(h.frames.length, 1);
+  assert.equal(h.frames[0]!.generation, generation);
+  assert.deepEqual(h.frames[0]!.provenance, { surface: 'email', sourceRevision: 'email-r1' });
+  assert.ok(Object.isFrozen(h.frames[0]!.provenance));
+  h.capture.dispose();
+});
+
+test('pause drops an encoded frame instead of assigning a newer revision', async () => {
+  const current: { surface: 'order'; sourceRevision: string } = {
+    surface: 'order', sourceRevision: 'order-r1',
+  };
+  const h = harness(ScreenCapture, { deferEncoding: true, snapshotProvenance: () => current });
+  await h.start(); h.share(); await h.step();
+  const stale = h.encodings.shift()!;
+  current.sourceRevision = 'order-r2';
+  h.capture.pause(); h.capture.resume();
+  stale(); await flush();
+  assert.equal(h.frames.length, 0);
+  await h.step();
+  h.encodings.shift()!(); await flush();
+  assert.equal(h.frames.length, 1);
+  assert.deepEqual(h.frames[0]!.provenance, { surface: 'order', sourceRevision: 'order-r2' });
+  assert.equal(h.frames[0]!.generation, h.capture.getSnapshot().generation);
+  h.capture.dispose();
+});
+
+test('missing provenance is null and invalid provenance fails closed', async () => {
+  const standalone = harness(ScreenCapture);
+  await standalone.start(); standalone.share(); await standalone.step();
+  assert.deepEqual(standalone.frames[0]!.provenance, { surface: null, sourceRevision: null });
+  assert.ok(Object.isFrozen(standalone.frames[0]!.provenance));
+  standalone.capture.dispose();
+
+  const invalid = harness(ScreenCapture, {
+    snapshotProvenance: () => ({ surface: 'email', sourceRevision: '' }),
+  });
+  await invalid.start(); invalid.share(); await invalid.step();
+  assert.equal(invalid.frames.length, 0);
+  assert.equal(invalid.capture.getSnapshot().state, 'error');
+  assert.equal(invalid.capture.getSnapshot().reason, 'frame-failed');
+});
+
 test('no backlog while downstream is busy; late vision result never commits after resume', async () => {
   const jobs: Array<{
     job: ReturnType<typeof deferred<void>>;
