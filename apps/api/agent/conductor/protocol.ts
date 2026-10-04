@@ -13,6 +13,11 @@ export type Audience = 'all' | ClientKind;
 /** macOS: how much of Clipa is out of the corner. */
 export type Presence = 'dot' | 'peek' | 'full';
 export type UiTarget = 'share' | 'start' | 'mode_tab' | 'board_gap' | 'teachback' | 'summary';
+/**
+ * Where the map on the board comes from: this session, an earlier session (the newest map the server kept), or the synthetic
+ * demo map. Reflect falls back to the last two when the session has no map and no screen of its own.
+ */
+export type MapOrigin = 'session' | 'earlier' | 'demo';
 
 /** A labelled place on a frame; box is [x, y, w, h] normalised 0..1 to that frame. */
 export interface Region { regionId: string; label: string; box: [number, number, number, number] | null; evidenceId: string | null }
@@ -53,14 +58,22 @@ export type Cue =
   | { type: 'ask'; questionId: string; text: string; topic: string; regions: Region[]; evidenceIds: string[] }
   | { type: 'point'; target: Target }
   | { type: 'context'; text: string }
-  | { type: 'map'; version: number; map: unknown; confirmed: boolean }
+  // `origin` is additive (v1.3): a face that does not know it shows the map as before.
+  | { type: 'map'; version: number; map: unknown; confirmed: boolean; origin?: MapOrigin }
   | { type: 'teachback'; version: number; text: string }
   | { type: 'warn'; guardrailId: string; text: string; regions: Region[]; evidenceIds: string[] }
   | { type: 'say'; text: string }
   | { type: 'presence'; size: Presence; anchor: 'corner' | 'target' }
   | { type: 'open_web'; page: 'review' | 'teach' | 'summary'; url: string; text: string }
   | { type: 'cancel'; cueId: string }
-  | { type: 'quiet'; reason: string };
+  | { type: 'quiet'; reason: string }
+  // Additive (v1.2): a face that does not know these ignores them. The conductor sends them to the web only for now.
+  /** A thought bubble: a short line about what Clipa is working on. Shown beside her, never spoken. */
+  | { type: 'thought'; text: string }
+  /** The person should look somewhere else (an ask about a region, a warning, the next stage): Clipa flashes and goes there. */
+  | { type: 'attention'; target: Target | null }
+  /** The person asked for a stage by voice: the face opens it the way a click on its stage does. */
+  | { type: 'stage'; mode: Mode };
 
 export interface CueEnvelope { seq: number; cueId: string; atMs: number; mode: Mode | null; persona: Persona; for: Audience; cue: Cue; expiresAtMs: number | null }
 

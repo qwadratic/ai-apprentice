@@ -40,14 +40,21 @@ export type Cue =
   | { type: 'ask'; questionId: string; text: string; topic: string; regions: Region[]; evidenceIds: string[] }
   | { type: 'point'; target: Target }
   | { type: 'context'; text: string }
-  | { type: 'map'; version: number; map: unknown; confirmed: boolean }
+  // `origin` (additive): this session's own map, a copy of an earlier session's, or the synthetic demo map.
+  | { type: 'map'; version: number; map: unknown; confirmed: boolean; origin?: MapOrigin }
   | { type: 'teachback'; version: number; text: string }
   | { type: 'warn'; guardrailId: string; text: string; regions: Region[]; evidenceIds: string[] }
   | { type: 'say'; text: string }
   | { type: 'presence'; size: string; anchor: string }
   | { type: 'open_web'; page: string; url: string; text: string }
   | { type: 'cancel'; cueId: string }
-  | { type: 'quiet'; reason: string };
+  | { type: 'quiet'; reason: string }
+  /** A thought bubble beside Clipa: visual only, never spoken. */
+  | { type: 'thought'; text: string }
+  /** Clipa flashes and goes to the target (null: she flashes where she is). */
+  | { type: 'attention'; target: Target | null }
+  /** The person asked for a stage by voice: the page opens it like a click on the rail. */
+  | { type: 'stage'; mode: ConductorMode };
 
 export interface CueEnvelope {
   seq: number;
@@ -112,6 +119,13 @@ export function parseTarget(v: unknown): Target | null {
 
 const ids = (v: unknown): string[] => (Array.isArray(v) ? v.filter(isStr).map((s) => s.slice(0, 64)).slice(0, 8) : []);
 
+/** Where the map on the board comes from (the conductor's Reflect fallbacks). */
+export type MapOrigin = 'session' | 'earlier' | 'demo';
+/** An unknown or missing origin is this session's own map, as before the field existed. */
+export function parseMapOrigin(v: unknown): MapOrigin {
+  return v === 'earlier' || v === 'demo' ? v : 'session';
+}
+
 export function parseCue(v: unknown): Cue | null {
   if (!isRecord(v) || !isStr(v.type)) return null;
   switch (v.type) {
@@ -136,7 +150,7 @@ export function parseCue(v: unknown): Cue | null {
       return t === null ? null : { type: 'context', text: t };
     }
     case 'map':
-      return isNum(v.version) ? { type: 'map', version: v.version, map: v.map, confirmed: v.confirmed === true } : null;
+      return isNum(v.version) ? { type: 'map', version: v.version, map: v.map, confirmed: v.confirmed === true, origin: parseMapOrigin(v.origin) } : null;
     case 'teachback': {
       const t = text(v.text, 4000);
       return t === null || !isNum(v.version) ? null : { type: 'teachback', version: v.version, text: t };
@@ -158,6 +172,14 @@ export function parseCue(v: unknown): Cue | null {
       return isStr(v.cueId) ? { type: 'cancel', cueId: v.cueId.slice(0, 64) } : null;
     case 'quiet':
       return { type: 'quiet', reason: text(v.reason, 200) ?? '' };
+    case 'thought': {
+      const t = text(v.text, 120)?.trim() ?? '';
+      return t === '' ? null : { type: 'thought', text: t };
+    }
+    case 'attention':
+      return { type: 'attention', target: parseTarget(v.target) };
+    case 'stage':
+      return oneOf(v.mode, MODES) ? { type: 'stage', mode: v.mode } : null;
     default:
       return null;
   }

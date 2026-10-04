@@ -10,6 +10,7 @@ import { originAllowed, readBody, reply } from '../routes.ts';
 import type { AgentRuntime } from '../routes.ts';
 import { SESSION_ID } from '../sessions.ts';
 import { Conductor, MapRegistry } from './engine.ts';
+import { createMapStore } from './map-store.ts';
 import { parseBatch, parseObservation } from './protocol.ts';
 import type { ClientKind } from './protocol.ts';
 
@@ -38,7 +39,8 @@ export interface ConductorHub {
 
 export function createConductorHub(rt: AgentRuntime): ConductorHub {
   const { config } = rt;
-  const maps = new MapRegistry();
+  // Work Maps survive a deploy or a restart: they are read back from AGENT_MAPS_FILE (or kept in memory when it is unusable).
+  const maps = new MapRegistry(createMapStore({ file: config.mapsFile, log: config.log }));
   const conductors = new Map<string, Conductor>();
   const links = new Map<string, string>();
   const codes = new Map<string, { target: string; expiresAt: number }>();

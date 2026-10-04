@@ -19,6 +19,9 @@ struct ClipaConfig {
     var uploadInterval: Double
     /// The ElevenLabs voice conversation; off means Clipa only shows her lines.
     var voice: Bool
+    /// macOS voice processing on the microphone, so Clipa can be interrupted while she speaks. Off by default: the
+    /// plain audio engine (the path the CI smoke test plays through), and the microphone is muted while she speaks.
+    var echoCancellation: Bool
 
     static let defaults = ClipaConfig(
         server: URL(string: "https://apprentice.exe.xyz")!,
@@ -28,7 +31,8 @@ struct ClipaConfig {
         maxWidth: 1280,
         jpegQuality: 0.6,
         uploadInterval: 1.6,
-        voice: true
+        voice: true,
+        echoCancellation: false
     )
 
     private struct File: Decodable {
@@ -39,6 +43,7 @@ struct ClipaConfig {
         var jpeg_quality: Double?
         var upload_interval: Double?
         var voice: Bool?
+        var echo_cancellation: Bool?
     }
 
     static func load() -> ClipaConfig {
@@ -61,6 +66,7 @@ struct ClipaConfig {
         if let quality = file.jpeg_quality, quality >= 0.2, quality <= 1 { config.jpegQuality = quality }
         if let interval = file.upload_interval, interval >= 0.5, interval <= 10 { config.uploadInterval = interval }
         if env["CLIPA_VOICE"] == "0" || file.voice == false { config.voice = false }
+        if env["CLIPA_AEC"] == "1" || file.echo_cancellation == true { config.echoCancellation = true }
         return config
     }
 

@@ -3,12 +3,16 @@
 // that hands over to the web). Pure apart from the injected clock, LLM call, id source and web link, so tests drive it
 // with a fake clock and fake tasks.
 import { BaselineProfileSelector, baselinePromptContext } from '../../../../packages/screen/baseline/profiles.ts';
+import { isRecord } from '../config.ts';
 import type { GenericQuestionOutput, GuardrailCheckOutput, MapEditOutput, MapSynthesisOutput, ProcessMatchOutput, ReplyOutput } from '../llm-tasks.ts';
 import type { TaskResult } from '../llm.ts';
-import { GUIDE, OPEN_WEB, detectLanguage } from './lines.ts';
+import { demoMap } from './demo-map.ts';
+import { GUIDE, NUDGES, OPEN_WEB, STAGE_CONFIRM, detectLanguage, stageAsked } from './lines.ts';
 import { applyEdits } from './map-edits.ts';
-import type { ConductorMap } from './map-edits.ts';
-import type { Activity, Audience, ClientEnvelope, ClientEvent, ClientKind, Cue, CueEnvelope, Mode, Persona, Presence, Region, SeenObservation } from './protocol.ts';
+import type { ConductorMap, MapComment } from './map-edits.ts';
+import { mapTitle, storableMap } from './map-store.ts';
+import type { MapStore, StoredMap } from './map-store.ts';
+import type { Activity, Audience, ClientEnvelope, ClientEvent, ClientKind, Cue, CueEnvelope, MapOrigin, Mode, Persona, Presence, Region, SeenObservation, Target } from './protocol.ts';
 
 export const RULES = {
   /** Quiet this long after the last typing, talking or screen change is a pause. */
@@ -40,10 +44,28 @@ export const RULES = {
   screenContextMs: 8_000,
   /** A quiet cue with the same reason is not repeated sooner than this. */
   quietRepeatMs: 20_000,
+  /** Thought bubbles: a short visual line about what Clipa is working on (never spoken), at most one per thoughtGapMs. */
+  thoughts: true,
+  thoughtGapMs: 3_000,
+  thoughtMaxChars: 60,
+  /** Attention: Clipa flashes and goes where the person should look (an ask about a region, a warning, the next stage). */
+  attention: true,
+  /** Show and Pass it on: a gentle line after nudgeAfterMs without the person talking or typing, at most nudgeMaxInRow in a row. */
+  nudges: true,
+  nudgeAfterMs: 10_000,
+  nudgeMaxInRow: 3,
+  /** An explicit phrase in the person's final turn ("let me show you", "let's review", "teach me") opens that stage. */
+  voiceStages: true,
   keepCues: 300,
   keepObservations: 200,
   keepTurns: 200,
 } as const;
+
+/** One line of at most `max` characters: whitespace collapsed, an ellipsis where it was cut. */
+function clip(text: string, max: number): string {
+  const line = text.replace(/\s+/g, ' ').trim();
+  return line.length <= max ? line : `${line.slice(0, max - 1).trimEnd()}…`;
+}
 
 /** Free-text paraphrases on a generic frame do not restart the user's pause. */
 function sameScreen(a: SeenObservation, b: SeenObservation): boolean {
@@ -52,14 +74,51 @@ function sameScreen(a: SeenObservation, b: SeenObservation): boolean {
 
 export interface ConfirmedMap { sessionId: string; map: MapSynthesisOutput; confirmedAt: number }
 
-/** Confirmed maps, shared by all sessions of this server: Teach reads the expert's map. One team, one demo server. */
+/** The comments a stored map carries (voice edits keep them on the map), or none. */
+function commentsOf(map: unknown): MapComment[] {
+  const raw = isRecord(map) ? map.comments : undefined;
+  return Array.isArray(raw)
+    ? raw.filter((c): c is MapComment => isRecord(c) && typeof c.targetId === 'string' && typeof c.text === 'string' && typeof c.atMs === 'number').slice(-50)
+    : [];
+}
+
+/**
+ * Confirmed maps, shared by all sessions of this server: Teach reads the expert's map. One team, one demo server. It also
+ * keeps the last map built in any session, which Reflect shows when a session has none of its own. With a store, all of it
+ * is written to disk on every change and read back at start, so a deploy or a restart keeps what Clipa learned.
+ */
 export class MapRegistry {
   private readonly bySession = new Map<string, ConfirmedMap>();
   private latest: ConfirmedMap | null = null;
-  confirm(sessionId: string, map: MapSynthesisOutput, at: number): void {
-    const entry = { sessionId, map, confirmedAt: at };
-    this.bySession.set(sessionId, entry);
+  private built: StoredMap | null = null;
+  private readonly store: MapStore | null;
+  constructor(store: MapStore | null = null) {
+    this.store = store;
+    if (store === null) return;
+    // Oldest first, so the newest confirmed map is the latest again.
+    for (const e of [...store.loaded.confirmed].sort((a, b) => a.atMs - b.atMs)) this.remember({ sessionId: e.sessionId, map: e.map, confirmedAt: e.atMs });
+    this.built = store.loaded.lastBuilt;
+  }
+  private remember(entry: ConfirmedMap): void {
+    this.bySession.set(entry.sessionId, entry);
     this.latest = entry;
+  }
+  confirm(sessionId: string, map: MapSynthesisOutput, at: number): void {
+    this.remember({ sessionId, map, confirmedAt: at });
+    this.persist();
+  }
+  /** A session built (or edited) its own map: it becomes the last built map, confirmed or not. */
+  recordBuilt(sessionId: string, map: MapSynthesisOutput, at: number): void {
+    this.built = { sessionId, atMs: at, title: mapTitle(map), map: storableMap(map) };
+    this.persist();
+  }
+  /** The newest map any session built from its own screen and words, or null. */
+  lastBuilt(): StoredMap | null { return this.built; }
+  private persist(): void {
+    this.store?.save({
+      confirmed: [...this.bySession.values()].map((e) => ({ sessionId: e.sessionId, atMs: e.confirmedAt, title: mapTitle(e.map), map: storableMap(e.map) })),
+      lastBuilt: this.built,
+    });
   }
   /** The map of `from` when named and confirmed, else the most recently confirmed one. */
   find(from: string | null): ConfirmedMap | null {
@@ -169,8 +228,9 @@ export class Conductor {
   private mapPrefetch: Promise<void> | null = null;
   private freshMap = false;
 
-  private review: { phase: ReviewPhase; map: ConductorMap | null; version: number; gapIndex: number; awaiting: 'gap' | 'teachback' | null; answeredAt: number; unclearAsked: boolean; editFailed: boolean } =
-    { phase: 'idle', map: null, version: 0, gapIndex: 0, awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false };
+  /** `origin`: the map is this session's own, a copy of an earlier session's, or the demo map (Reflect's fallbacks). */
+  private review: { phase: ReviewPhase; map: ConductorMap | null; version: number; gapIndex: number; awaiting: 'gap' | 'teachback' | null; answeredAt: number; unclearAsked: boolean; editFailed: boolean; origin: MapOrigin } =
+    { phase: 'idle', map: null, version: 0, gapIndex: 0, awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false, origin: 'session' };
   private readonly voiceQueue: string[] = [];
 
   private readonly cues: CueEnvelope[] = [];
@@ -181,6 +241,14 @@ export class Conductor {
   private inflightTask: string | null = null;
   private lastQuiet: { reason: string; at: number } | null = null;
   private readonly guided = new Set<string>();
+  private lastThoughtAt = -Infinity;
+  private pendingThought: { text: string; at: number } | null = null;
+  /** Nudges: the person's last talk or typing, Clipa's last line (or the voice agent's own), the start of the stage. */
+  private lastPersonAt = -Infinity;
+  private lastSpokeAt = -Infinity;
+  private stageStartedAt = -Infinity;
+  private nudgesInRow = 0;
+  private nudgeIndex = 0;
   lastSeenAt: number;
 
   constructor(sessionId: string, deps: ConductorDeps) {
@@ -224,11 +292,42 @@ export class Conductor {
     this.cues.push(env);
     if (this.cues.length > RULES.keepCues) this.cues.splice(0, this.cues.length - RULES.keepCues);
     if (cue.type === 'ask' || cue.type === 'warn' || cue.type === 'teachback') this.active = { cueId: env.cueId, type: cue.type, expiresAt: ttl === null ? null : now + ttl, done: false };
+    if (cue.type === 'ask' || cue.type === 'warn' || cue.type === 'teachback' || cue.type === 'say') this.lastSpokeAt = now;
     for (const l of [...this.listeners]) l(env);
     return env;
   }
 
   private pose(clipa: Extract<Cue, { type: 'state' }>['clipa']): void { this.emit({ type: 'state', clipa }); }
+
+  /** The web face is (or may be) watching: the cues only the web renders for now (thought, attention, stage). */
+  private webFace(): boolean { return this.kinds().includes('web'); }
+
+  /** A thought bubble about what Clipa works on: visual only, never spoken, never off the record, at most one per thoughtGapMs. */
+  private thought(text: string): void {
+    if (!RULES.thoughts || this.offRecord || !this.webFace()) return;
+    const line = clip(text, RULES.thoughtMaxChars);
+    if (line === '') return;
+    this.pendingThought = { text: line, at: this.deps.now() };
+    this.flushThought();
+  }
+
+  /** A thought that came too soon waits for the gap (the newest one wins) and is dropped once it is stale. */
+  private flushThought(): void {
+    const t = this.pendingThought;
+    if (t === null) return;
+    const now = this.deps.now();
+    if (this.offRecord || now - t.at > 2 * RULES.thoughtGapMs) { this.pendingThought = null; return; }
+    if (now - this.lastThoughtAt < RULES.thoughtGapMs) return;
+    this.pendingThought = null;
+    this.lastThoughtAt = now;
+    this.emit({ type: 'thought', text: t.text }, { for: 'web' });
+  }
+
+  /** The person should look elsewhere: Clipa flashes and goes to the target (an ask about a region, a warning, the next stage). */
+  private attention(target: Target | null): void {
+    if (!RULES.attention || this.offRecord || !this.webFace()) return;
+    this.emit({ type: 'attention', target }, { for: 'web' });
+  }
 
   /** macOS only: how far Clipa comes out of the corner. */
   private presence(size: Presence, anchor: 'corner' | 'target' = 'corner'): void {
@@ -240,7 +339,10 @@ export class Conductor {
     this.guided.add(step);
     for (const kind of only ? [only] : this.kinds()) {
       const line = GUIDE[kind][this.persona][step];
-      if (line) this.emit({ type: 'guide', step: line.step, phase: line.phase, text: line.text, target: line.target, speak: line.speak }, { for: kind });
+      if (!line) continue;
+      this.emit({ type: 'guide', step: line.step, phase: line.phase, text: line.text, target: line.target, speak: line.speak }, { for: kind });
+      // The next stage of the journey: the person looks at its tab on the rail.
+      if (kind === 'web' && line.target?.kind === 'ui' && line.target.name === 'mode_tab') this.attention(line.target);
     }
   }
   private guideOnce(step: string): void { if (!this.guided.has(step)) this.guide(step); }
@@ -298,12 +400,13 @@ export class Conductor {
         if (e.client === 'macos') this.presence('peek');
         this.guide(this.review.map && e.client === 'web' ? 'talk_to_edit' : 'welcome', e.client);
         // A web app joining a session that already has a map shows it right away.
-        if (e.client === 'web' && this.review.map) this.emit({ type: 'map', version: this.review.version, map: this.review.map, confirmed: this.review.phase === 'confirmed' }, { for: 'web' });
+        if (e.client === 'web' && this.review.map) this.emit({ type: 'map', version: this.review.version, map: this.review.map, confirmed: this.review.phase === 'confirmed', origin: this.review.origin }, { for: 'web' });
         return;
       case 'off_record':
         if (e.on === this.offRecord) return;
         this.offRecord = e.on;
         this.resetLiveContext();
+        this.pendingThought = null;
         if (e.on) {
           this.inflight?.abort();
           this.inflight = null;
@@ -348,9 +451,12 @@ export class Conductor {
         this.onSession(e.mode, e.live, e.reason);
         return;
       case 'activity':
+        // Typing lasts until the next activity word: that moment is when the person last typed.
+        if (this.activity === 'typing' && e.state !== 'typing') this.lastPersonAt = now;
         this.activity = e.state;
         if (e.state === 'typing') {
           this.lastBusyAt = now;
+          this.lastPersonAt = now;
           // The person went back to work: a question or warning that has not been said yet is out of date.
           if (this.active && !this.active.done && (this.active.type === 'ask' || this.active.type === 'warn')) { this.cancelActive(); this.presence('dot'); }
         }
@@ -358,7 +464,16 @@ export class Conductor {
       case 'talking':
         if (e.by === 'person') this.personTalking = e.active; else this.agentTalking = e.active;
         this.lastBusyAt = now;
-        if (e.by === 'agent') this.pose(e.active ? 'speak' : 'listen');
+        if (e.by === 'agent') {
+          // The voice agent may also speak on its own: a nudge waits as long after it as after one of Clipa's lines.
+          this.lastSpokeAt = now;
+          this.pose(e.active ? 'speak' : 'listen');
+        } else {
+          // The person talks: Clipa listens, and the nudges start counting again.
+          this.lastPersonAt = now;
+          this.nudgesInRow = 0;
+          if (e.active && !this.agentTalking) this.pose('listen');
+        }
         return;
       case 'transcript':
         this.onTranscript(e.role, e.text);
@@ -422,6 +537,7 @@ export class Conductor {
     if (changed || o.pendingAction !== null) this.pendingTeachCheck = true;
     if (o.pendingAction !== null) this.urgentTeachCheck = true;
     this.shareScreen(o, newScreen, now);
+    if (newScreen && (this.liveMode === 'learn' || this.liveMode === 'teach')) this.thought(`Looking at ${o.app ? `${o.app}: ` : ''}${o.surface}`);
   }
 
   /**
@@ -488,6 +604,8 @@ export class Conductor {
     if (live) {
       this.liveMode = mode;
       this.selectedMode = mode;
+      this.stageStartedAt = this.deps.now();
+      this.nudgesInRow = 0;
       this.cancelActive();
       this.recognized = null;
       this.recognizedFor = null;
@@ -503,6 +621,7 @@ export class Conductor {
     }
     if (this.liveMode !== mode) return;
     this.liveMode = null;
+    this.pendingThought = null;
     this.inflight?.abort();
     this.inflight = null;
     this.prefetch = null;
@@ -533,6 +652,8 @@ export class Conductor {
     if (this.turns.length > RULES.keepTurns) this.turns.splice(0, this.turns.length - RULES.keepTurns);
     if (role !== 'expert') return;
     this.lastBusyAt = this.deps.now();
+    this.lastPersonAt = this.lastBusyAt;
+    this.nudgesInRow = 0;
     // The person answered: whatever Clipa asked is done.
     if (this.active) this.active.done = true;
     if (!this.languageFixed) {
@@ -540,6 +661,9 @@ export class Conductor {
       if (lang !== null) this.language = lang;
       else if (/^[\x20-\x7e]+$/.test(text) && text.length > 20) this.language = null;
     }
+    // "Let's review", "teach me": the person picks a stage by voice. A turn that does that is not an answer or a map edit.
+    const asked = RULES.voiceStages ? stageAsked(text) : null;
+    if (asked !== null && asked !== this.liveMode && this.webFace()) { this.voiceStage(asked); return; }
     if (this.liveMode !== 'review' || !this.review.map) return;
     if (this.review.awaiting === 'teachback') { void this.classifyReply(text); return; }
     if (this.review.awaiting === 'gap') {
@@ -552,9 +676,18 @@ export class Conductor {
     void this.drainVoice();
   }
 
+  /** The web opens the stage the way a click on its tab does, and Clipa confirms it in a few words. */
+  private voiceStage(mode: Mode): void {
+    this.emit({ type: 'stage', mode }, { for: 'web' });
+    this.attention({ kind: 'ui', name: 'mode_tab', mode });
+    this.emit({ type: 'say', text: STAGE_CONFIRM[mode] }, { for: 'web' });
+  }
+
   private onUi(action: 'confirm' | 'correct' | 'answer_gap' | 'ask_about' | 'finish', targetId: string | null, text: string | null): void {
     const map = this.review.map;
-    if (action === 'confirm' && map && this.review.phase === 'teachback') { this.confirmMap(); return; }
+    // A map from an earlier session or the demo map may be confirmed at once, before its open points: it is not news.
+    const confirmable = this.review.phase === 'teachback' || (this.review.phase === 'gaps' && this.review.origin !== 'session');
+    if (action === 'confirm' && map && confirmable) { this.confirmMap(); return; }
     if (action === 'correct' && map && text) { this.voiceQueue.push(text); void this.drainVoice(); return; }
     if (action === 'finish' && this.liveMode === 'review' && this.review.phase === 'gaps') { this.review.gapIndex = map?.gaps.length ?? 0; this.finishGaps(); return; }
     if (action === 'answer_gap' && map) {
@@ -586,6 +719,7 @@ export class Conductor {
     const now = this.deps.now();
     if (this.active && !this.active.done && this.active.expiresAt !== null && now > this.active.expiresAt) { this.cancelActive(); this.presence('dot'); }
     if (this.offRecord) return;
+    this.flushThought();
     if (this.pendingSay && this.paused(now) && (!this.active || this.active.done)) { this.emit({ type: 'say', text: this.pendingSay }); this.pendingSay = null; return; }
     if ((this.liveMode === 'learn' || this.liveMode === 'teach') && this.inflight === null && this.shouldRecognize(now)) { void this.recognize(); return; }
     if (this.liveMode === 'learn') this.tickLearn(now);
@@ -593,6 +727,21 @@ export class Conductor {
     if (this.active && !this.active.done) return;
     if (this.liveMode === 'review') this.tickReview(now);
     else if (this.liveMode === 'teach') this.tickTeach(now);
+    if (this.inflight === null) this.tickNudge(now);
+  }
+
+  /**
+   * Show and Pass it on never go silent for long: when the person has not talked or typed for nudgeAfterMs, nothing else is
+   * due and Clipa is not speaking, she says one gentle line. At most nudgeMaxInRow in a row; the person talking resets that.
+   */
+  private tickNudge(now: number): void {
+    if (!RULES.nudges || (this.liveMode !== 'learn' && this.liveMode !== 'teach')) return;
+    if (this.nudgesInRow >= RULES.nudgeMaxInRow) return;
+    if (this.personTalking || this.agentTalking || this.activity === 'typing' || this.activity === 'away') return;
+    if ((this.active && !this.active.done) || this.pendingSay !== null || this.prefetch !== null) return;
+    if (now - Math.max(this.lastPersonAt, this.lastSpokeAt, this.stageStartedAt) < RULES.nudgeAfterMs) return;
+    this.nudgesInRow++;
+    this.emit({ type: 'say', text: NUDGES[this.nudgeIndex++ % NUDGES.length]! });
   }
 
   private learnBudget(now: number): 'ok' | 'used' | 'soon' {
@@ -669,14 +818,17 @@ export class Conductor {
     if (!latest || library.length === 0 || observations.length === 0) return;
     this.recognizedFor = `${latest.app ?? ''}|${latest.surface}`;
     this.lastRecognitionAt = this.deps.now();
+    this.pose('think');
     const out = await this.run<ProcessMatchOutput>('process_match', {
       processes: library.map((p) => ({ id: p.key, title: p.title.slice(0, 120), summary: p.summary.slice(0, 300), steps: p.steps.slice(0, 10).map((x) => x.slice(0, 300)), rules: p.rules.slice(0, 8).map((r) => `when ${r.condition}, ${r.requiredAction}`.slice(0, 400)) })),
       observations,
     });
+    if (!this.offRecord && this.liveMode === mode) this.pose('listen');
     if (revision !== this.contextRevision || this.offRecord || this.liveMode !== mode || !out || out.processId === null || out.confidence < RULES.processConfidence) return;
     const match = library.find((p) => p.key === out.processId);
     if (!match || match.key === this.recognized?.key) return;
     this.recognized = match;
+    this.thought(`This looks like ${match.title}`);
     if (this.liveMode === 'teach') {
       this.emit({ type: 'context', text: `[map] The expert's confirmed rules for ${match.title}: ${match.rules.map((g) => `when ${g.condition}, ${g.requiredAction}`).join('; ') || 'none'}. Do not state them unless the app asks.`.slice(0, 2000) });
     }
@@ -749,6 +901,9 @@ export class Conductor {
     const entry: Prefetch = { basis, status: 'running', out: null };
     this.prefetch = entry;
     this.pose('think');
+    const latest = [...this.observations].reverse().find((o) => o.kind !== 'input_activity' && this.contextObservationIds.has(o.id));
+    const change = latest?.change ?? null;
+    this.thought(change ? `Hmm… ${change.charAt(0).toLowerCase()}${change.slice(1)}` : `Hmm… what happens on ${latest?.surface ?? 'this screen'}?`);
     const out = await this.run<GenericQuestionOutput>('generic_question', {
       observations, transcript: [...this.knownContext(), ...this.transcript(this.recognized ? 15 : 16, 1000, true)], baselineContext: baselinePromptContext(this.baseline.current()), asked: this.contextAskedTexts.slice(-20).map((a) => a.slice(0, 300)), language: this.language,
     });
@@ -780,7 +935,10 @@ export class Conductor {
     this.askTimes.push(now);
     this.lastAskAt = now;
     this.presence('full', regions[0] ? 'target' : 'corner');
-    if (regions[0]) this.emit({ type: 'point', target: { kind: 'region', ...regions[0] } });
+    if (regions[0]) {
+      this.emit({ type: 'point', target: { kind: 'region', ...regions[0] } });
+      this.attention({ kind: 'region', ...regions[0] });
+    }
     const questionId = `q${this.askTimes.length}-${this.seq + 1}`;
     const current = this.baseline.current();
     const scopedIds = obsIds.filter((id) => this.contextObservationIds.has(id));
@@ -798,13 +956,16 @@ export class Conductor {
   // queue behind it). A confirmed map stays as it is, as before.
   private prefetchMap(): void {
     const observations = this.genericObservations(40);
-    if (observations.length === 0 || this.mapPrefetch || this.review.phase === 'confirmed') return;
+    if (observations.length === 0 || this.mapPrefetch || this.ownConfirmed()) return;
     const provenance = this.provenanceSnapshot();
+    this.thought('Putting your map together…');
     this.mapPrefetch = (async () => {
       const map = await this.run<MapSynthesisOutput>('map_synthesis', { observations, transcript: this.transcript(60, 600), correction: null, previousTeachBack: null });
-      if (map && !this.offRecord && this.review.phase !== 'confirmed') {
-        this.review = { phase: 'idle', map: { ...map, baselineProvenance: provenance, comments: [] }, version: this.review.version, gapIndex: 0, awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false };
+      if (map && !this.offRecord && !this.ownConfirmed()) {
+        const built: ConductorMap = { ...map, baselineProvenance: provenance, comments: [] };
+        this.review = { phase: 'idle', map: built, version: this.review.version, gapIndex: 0, awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false, origin: 'session' };
         this.freshMap = true;
+        this.deps.maps.recordBuilt(this.sessionId, built, this.deps.now());
       }
     })().catch(() => undefined).finally(() => { this.mapPrefetch = null; });
   }
@@ -813,6 +974,7 @@ export class Conductor {
     if (this.mapPrefetch) {
       this.pose('think');
       this.guide('building', 'web');
+      this.thought('Putting your map together…');
       await this.mapPrefetch;
       if (this.offRecord || this.liveMode !== 'review') return;
     }
@@ -824,22 +986,52 @@ export class Conductor {
       this.freshMap = false;
       const map = this.review.map;
       this.publishMap(map, false);
+      this.pose('listen');
       if (map.gaps.length > 0) { this.review.phase = 'gaps'; this.guide('gaps', 'web'); }
       else this.readTeachBack();
       return;
     }
-    if (this.review.map) { this.publishMap(this.review.map, this.review.phase === 'confirmed', false); this.guide('talk_to_edit', 'web'); return; }
-    if (observations.length === 0) { this.guide('no_session_yet', 'web'); return; }
-    this.review = { phase: 'building', map: null, version: this.review.version, gapIndex: 0, awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false };
+    // A fallback copy gives way as soon as the session has a screen of its own: its own map is built instead.
+    const fallback = this.review.map !== null && this.review.origin !== 'session';
+    if (this.review.map && !(fallback && observations.length > 0)) { this.publishMap(this.review.map, this.review.phase === 'confirmed', false); this.guide('talk_to_edit', 'web'); return; }
+    if (observations.length === 0) { this.openFallbackMap(); return; }
+    this.review = { phase: 'building', map: null, version: this.review.version, gapIndex: 0, awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false, origin: 'session' };
     this.pose('think');
     this.guide('building', 'web');
+    this.thought('Putting your map together…');
     const map = await this.run<MapSynthesisOutput>('map_synthesis', { observations, transcript: turns, correction: null, previousTeachBack: null });
     if (this.offRecord || this.liveMode !== 'review') return;
-    if (!map) { this.review.phase = 'idle'; this.quiet('could not build the map; try Review again'); this.pose('idle'); return; }
+    // The model could not build this session's map: Reflect still opens with one (the last built map or the demo map),
+    // labelled, and the next Review tries this session's own map again.
+    if (!map) { this.quiet('could not build this session\'s map; showing an earlier one'); this.openFallbackMap(); return; }
     this.publishMap({ ...map, baselineProvenance: provenance, comments: [] }, false);
+    this.pose('listen');
     if (map.gaps.length > 0) { this.review.phase = 'gaps'; this.guide('gaps', 'web'); }
     else this.readTeachBack();
   }
+
+  /**
+   * Reflect always has a session to explore. Without a map of its own (no screen yet, or the model could not build one),
+   * the session gets a copy of the last map
+   * built in an earlier session (kept across restarts), else the synthetic demo map; the board labels where it comes from.
+   * Edits change this session's copy only, and a confirmation registers it like any confirmed map, so Pass it on works.
+   */
+  private openFallbackMap(): void {
+    const stored = this.deps.maps.lastBuilt();
+    // The same session id: this session's own map, back after a restart.
+    const origin: MapOrigin = stored === null ? 'demo' : stored.sessionId === this.sessionId ? 'session' : 'earlier';
+    const source = stored === null ? demoMap() : structuredClone(stored.map);
+    this.freshMap = false;
+    this.review = { phase: 'gaps', map: null, version: this.review.version, gapIndex: 0, awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false, origin };
+    this.publishMap({ ...source, processes: source.processes ?? [], comments: commentsOf(source), baselineProvenance: this.provenanceSnapshot() }, false);
+    this.pose('listen');
+    if (origin === 'demo') this.emit({ type: 'context', text: '[map] The map on the board is a synthetic demo map, not from this session: payment terms on an invoice email and a prepaid cost spread by quarter. Say so if asked; any change the person asks for is applied by the app.' });
+    if (origin === 'earlier') this.emit({ type: 'context', text: '[map] The map on the board comes from an earlier session, not from this one. Any change the person asks for is applied by the app to this session\'s copy.' });
+    this.guide(origin === 'demo' ? 'demo_map' : origin === 'earlier' ? 'earlier_map' : 'talk_to_edit', 'web');
+  }
+
+  /** This session confirmed a map of its own (a confirmed fallback copy does not stop its own map from being built). */
+  private ownConfirmed(): boolean { return this.review.phase === 'confirmed' && this.review.origin === 'session'; }
 
   private provenanceSnapshot(): NonNullable<MapSynthesisOutput['baselineProvenance']> {
     return structuredClone(this.baselineProvenance);
@@ -849,7 +1041,9 @@ export class Conductor {
     map = { ...map, baselineProvenance: map.baselineProvenance ?? this.provenanceSnapshot() };
     this.review.map = map;
     if (bump) this.review.version++;
-    this.emit({ type: 'map', version: this.review.version, map, confirmed });
+    // A new or edited map of the session's own is the last built one; an earlier or demo copy is never stored as built.
+    if (bump && this.review.origin === 'session') this.deps.maps.recordBuilt(this.sessionId, map, this.deps.now());
+    this.emit({ type: 'map', version: this.review.version, map, confirmed, origin: this.review.origin });
   }
 
   private askGap(): void {
@@ -858,14 +1052,17 @@ export class Conductor {
     if (!map || !gap) return;
     this.review.awaiting = 'gap';
     const regions = this.regionsFor(gap.evidenceIds, gap.regionIds);
-    if (regions[0]) this.emit({ type: 'point', target: { kind: 'region', ...regions[0] } });
-    else this.emit({ type: 'point', target: { kind: 'ui', name: 'board_gap' } });
+    if (regions[0]) {
+      this.emit({ type: 'point', target: { kind: 'region', ...regions[0] } });
+      this.attention({ kind: 'region', ...regions[0] });
+    } else this.emit({ type: 'point', target: { kind: 'ui', name: 'board_gap' } });
     this.emit({ type: 'ask', questionId: `gap-${this.review.gapIndex + 1}`, text: gap.question, topic: 'gap', regions, evidenceIds: this.evidenceFor(gap.evidenceIds) });
   }
 
   /** After the gaps: rebuild the map when an answer could not be applied by voice, then read the teach-back. */
   private finishGaps(): void {
-    if (this.review.editFailed) { void this.resynthesize(null); return; }
+    // Rebuilding needs the session's own screen: a map without it (an earlier or demo copy) is read back as it is.
+    if (this.review.editFailed && this.genericObservations(1).length > 0) { void this.resynthesize(null); return; }
     this.readTeachBack();
   }
 
@@ -876,12 +1073,14 @@ export class Conductor {
     this.review.phase = 'building';
     this.review.awaiting = null;
     this.pose('think');
+    this.thought('Putting your map together…');
     const map = await this.run<MapSynthesisOutput>('map_synthesis', {
       observations: this.genericObservations(40), transcript: this.transcript(60, 600), correction: correction?.slice(0, 600) ?? null, previousTeachBack: previous?.slice(0, 3000) ?? null,
     });
     if (this.offRecord || this.liveMode !== 'review') return;
     this.review.editFailed = false;
     if (map) this.publishMap({ ...map, baselineProvenance: provenance, comments }, false);
+    this.pose('listen');
     if (!this.review.map) { this.review.phase = 'idle'; return; }
     this.readTeachBack();
   }
@@ -948,7 +1147,7 @@ export class Conductor {
     this.review.phase = 'confirmed';
     this.review.awaiting = null;
     this.deps.maps.confirm(this.sessionId, map, this.deps.now());
-    this.emit({ type: 'map', version: this.review.version, map, confirmed: true });
+    this.emit({ type: 'map', version: this.review.version, map, confirmed: true, origin: this.review.origin });
     this.pose('celebrate');
     this.guide('handoff', 'web');
   }
@@ -972,20 +1171,28 @@ export class Conductor {
     const guardrails = rules.slice(0, 10).map((g) => ({
       id: g.id, condition: g.condition.slice(0, 300), requiredAction: g.requiredAction.slice(0, 300), reason: g.reason?.slice(0, 400) ?? null, quote: g.quote?.slice(0, 600) ?? null,
     }));
+    // The rule as the expert put it, without the process name teachRules() puts in front.
+    const first = guardrails[0]?.condition.replace(/^\[[^\]]*\]\s*/, '');
+    if (first) this.thought(`Checking: ${first}…`);
+    this.pose('think');
     const out = await this.run<GuardrailCheckOutput>('guardrail_check', { guardrails, observations, transcript: this.transcript(8, 1000, true), language: this.language });
-    if (revision !== this.contextRevision || this.offRecord || this.liveMode !== 'teach' || !out) return;
+    if (this.offRecord || this.liveMode !== 'teach') return;
+    const current = revision === this.contextRevision;
+    if (!(current && out?.status === 'warn' && out.guardrailId && out.message)) this.pose('listen');
+    if (!current || !out) return;
     if (out.status === 'unknown' && out.message) { this.quiet(out.message); return; }
     if (out.status !== 'warn' || !out.guardrailId || !out.message) return;
     const latest = observations[observations.length - 1];
     const latestId = typeof latest?.id === 'string' ? latest.id : '';
     const key = `${out.guardrailId}:${latestId}`;
-    if (this.warned.has(key)) return;
+    if (this.warned.has(key)) { this.pose('listen'); return; }
     this.warned.add(key);
     const rule = rules.find((g) => g.id === out.guardrailId);
     const regions = this.regionsFor([latestId], out.regionIds, true);
     this.pose('warn');
     this.presence('full', regions[0] ? 'target' : 'corner');
     if (regions[0]) this.emit({ type: 'point', target: { kind: 'region', ...regions[0] } });
+    this.attention(regions[0] ? { kind: 'region', ...regions[0] } : null);
     this.emit({ type: 'warn', guardrailId: out.guardrailId, text: out.message, regions, evidenceIds: rule?.evidenceIds ?? [] }, { ttlMs: RULES.warnTtlMs });
   }
 

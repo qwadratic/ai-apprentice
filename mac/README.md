@@ -104,7 +104,7 @@ Every request carries `Origin: app://apprentice-macos` and the session token as 
 
 - **Microphone.** 16 kHz mono 16-bit PCM, sent as base64 `user_audio_chunk`.
 - **Playback.** The agent's `audio` events are played as they arrive; `interruption` flushes playback; `ping` is answered with `pong`.
-- **Echo.** Voice processing (echo cancellation) is switched on when the Mac supports it. Without it, the microphone sends silence while Clipa speaks.
+- **Echo.** The microphone sends silence while Clipa speaks. Voice processing (echo cancellation) is opt-in (`"echo_cancellation": true`); with it the microphone stays open.
 - **Roles.** Show uses `role=interviewer`; Pass it on uses `role=tutor`.
 - **Secrets.** The signed URL is a secret: it is never logged, and connection errors are reported by code only.
 
@@ -143,7 +143,7 @@ Optional. Nothing secret is configured on the Mac: the server issues the session
 
 ```json
 { "server": "https://apprentice.exe.xyz", "web": "https://qwadratic.github.io/clipa/", "fps": 2,
-  "max_width": 1280, "jpeg_quality": 0.6, "upload_interval": 1.6, "voice": true }
+  "max_width": 1280, "jpeg_quality": 0.6, "upload_interval": 1.6, "voice": true, "echo_cancellation": false }
 ```
 
 | Variable | Meaning |
@@ -152,6 +152,7 @@ Optional. Nothing secret is configured on the Mac: the server issues the session
 | `CLIPA_WEB` | web app opened when there is no Reflect link |
 | `CLIPA_FPS` | capture rate, 0.5 to 5 |
 | `CLIPA_VOICE=0` | no voice conversation; Clipa only shows her lines |
+| `CLIPA_AEC=1` | try macOS voice processing (echo cancellation) first, so Clipa can be interrupted while she speaks. Off by default: the plain audio engine, and the microphone is muted while she speaks |
 
 The session log is in `~/Library/Application Support/Clipa/sessions/`. It holds one JSONL file per run with stages, cue types, voice state and per-frame latency. It never holds tokens, signed URLs, images or what was said.
 
@@ -183,7 +184,7 @@ scripts/build-app.sh
 - **No masking on macOS frames yet.** Frames leave the Mac as they are on screen: no masks, no redaction. Use synthetic demo data only. Off the record stops the stream and the voice, but does not recall frames or audio already sent. The screen pipeline does not clean speech.
 - **Main display only.** Pointing maps onto the main display, and the overlay sits on every screen.
 - **Typing detection.** It needs Input Monitoring on current macOS. Without it, Clipa may start a question while you type; the conductor still waits for pauses in what it sees.
-- **Echo cancellation.** It depends on macOS voice processing. Where that is unavailable, Clipa cannot be interrupted by voice while she speaks.
+- **Echo cancellation is opt-in.** By default Clipa plays through the plain audio engine (the path the CI smoke test plays through) and mutes the microphone while she speaks, so she cannot be interrupted by voice. `"echo_cancellation": true` (or `CLIPA_AEC=1`) tries macOS voice processing first; where it cannot start, or starts but plays nothing (the app checks with 0.2 s of silence), she switches back to the plain engine and the menu says "echo cancellation off". If she cannot be heard at all, the bubble says why once, and the menu's Voice line keeps the reason.
 - **Reflect link.** The link from `open_web` carries a join code that works once, for five minutes. Opened later, the web app starts unlinked.
 - **Distribution.** Ad-hoc signed only: no notarization and no auto-update.
 

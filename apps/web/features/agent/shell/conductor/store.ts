@@ -3,7 +3,7 @@
 // state stays the in-browser brain's, and this one is the conductor's. Nothing secret is kept here.
 import type { ScreenObservation } from '@apprentice/contracts';
 import type { ConductorStatus } from './client.ts';
-import type { ClipaPose, Region, Target } from './protocol.ts';
+import type { ClipaPose, MapOrigin, Region, Target } from './protocol.ts';
 
 export interface ConductorLine {
   cueId: string;
@@ -28,6 +28,8 @@ export interface ConductorMapSnapshot {
   /** The conductor's generic map (steps, guardrails, gaps, teachBack, comments) as sent; read it with fromGenericMap. */
   map: unknown;
   confirmed: boolean;
+  /** Where the map comes from: this session (default), an earlier session, or the synthetic demo map. */
+  origin?: MapOrigin;
 }
 
 export interface ConductorState {
@@ -55,14 +57,19 @@ export interface ConductorState {
   observations: readonly ScreenObservation[];
   /** What Clipa asked, warned or said in this page (newest last, capped). */
   said: readonly SaidItem[];
+  /** The latest thought bubble, or null. Visual only: it is never spoken. */
+  thought: ConductorThought | null;
 }
 
 export const MAX_SAID = 40;
 
+/** Clipa's current thought bubble (the conductor's `thought` cue): shown beside her, faded out by CSS after a few seconds. */
+export interface ConductorThought { cueId: string; text: string }
+
 export function initialConductorState(): ConductorState {
   return {
     enabled: false, status: 'idle', statusDetail: null, linked: false, pose: null, line: null, target: null,
-    regions: [], regionsCueId: null, map: null, teachBack: null, paused: false, quiet: null, observations: [], said: [],
+    regions: [], regionsCueId: null, map: null, teachBack: null, paused: false, quiet: null, observations: [], said: [], thought: null,
   };
 }
 

@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Conductor, MapRegistry, RULES } from '../agent/conductor/engine.ts';
-import { detectLanguage } from '../agent/conductor/lines.ts';
+import { NUDGES, STAGE_CONFIRM, detectLanguage, stageAsked } from '../agent/conductor/lines.ts';
+import { demoMap } from '../agent/conductor/demo-map.ts';
 import { applyEdits } from '../agent/conductor/map-edits.ts';
 import type { ConductorMap } from '../agent/conductor/map-edits.ts';
 import { parseBatch } from '../agent/conductor/protocol.ts';
@@ -543,4 +544,323 @@ test('routes: status authenticates the session and exposes the current baseline 
   assert.equal(suspended.status, 'suspended');
   assert.equal(suspended.appId, null);
   assert.equal(suspended.profileId, null);
+});
+
+// ---- Clipa feels alive: thoughts, attention, nudges, stages by voice ------------------------------------------------
+/** Runs `fn` with some RULES switches changed, then puts them back. */
+async function withRules(patch: Partial<Record<keyof typeof RULES, unknown>>, fn: () => Promise<void>): Promise<void> {
+  const rules = RULES as unknown as Record<string, unknown>;
+  const saved = Object.fromEntries(Object.keys(patch).map((k) => [k, rules[k]]));
+  Object.assign(rules, patch);
+  try { await fn(); } finally { Object.assign(rules, saved); }
+}
+const nudgesOf = (cues: CueEnvelope[]) => cueOf(cues, 'say').map((s) => s.text).filter((t) => NUDGES.includes(t));
+
+test('thoughts: a new screen and a question being prepared show short thoughts, one per gap, to the web only', async () => {
+  const r = rig({ generic_question: () => ok(QUESTION) });
+  await r.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', null));
+  assert.deepEqual(cueOf(r.cues, 'thought').map((t) => t.text), ['Looking at Mail: compose window']);
+  await r.advance(RULES.settleMs + 10);
+  assert.equal(r.calls.at(-1)?.task, 'generic_question');
+  assert.equal(of(r.cues, 'thought').length, 1, 'the thought about the question waits for the gap');
+  await r.advance(RULES.thoughtGapMs);
+  const thoughts = of(r.cues, 'thought');
+  assert.deepEqual(thoughts.map((t) => (t.cue as { text: string }).text), ['Looking at Mail: compose window', 'Hmm… what happens on compose window?']);
+  assert.ok(thoughts.every((t) => t.for === 'web'), 'web only for now');
+  assert.ok(thoughts[1]!.atMs - thoughts[0]!.atMs >= RULES.thoughtGapMs, 'throttled');
+  // A long app name is cut to a short line.
+  await r.advance(RULES.thoughtGapMs);
+  await r.send(obs('o2', null, { app: 'A very long application name that goes on', surface: 'and an even longer surface title here' }));
+  const long = cueOf(r.cues, 'thought').at(-1)!.text;
+  assert.ok(long.startsWith('Looking at A very long') && long.length <= RULES.thoughtMaxChars && long.endsWith('…'));
+});
+
+test('thoughts: never off the record, none for a Mac-only session, and the switch turns them off', async () => {
+  const r = rig({});
+  await r.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, { type: 'off_record', on: true }, obs('o1', 'Secret change.'));
+  await r.advance(RULES.thoughtGapMs * 2);
+  assert.equal(of(r.cues, 'thought').length, 0);
+  const mac = rig({}, new MapRegistry(), 'mac-1');
+  await mac.send(hello('macos'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', null));
+  assert.equal(of(mac.cues, 'thought').length, 0, 'the Mac does not render thoughts yet');
+  await withRules({ thoughts: false }, async () => {
+    const off = rig({});
+    await off.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', null));
+    assert.equal(of(off.cues, 'thought').length, 0);
+  });
+});
+
+test('thoughts: the map being built, a recognised process and a guardrail check', async () => {
+  const r = rig({ map_synthesis: () => ok(MAP) });
+  await r.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', 'Changed.'));
+  await r.advance(RULES.thoughtGapMs);
+  await r.send({ type: 'session', mode: 'learn', live: false, reason: 'user' });
+  await r.advance(RULES.thoughtGapMs);
+  assert.equal(cueOf(r.cues, 'thought').at(-1)?.text, 'Putting your map together…');
+  const maps = new MapRegistry();
+  maps.confirm('expert-session', TWO as never, 1);
+  const t = rig({
+    process_match: () => ok({ processId: 'm1-p2', confidence: 0.9 }),
+    guardrail_check: () => ok({ status: 'clear', guardrailId: null, message: null, regionIds: [] }),
+  }, maps, 'hire-1');
+  await t.send(hello('web', 'new_hire', 'expert-session'), { type: 'session', mode: 'teach', live: true, reason: null }, obs('n1', 'A contract is open.'));
+  await t.advance(RULES.settleMs + 10);
+  await t.advance(RULES.thoughtGapMs);
+  assert.ok(cueOf(t.cues, 'thought').some((x) => x.text === 'This looks like Supplier check'));
+  await t.advance(RULES.teachCheckGapMs);
+  await t.advance(RULES.thoughtGapMs);
+  assert.ok(cueOf(t.cues, 'thought').some((x) => x.text.startsWith('Checking: a new supplier')));
+  const poses = cueOf(t.cues, 'state').map((s) => s.clipa);
+  assert.ok(poses.includes('think') && poses.at(-1) === 'listen', 'think while a model task works, then listen');
+});
+
+test('attention: an ask about a region, a warning and the next stage make Clipa flash and go there (web only)', async () => {
+  const r = rig({ generic_question: () => ok(QUESTION) });
+  await r.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', null), obs('o2', 'The recipient changed.'));
+  await r.advance(RULES.pauseMs + 10);
+  const seq = r.cues.map((c) => c.cue.type).filter((x) => x === 'point' || x === 'attention' || x === 'ask');
+  assert.deepEqual(seq, ['point', 'attention', 'ask']);
+  const att = cueOf(r.cues, 'attention')[0];
+  assert.ok(att?.target?.kind === 'region' && att.target.regionId === 'r-to');
+  assert.equal(of(r.cues, 'attention')[0]?.for, 'web');
+  await r.send({ type: 'session', mode: 'learn', live: false, reason: 'user' });
+  const next = cueOf(r.cues, 'attention').at(-1);
+  assert.ok(next?.target?.kind === 'ui' && next.target.name === 'mode_tab' && next.target.mode === 'review', 'the next stage');
+  const maps = new MapRegistry();
+  maps.confirm('expert-session', MAP as never, 1);
+  const t = rig({ guardrail_check: () => ok({ status: 'warn', guardrailId: 'g1', message: 'Your lead would stop here. Why?', regionIds: ['r-to'] }) }, maps, 'hire-1');
+  await t.send(hello('web', 'new_hire', 'expert-session'), { type: 'session', mode: 'teach', live: true, reason: null }, obs('n1', 'Budget set to 450.', { pendingAction: 'Submit' }));
+  await t.advance(RULES.urgentSettleMs + 10);
+  const warnAtt = cueOf(t.cues, 'attention').at(-1);
+  assert.ok(of(t.cues, 'warn').length === 1 && warnAtt?.target?.kind === 'region' && warnAtt.target.regionId === 'r-to');
+  await withRules({ attention: false }, async () => {
+    const off = rig({ generic_question: () => ok(QUESTION) });
+    await off.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', null), obs('o2', 'Changed.'));
+    await off.advance(RULES.pauseMs + 10);
+    assert.ok(of(off.cues, 'ask').length === 1 && of(off.cues, 'attention').length === 0);
+  });
+});
+
+test('poses: Clipa listens while the person talks and speaks while the voice agent speaks', async () => {
+  const r = rig({});
+  await r.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null });
+  await r.send({ type: 'talking', by: 'person', active: true });
+  assert.equal(cueOf(r.cues, 'state').at(-1)?.clipa, 'listen');
+  await r.send({ type: 'talking', by: 'person', active: false }, { type: 'talking', by: 'agent', active: true });
+  assert.equal(cueOf(r.cues, 'state').at(-1)?.clipa, 'speak');
+});
+
+test('nudges: after 10 s of silence in Show, a gentle line in turn; at most three in a row, talking resets the count', async () => {
+  const r = rig({});
+  await r.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null });
+  await r.advance(RULES.nudgeAfterMs - 100);
+  assert.deepEqual(nudgesOf(r.cues), [], 'not before 10 s');
+  await r.advance(200);
+  assert.deepEqual(nudgesOf(r.cues), [NUDGES[0]]);
+  await r.advance(RULES.nudgeAfterMs - 200);
+  assert.equal(nudgesOf(r.cues).length, 1, 'never within 10 s after a say');
+  await r.advance(300);
+  await r.advance(RULES.nudgeAfterMs + 100);
+  assert.deepEqual(nudgesOf(r.cues), [NUDGES[0], NUDGES[1], NUDGES[2]]);
+  await r.advance(RULES.nudgeAfterMs * 3);
+  assert.equal(nudgesOf(r.cues).length, RULES.nudgeMaxInRow, 'at most three in a row without the person talking');
+  await r.send({ type: 'talking', by: 'person', active: true }, { type: 'talking', by: 'person', active: false });
+  await r.advance(RULES.nudgeAfterMs + 100);
+  assert.deepEqual(nudgesOf(r.cues).at(-1), NUDGES[3], 'talking resets the count');
+  // Typing holds the nudge: the 10 s count from the last key press.
+  await r.send({ type: 'activity', state: 'typing' });
+  await r.advance(RULES.nudgeAfterMs * 2);
+  assert.equal(nudgesOf(r.cues).length, 4, 'not while the person types');
+  await r.send({ type: 'activity', state: 'idle' });
+  await r.advance(RULES.nudgeAfterMs - 500);
+  assert.equal(nudgesOf(r.cues).length, 4);
+});
+
+test('nudges: never within 10 s after an ask, not in Review, not off the record, not before a stage runs', async () => {
+  const r = rig({ generic_question: () => ok(QUESTION) });
+  await r.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', null), obs('o2', 'The recipient changed.'));
+  await r.advance(RULES.pauseMs + 10);
+  const ask = of(r.cues, 'ask')[0]!;
+  await r.send({ type: 'cue_done', cueId: ask.cueId, outcome: 'spoken' });
+  await r.advance(RULES.nudgeAfterMs - 300);
+  assert.equal(nudgesOf(r.cues).length, 0, 'not within 10 s after the ask');
+  await r.advance(400);
+  assert.equal(nudgesOf(r.cues).length, 1);
+  const idle = rig({});
+  await idle.send(hello('web'));
+  await idle.advance(RULES.nudgeAfterMs * 3);
+  assert.equal(nudgesOf(idle.cues).length, 0, 'not before a stage runs');
+  const review = rig({ map_synthesis: () => ok({ ...MAP, gaps: [] }) });
+  await review.send(hello('web'), { type: 'session', mode: 'review', live: true, reason: null });
+  await review.advance(RULES.nudgeAfterMs * 3);
+  assert.equal(nudgesOf(review.cues).length, 0, 'not in Review');
+  const off = rig({});
+  await off.send(hello('web'), { type: 'session', mode: 'teach', live: true, reason: null }, { type: 'off_record', on: true });
+  await off.advance(RULES.nudgeAfterMs * 3);
+  assert.equal(nudgesOf(off.cues).length, 0, 'not off the record');
+  await withRules({ nudges: false }, async () => {
+    const quiet = rig({});
+    await quiet.send(hello('web'), { type: 'session', mode: 'teach', live: true, reason: null });
+    await quiet.advance(RULES.nudgeAfterMs * 3);
+    assert.equal(nudgesOf(quiet.cues).length, 0);
+  });
+});
+
+test('stage phrases: explicit phrases in English, Russian and German, whole words near the start of the turn', () => {
+  const cases: Array<[string, string | null]> = [
+    ['Okay, let’s review.', 'review'], ["Let's review what you saw", 'review'], ['LET US REVIEW', 'review'],
+    ['Давай проверим', 'review'], ['Gut, lass uns prüfen.', 'review'],
+    ['Let me show you how I do it', 'learn'], ["I'll show you", 'learn'], ['Сейчас покажу', 'learn'], ['Ich zeig dir das', 'learn'],
+    ['Now teach me', 'teach'], ['Научи меня', 'teach'], ['Bring es mir bei', 'teach'],
+    // Normal sentences: no switch.
+    ['My boss used to teach me this every December', null], ['We review every email before sending it', null],
+    ['I showed you the order table', null], ['Он хочет научиться', null], ['Показываю адрес', null], ['preview the email', null],
+  ];
+  for (const [text, mode] of cases) assert.equal(stageAsked(text), mode, text);
+});
+
+test('stage by voice: a clear request opens that stage on the web with a short spoken confirmation', async () => {
+  const r = rig({});
+  await r.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null });
+  await r.send({ type: 'transcript', role: 'expert', text: 'I copy the address into the email body.' });
+  assert.equal(of(r.cues, 'stage').length, 0, 'a normal sentence does not switch');
+  await r.send({ type: 'transcript', role: 'expert', text: 'Let me show you the next one.' });
+  assert.equal(of(r.cues, 'stage').length, 0, 'Show is already live');
+  await r.send({ type: 'transcript', role: 'expert', text: 'Okay, let’s review.' });
+  const stage = of(r.cues, 'stage')[0];
+  assert.ok(stage?.cue.type === 'stage' && stage.cue.mode === 'review' && stage.for === 'web');
+  assert.equal(cueOf(r.cues, 'say').at(-1)?.text, STAGE_CONFIRM.review);
+  assert.equal(of(r.cues, 'say').at(-1)?.for, 'web');
+  await r.send({ type: 'off_record', on: true }, { type: 'transcript', role: 'expert', text: 'Teach me' });
+  assert.equal(of(r.cues, 'stage').length, 1, 'never off the record');
+  await withRules({ voiceStages: false }, async () => {
+    const off = rig({});
+    await off.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, { type: 'transcript', role: 'expert', text: 'Teach me' });
+    assert.equal(of(off.cues, 'stage').length, 0);
+  });
+  const mac = rig({}, new MapRegistry(), 'mac-1');
+  await mac.send(hello('macos'), { type: 'session', mode: 'learn', live: true, reason: null }, { type: 'transcript', role: 'expert', text: "Let's review" });
+  assert.equal(of(mac.cues, 'stage').length, 0, 'the Mac has no stages to open');
+});
+
+test('stage by voice in Review: the request is not taken as a map edit', async () => {
+  const r = rig({ map_synthesis: () => ok({ ...MAP, gaps: [] }), map_edit: () => ok(NO_EDIT), reply_classification: () => ok({ verdict: 'unclear', correction: null }) });
+  await r.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', 'Changed.'));
+  await r.send({ type: 'session', mode: 'review', live: true, reason: null });
+  const calls = r.calls.length;
+  await r.send({ type: 'transcript', role: 'expert', text: 'Научи меня' });
+  assert.equal(r.calls.length, calls, 'no reply classification and no map edit');
+  assert.ok(of(r.cues, 'stage').some((s) => s.cue.type === 'stage' && s.cue.mode === 'teach'));
+});
+
+// ---- Reflect always has a session to explore ------------------------------------------------------------------------
+const mapsOf = (cues: CueEnvelope[]) => cueOf(cues, 'map');
+const evidenceIn = (map: ConductorMap): string[] =>
+  [...map.steps.flatMap((s) => s.evidenceIds), ...map.guardrails.flatMap((g) => g.evidenceIds), ...map.gaps.flatMap((g) => g.evidenceIds)];
+
+test('Reflect falls back: its own map first, then the last map of an earlier session, then the demo map', async () => {
+  const maps = new MapRegistry();
+  // No session anywhere yet: the synthetic demo map of the demo script, with no screen moments and no model call.
+  const first = rig({}, maps, 'sess-a');
+  await first.send(hello('web'), { type: 'session', mode: 'review', live: true, reason: null });
+  const demo = mapsOf(first.cues).at(-1);
+  assert.equal(demo?.origin, 'demo');
+  const seeded = demo?.map as ConductorMap;
+  assert.deepEqual(seeded.processes.map((p) => p.title), ['Invoice email: payment terms', 'Prepaid cost: spread by quarter']);
+  assert.deepEqual(evidenceIn(seeded), [], 'never seen on a screen');
+  assert.ok(seeded.steps.some((s) => s.action.includes('Net 30') && s.decision?.reason?.includes('signed agreement') && s.decision.quote?.includes('signed agreement')));
+  assert.ok(seeded.guardrails.some((g) => g.requiredAction.startsWith('Net 30 only for Lumen') && g.escalateTo === 'the finance lead'));
+  assert.ok(seeded.guardrails.some((g) => g.condition.includes('prepaid cost over EUR 1,000') && g.exceptions.length === 1));
+  assert.ok(seeded.gaps.length >= 1 && seeded.gaps.length <= 2 && seeded.teachBack.length > 0);
+  assert.equal(cueOf(first.cues, 'guide').at(-1)?.step, 'demo_map');
+  assert.ok(cueOf(first.cues, 'context').some((c) => c.text.includes('synthetic demo map')));
+  assert.equal(first.calls.length, 0);
+  assert.equal(maps.lastBuilt(), null, 'the demo map is never stored as a built map');
+
+  // Session B builds its own map from its screen, as before: it becomes the last built map.
+  const own = rig({ map_synthesis: () => ok(MAP) }, maps, 'sess-b');
+  await own.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', null), obs('o2', 'Changed.'));
+  await own.send({ type: 'session', mode: 'learn', live: false, reason: 'user' }, { type: 'session', mode: 'review', live: true, reason: null });
+  assert.equal(mapsOf(own.cues).at(-1)?.origin, 'session');
+  assert.deepEqual([maps.lastBuilt()?.sessionId, maps.lastBuilt()?.title], ['sess-b', 'Budget update']);
+  assert.equal(maps.lastBuilt()?.map.baselineProvenance, undefined, 'the stored map keeps the workflow, not the bookkeeping');
+
+  // A page reload is a new session with no screen: Reflect shows B's map, labelled as an earlier session.
+  const reload = rig({}, maps, 'sess-c');
+  await reload.send(hello('web'), { type: 'session', mode: 'review', live: true, reason: null });
+  const earlier = mapsOf(reload.cues).at(-1);
+  assert.equal(earlier?.origin, 'earlier');
+  assert.deepEqual((earlier?.map as ConductorMap).steps.map((s) => s.action), MAP.steps.map((s) => s.action));
+  assert.equal(cueOf(reload.cues, 'guide').at(-1)?.step, 'earlier_map');
+  assert.ok(cueOf(reload.cues, 'context').some((c) => c.text.includes('earlier session')));
+  assert.equal(reload.calls.length, 0);
+  // The person can still dig in: Clipa raises the open point at a pause, as for a map of the session's own.
+  await reload.advance(RULES.pauseMs + 10);
+  assert.equal(cueOf(reload.cues, 'ask').at(-1)?.text, 'Who is the lead?');
+});
+
+test('Reflect: edits change this session\'s copy only, and the copy gives way once the session has a screen of its own', async () => {
+  const maps = new MapRegistry();
+  maps.recordBuilt('sess-old', MAP as never, 1);
+  const edit = { intent: 'edit', operations: [{ op: 'set', targetId: 'g1', field: 'condition', value: 'budget above 500', value2: null, quote: null }], reply: 'Changed the limit to 500.', teachBack: null };
+  const r = rig({ map_edit: () => ok(edit), map_synthesis: () => ok(TWO) }, maps, 'sess-new');
+  await r.send(hello('web'), { type: 'session', mode: 'review', live: true, reason: null });
+  await r.send({ type: 'transcript', role: 'expert', text: 'The lead signs above 500.' });
+  const edited = mapsOf(r.cues).at(-1);
+  assert.equal(edited?.origin, 'earlier');
+  assert.equal((edited?.map as ConductorMap).guardrails[0]?.condition, 'budget above 500');
+  assert.deepEqual([maps.lastBuilt()?.sessionId, maps.lastBuilt()?.map.guardrails[0]?.condition], ['sess-old', 'budget above 300'], 'the earlier map is unchanged');
+
+  // A demo copy is edited the same way; the seeded map itself never changes.
+  const d = rig({ map_edit: () => ok({ ...edit, operations: [{ ...edit.operations[0]!, value: 'longer terms' }] }) }, new MapRegistry(), 'sess-demo');
+  await d.send(hello('web'), { type: 'session', mode: 'review', live: true, reason: null });
+  await d.send({ type: 'transcript', role: 'expert', text: 'Any longer terms need the finance lead.' });
+  assert.equal((mapsOf(d.cues).at(-1)?.map as ConductorMap).guardrails[0]?.condition, 'longer terms');
+  assert.equal(demoMap().guardrails[0]?.condition, 'Payment terms other than the standard Net 14 on an invoice email');
+
+  // The session runs Show: Reflect builds its own map instead of showing the copy again.
+  await r.send({ type: 'session', mode: 'review', live: false, reason: 'user' }, { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', 'Changed.'));
+  await r.send({ type: 'session', mode: 'learn', live: false, reason: 'user' }, { type: 'session', mode: 'review', live: true, reason: null });
+  const own = mapsOf(r.cues).at(-1);
+  assert.equal(own?.origin, 'session');
+  assert.deepEqual((own?.map as ConductorMap).processes.map((p) => p.title), ['Budget update', 'Supplier check']);
+  assert.equal(maps.lastBuilt()?.sessionId, 'sess-new');
+});
+
+test('Reflect: confirming a fallback map registers it like any confirmed map, so Pass it on works after a reload', async () => {
+  const maps = new MapRegistry();
+  const r = rig({}, maps, 'sess-1');
+  await r.send(hello('web'), { type: 'session', mode: 'review', live: true, reason: null });
+  assert.equal(mapsOf(r.cues).at(-1)?.origin, 'demo');
+  await r.send({ type: 'ui', action: 'confirm', targetId: null, text: null });
+  const confirmed = mapsOf(r.cues).at(-1);
+  assert.ok(confirmed?.confirmed === true && confirmed.origin === 'demo', 'still labelled as the demo map');
+  assert.equal(maps.find(null)?.sessionId, 'sess-1');
+  assert.ok(cueOf(r.cues, 'guide').some((g) => g.step === 'handoff'));
+  assert.equal(maps.lastBuilt(), null);
+  const hire = rig({}, maps, 'hire-1');
+  await hire.send(hello('web', 'new_hire'), { type: 'session', mode: 'teach', live: true, reason: null });
+  assert.ok(!cueOf(hire.cues, 'guide').some((g) => g.step === 'no_map'), 'Pass it on has a confirmed map');
+  assert.deepEqual(maps.library().map((p) => [p.title, p.rules.length]), [['Invoice email: payment terms', 2], ['Prepaid cost: spread by quarter', 1]]);
+
+  // A map of the session's own is still confirmed only after its teach-back, as before.
+  const own = rig({ map_synthesis: () => ok(MAP) }, new MapRegistry(), 'sess-2');
+  await own.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', 'Changed.'));
+  await own.send({ type: 'session', mode: 'learn', live: false, reason: 'user' }, { type: 'session', mode: 'review', live: true, reason: null });
+  await own.send({ type: 'ui', action: 'confirm', targetId: null, text: null });
+  assert.ok(!mapsOf(own.cues).some((m) => m.confirmed));
+});
+
+test('Reflect: when the model cannot build the session\'s own map, the board still opens with the last built map', async () => {
+  const maps = new MapRegistry();
+  maps.recordBuilt('sess-old', MAP as never, 1);
+  // No map_synthesis answer: every build fails (runner_error), in the background after Show and again in Reflect.
+  const r = rig({}, maps, 'sess-new');
+  await r.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', null), obs('o2', 'Changed.'));
+  await r.send({ type: 'session', mode: 'learn', live: false, reason: 'user' }, { type: 'session', mode: 'review', live: true, reason: null });
+  const shown = mapsOf(r.cues).at(-1);
+  assert.equal(shown?.origin, 'earlier');
+  assert.deepEqual((shown?.map as ConductorMap).steps.map((s) => s.action), MAP.steps.map((s) => s.action));
+  assert.equal(cueOf(r.cues, 'guide').at(-1)?.step, 'earlier_map');
+  assert.ok(r.calls.filter((c) => c.task === 'map_synthesis').length >= 1, 'it did try to build its own map');
 });

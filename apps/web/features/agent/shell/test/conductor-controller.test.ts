@@ -5,6 +5,7 @@ import type { AgentApi } from '../api.ts';
 import { createAgentApi } from '../api.ts';
 import type { BrainDecision } from '../brain/types.ts';
 import { BATCH_MS, RECONNECT_MIN_MS } from '../conductor/client.ts';
+import { THOUGHT_MS } from '../conductor/face.ts';
 import type { Target } from '../conductor/protocol.ts';
 import { ShellController, TYPING_IDLE_MS } from '../controller.ts';
 import type { ControllerDeps } from '../controller.ts';
@@ -23,6 +24,7 @@ function conductorRig(options: { linkStatus?: number } = {}) {
   const brain = new ScriptedBrain();
   const pointed: Array<Target | null> = [];
   const guides: Array<{ phase: string; step: string; text: string } | null> = [];
+  const flashes: Array<Target | null> = [];
   const api: AgentApi = createAgentApi({ base: 'https://api.example.invalid', fetch, now: clock.now, newId: () => 'legacy' });
   const memory = new Map<string, string>();
   const deps: ControllerDeps = {
@@ -35,6 +37,7 @@ function conductorRig(options: { linkStatus?: number } = {}) {
       base: 'https://api.example.invalid', version: 'web-test',
       present: (_text, target) => { if (target !== undefined) pointed.push(target); },
       guide: (step) => { guides.push(step); },
+      attention: (target) => { flashes.push(target); },
     },
   };
   const controller = new ShellController(deps);
@@ -42,7 +45,7 @@ function conductorRig(options: { linkStatus?: number } = {}) {
   const events = (): Array<{ seq: number; event: Record<string, unknown> }> =>
     c.calls.filter((x) => x.url.endsWith('/events')).flatMap((x) => (x.body as { events: Array<{ seq: number; event: Record<string, unknown> }> }).events);
   const sessionPosts = (): number => rest.calls.filter((x) => x.url.endsWith('/api/agent/sessions') && x.method === 'POST').length;
-  return { controller, timers, voice, presenter, brain, pointed, guides, conductor: c, rest, events, sessionPosts };
+  return { controller, timers, voice, presenter, brain, pointed, guides, flashes, conductor: c, rest, events, sessionPosts };
 }
 
 async function booted(options: { join?: string; page?: 'review' | 'teach'; linkStatus?: number; lastCueSeq?: number } = {}) {
@@ -277,5 +280,66 @@ test('Teach: the hello is sent again as the new hire when the stage changes', as
   const hellos = rig.events().filter((e) => e.event.type === 'hello');
   assert.equal(hellos.length, 2);
   assert.equal(hellos[1]?.event.persona, 'new_hire');
+  rig.controller.dispose();
+});
+
+test('a thought cue shows in the thought bubble for a few seconds and is never spoken or reported', async () => {
+  const rig = await booted();
+  await rig.controller.start('learn');
+  await settle();
+  rig.conductor.streams[0]?.push(sseCue(cue(1, { type: 'thought', text: 'Looking at Mail: compose window' }, { for: 'web' })));
+  await settle();
+  assert.deepEqual(rig.controller.conductorStore.getState().thought, { cueId: 'c1-abcdef12', text: 'Looking at Mail: compose window' });
+  assert.ok(!rig.voice.userMessages.some((m) => m.includes('Looking at')), 'never spoken');
+  assert.ok(!rig.presenter.bubbles.includes('Looking at Mail: compose window'), 'not in the speech bubble');
+  rig.timers.advance(THOUGHT_MS - 100);
+  assert.notEqual(rig.controller.conductorStore.getState().thought, null);
+  rig.timers.advance(200);
+  assert.equal(rig.controller.conductorStore.getState().thought, null, 'gone after a few seconds');
+  rig.timers.advance(BATCH_MS);
+  await settle();
+  assert.ok(!rig.events().some((e) => e.event.type === 'cue_done' && e.event.cueId === 'c1-abcdef12'));
+  rig.controller.dispose();
+});
+
+test('an attention cue flashes Clipa and sends her to a new target; at her current target she only flashes', async () => {
+  const rig = await booted();
+  const region = { kind: 'region', regionId: 'r-to', label: 'recipient field', box: [0.1, 0.1, 0.3, 0.05], evidenceId: 'ev-1' };
+  rig.conductor.streams[0]?.push(sseCue(cue(1, { type: 'point', target: region })));
+  rig.conductor.streams[0]?.push(sseCue(cue(2, { type: 'attention', target: region }, { for: 'web' })));
+  await settle();
+  assert.equal(rig.flashes.length, 1);
+  assert.equal(rig.pointed.length, 1, 'already there: no second flight');
+  rig.conductor.streams[0]?.push(sseCue(cue(3, { type: 'attention', target: { kind: 'ui', name: 'mode_tab', mode: 'review' } }, { for: 'web' })));
+  await settle();
+  assert.equal(rig.flashes.length, 2);
+  assert.deepEqual(rig.pointed.at(-1), { kind: 'ui', name: 'mode_tab', mode: 'review' }, 'a new target: she goes there');
+  rig.conductor.streams[0]?.push(sseCue(cue(4, { type: 'attention', target: null }, { for: 'web' })));
+  await settle();
+  assert.deepEqual(rig.flashes.at(-1), null, 'no target: she flashes where she is');
+  rig.controller.dispose();
+});
+
+test('a stage cue opens the stage exactly like a click on the rail; nothing is applied off the record', async () => {
+  const rig = await booted();
+  await rig.controller.start('learn');
+  await settle();
+  rig.conductor.streams[0]?.push(sseCue(cue(1, { type: 'stage', mode: 'review' }, { for: 'web' })));
+  await settle();
+  assert.equal(rig.controller.store.getState().mode, 'review', 'the Reflect tab is open');
+  assert.equal(rig.controller.store.getState().session?.mode, 'learn', 'like a rail click, the running session keeps going');
+  rig.timers.advance(BATCH_MS);
+  await settle();
+  assert.equal(rig.events().filter((e) => e.event.type === 'mode').at(-1)?.event.mode, 'review', 'the conductor hears the mode, as after a click');
+  rig.conductor.streams[0]?.push(sseCue(cue(2, { type: 'stage', mode: 'bogus' })));
+  await settle();
+  assert.equal(rig.controller.store.getState().mode, 'review', 'an unknown stage is ignored');
+  await rig.controller.goOffRecord();
+  await settle();
+  rig.conductor.streams[0]?.push(sseCue(cue(3, { type: 'stage', mode: 'teach' })));
+  rig.conductor.streams[0]?.push(sseCue(cue(4, { type: 'thought', text: 'Hmm…' })));
+  await settle();
+  assert.equal(rig.controller.store.getState().mode, 'review');
+  assert.equal(rig.controller.conductorStore.getState().thought, null);
   rig.controller.dispose();
 });
