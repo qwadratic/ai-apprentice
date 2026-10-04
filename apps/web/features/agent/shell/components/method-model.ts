@@ -26,7 +26,7 @@ export const METHOD: Readonly<Record<BoxId, { title: string; what: string; examp
   },
   knowledge: {
     title: 'Knowledge graph',
-    what: 'Process, step, decision, rule, exception. Each is linked to its evidence: the screen moment and the expert’s words.',
+    what: 'Process → step → decision → rule → exception, each linked to its evidence: the screen moment and the expert’s words.',
     example: '1 process, 1 rule, 1 exception, each with its evidence.',
   },
   teaching: {
@@ -46,13 +46,15 @@ export interface MethodBox {
   live: string | null;
   /** Shown (and marked "example") while `live` is null. */
   example: string;
-  /** The live item comes from the sample source (invented data, not the person's screen). */
-  synthetic: boolean;
+  /** What the live item is not: "synthetic" (the sample source's invented data, not the person's screen) or "earlier session". */
+  note: string | null;
 }
 
 /** The part of a Work Map the panel shows: its rules with the expert's words and exceptions. */
 export interface MapSummary {
   process: string | null;
+  /** The map is not this session's own: invented ("synthetic") or from "earlier session". Shown next to it, never hidden. */
+  note: string | null;
   steps: number;
   rules: Array<{ id: string; text: string; quote: string | null; exceptions: string[] }>;
 }
@@ -101,7 +103,8 @@ export function summarizeGenericMap(snapshot: ConductorMapSnapshot | null): MapS
   });
   if (steps === 0 && rules.length === 0) return null;
   const firstProcess = list(raw.processes).filter(isRec).map((p) => text(p.title, 120)).find((t): t is string => t !== null) ?? null;
-  return { process: firstProcess, steps, rules };
+  const note = snapshot.origin === 'demo' ? 'synthetic' : snapshot.origin === 'earlier' ? 'earlier session' : null;
+  return { process: firstProcess, note, steps, rules };
 }
 
 /** The in-browser brain's draft map as a summary: a step's reason is the expert's words for the rules of that step. */
@@ -121,7 +124,7 @@ export function summarizeDraftMap(map: DraftMap): MapSummary | null {
     rules.push({ id: g.id, text: g.text, quote: null, exceptions: [] });
   }
   if (map.steps.length === 0 && rules.length === 0) return null;
-  return { process: null, steps: map.steps.length, rules };
+  return { process: null, note: map.synthetic === true ? 'synthetic' : null, steps: map.steps.length, rules };
 }
 
 /** The counts line of the knowledge box. */
@@ -191,7 +194,7 @@ export function methodBoxes(input: MethodInput): MethodBox[] {
     what: METHOD[id].what,
     live: live[id],
     example: METHOD[id].example,
-    synthetic: id === 'events' && live.events !== null && observation?.synthetic === true,
+    note: id === 'events' && live.events !== null && observation?.synthetic === true ? 'synthetic' : id === 'knowledge' && live.knowledge !== null ? (input.summary?.note ?? null) : null,
   }));
 }
 
@@ -225,10 +228,13 @@ export interface KnowledgeGraph {
   edges: GraphEdge[];
   /** The graph is the customer_07 example, not the current Work Map. */
   example: boolean;
+  /** The map is invented or from an earlier session (see MapSummary.note); null for the session's own map and for the example. */
+  note: string | null;
 }
 
 export const EXAMPLE_SUMMARY: MapSummary = {
   process: 'Send a delivery update',
+  note: null,
   steps: 5,
   rules: [{
     id: 'example-rule',
@@ -245,8 +251,8 @@ const GAP = 18;
 const LINE = 14;
 const HEAD = 22;
 const FOOT = 8;
-/** About how many characters of the 11.5 px label font fit in a node of this width. */
-const charsFor = (w: number): number => Math.max(8, Math.floor((w - 16) / 6.1));
+/** About how many characters of the 11.5 px label font fit in a node of this width (a wide average, so a line never leaves its node). */
+const charsFor = (w: number): number => Math.max(8, Math.floor((w - 16) / 6.4));
 const heightFor = (lines: number): number => HEAD + lines * LINE + FOOT;
 
 /** Greedy word wrap into at most `maxLines` lines; what does not fit ends in an ellipsis. */
@@ -316,7 +322,7 @@ export function buildGraph(summary: MapSummary | null): KnowledgeGraph {
     y += GAP;
   });
 
-  return { width: WIDTH, height: y - GAP + 2, nodes, edges, example: !real };
+  return { width: WIDTH, height: y - GAP + 2, nodes, edges, example: !real, note: real ? source.note : null };
 }
 
 /** The graph in words, for screen readers. */

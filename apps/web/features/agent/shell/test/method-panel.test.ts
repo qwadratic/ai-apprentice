@@ -78,7 +78,7 @@ test('each box says what it is, in the words of the method', () => {
   assert.match(box(html, 'signals'), /Screen frames, the pointer and speech\. Raw data: nothing is decided here\./);
   assert.match(box(html, 'events'), /What changed on screen, in words\./);
   assert.match(box(html, 'reasoning'), /When to speak: at a pause\. What to ask: the why behind the change\./);
-  assert.match(box(html, 'knowledge'), /Process, step, decision, rule, exception\. Each is linked to its evidence: the screen moment and the expert’s words\./);
+  assert.match(box(html, 'knowledge'), /Process → step → decision → rule → exception, each linked to its evidence: the screen moment and the expert’s words\./);
   assert.match(box(html, 'teaching'), /The new hire is checked against the confirmed rules before Send\./);
   assert.match(html, /The screen and the mouse are raw data\. Reasoning runs over them\. What is learned ends up as a graph\./);
 });
@@ -147,6 +147,7 @@ test('without the conductor the in-browser brain\'s draft map feeds the knowledg
 test('the graph has at most ten nodes whatever the map holds, stays inside its box and never loses the example fallback', () => {
   const many = {
     process: 'A process with a long name that has to wrap onto the next line of its node and then stop',
+    note: null,
     steps: 9,
     rules: Array.from({ length: 7 }, (_, i) => ({
       id: `g${i}`,
@@ -168,11 +169,27 @@ test('the graph has at most ten nodes whatever the map holds, stays inside its b
   assert.equal(new Set(ids).size, ids.length, 'unique node ids');
   assert.equal(graph.edges.length, GRAPH_MAX_RULES * 3, 'one edge per rule, exception and quote');
   // A map without a rule has nothing to draw as a graph: the example stands in, marked.
-  assert.equal(buildGraph({ process: 'x', steps: 3, rules: [] }).example, true);
+  assert.equal(buildGraph({ process: 'x', note: null, steps: 3, rules: [] }).example, true);
   assert.equal(buildGraph(null).example, true);
   assert.equal(buildGraph(null).nodes.length, 4);
   assert.match(describeGraph(buildGraph(null)), /^Example knowledge graph\./);
   assert.match(describeGraph(graph), /^Knowledge graph of the Work Map\./);
+});
+
+test('a map that is invented or from an earlier session says so next to its counts and its graph', () => {
+  const r = rig();
+  r.conductor.set({ enabled: true, status: 'live', map: { ...genericMap, origin: 'demo' } });
+  const demo = render(r);
+  assert.match(box(demo, 'knowledge'), /2 steps, 1 rule, 1 exception<span class="mp__tag mp__tag--warn">synthetic<\/span>/);
+  assert.match(demo, /The current Work Map as a graph: each rule links to the expert’s words\.<span class="mp__tag mp__tag--warn">synthetic<\/span>/);
+  r.conductor.set({ map: { ...genericMap, origin: 'earlier' } });
+  assert.match(box(render(r), 'knowledge'), /<span class="mp__tag mp__tag--warn">earlier session<\/span>/);
+  r.conductor.set({ map: { ...genericMap, origin: 'session' } });
+  assert.doesNotMatch(box(render(r), 'knowledge'), /mp__tag--warn/, 'the session\'s own map carries no note');
+  const draft = summarizeDraftMap({ synthetic: true, steps: [{ id: 's1', title: 'T', kind: 'step', decision: null, reason: null, guardrails: [{ id: 'g1', text: 'Rule', evidenceIds: [] }], evidenceIds: [], atMs: 1 }] });
+  assert.equal(draft?.note, 'synthetic');
+  assert.equal(buildGraph(draft).note, 'synthetic');
+  assert.equal(buildGraph(null).note, null, 'the example is labelled example, not synthetic');
 });
 
 test('the example is the customer_07 rule with its exception and the expert\'s words', () => {

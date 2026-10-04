@@ -80,7 +80,7 @@ export function MethodPanel() {
               {box.live === null ? (
                 <><span className="mp__tag">example</span>{box.example}</>
               ) : (
-                <><span className="mp__tag mp__tag--live">live</span>{box.live}{box.synthetic && <span className="mp__tag mp__tag--warn">synthetic</span>}</>
+                <><span className="mp__tag mp__tag--live">live</span>{box.live}{box.note !== null && <span className="mp__tag mp__tag--warn">{box.note}</span>}</>
               )}
             </p>
           </li>
@@ -93,7 +93,7 @@ export function MethodPanel() {
           {graph.example ? (
             <><span className="mp__tag">example</span>The customer_07 rule as a graph: each rule links to the expert’s words.</>
           ) : (
-            <><span className="mp__tag mp__tag--live">live</span>The current Work Map as a graph: each rule links to the expert’s words.</>
+            <><span className="mp__tag mp__tag--live">live</span>The current Work Map as a graph: each rule links to the expert’s words.{graph.note !== null && <span className="mp__tag mp__tag--warn">{graph.note}</span>}</>
           )}
         </figcaption>
       </figure>
