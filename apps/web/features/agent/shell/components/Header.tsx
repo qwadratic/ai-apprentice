@@ -1,5 +1,6 @@
 import type { KeyboardEvent } from 'react';
 import { useShell, useShellState } from '../hooks.ts';
+import { ClipaLogo } from './ClipaLogo.tsx';
 import { MODES, MODE_LABELS, PERSONAS, PERSONA_INFO } from '../state/types.ts';
 import type { Mode, Persona } from '../state/types.ts';
 
@@ -22,8 +23,8 @@ export function Header({ debugOpen, onToggleDebug }: { debugOpen: boolean; onTog
   return (
     <header className="as-header">
       <div className="as-brand">
-        <span className="as-brand__name">AI Apprentice</span>
-        <span className="as-brand__sub">Clipa learns your judgment, then teaches it</span>
+        <ClipaLogo />
+        <span className="as-brand__sub">Learns your judgment, then teaches it</span>
       </div>
 
       <div className="as-tabs" role="tablist" aria-label="Mode">
