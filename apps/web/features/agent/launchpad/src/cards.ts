@@ -19,7 +19,7 @@ export const CARDS: readonly Card[] = [
     title: 'AI Apprentice app',
     summary: 'The product: Learn, Review and Teach with Clipa, screen sharing and voice. Built from main on every release; the shell is being wired in.',
     chip: { text: 'live', tone: 'live' },
-    action: { label: 'Open the app', href: './app/' },
+    action: { label: 'Open the app', href: '../' },
   },
   {
     id: 'demo-workspace',
