@@ -107,6 +107,9 @@ export class ShellController {
   private source: ObservationSource | null = null;
   /** Every source of this page, newest last: evidence of an earlier session (the expert's moment) stays resolvable in Teach. */
   private evidenceSources: ObservationSource[] = [];
+  /** A real source that waits for the person to share a screen while a sample source runs. */
+  private standby: ObservationSource | null = null;
+  private standbyOff: Array<() => void> = [];
   private readonly speech = new SpeechGate();
   private held: { decision: BrainDecision; atPerfMs: number } | null = null;
   private sourceOff: Array<() => void> = [];
@@ -335,7 +338,10 @@ export class ShellController {
     }
     this.store.dispatch({ type: 'OFF_RECORD_SET', on: true });
     // A live source coordinates the workspace and the capture itself (also before capture has started).
-    try { await this.source?.setOffRecord?.(true); } catch (e) { this.err(`The workspace could not go off the record cleanly: ${errMsg(e)}`); }
+    try {
+      await this.source?.setOffRecord?.(true);
+      await this.standby?.setOffRecord?.(true);
+    } catch (e) { this.err(`The workspace could not go off the record cleanly: ${errMsg(e)}`); }
     this.deps.presenter.say('');
     this.deps.presenter.setTarget(null);
     await this.teardown('Off the record: session ended, microphone closed. What was already sent is not deleted or recalled.');
@@ -365,6 +371,7 @@ export class ShellController {
     // The microphone closes first: nothing below may keep it open.
     if (voice) await voice.end();
     await this.stopSource();
+    this.dropStandby();
     this.capture?.stop();
     this.deps.presenter.say('');
     this.deps.presenter.setTarget(null);
@@ -407,6 +414,7 @@ export class ShellController {
     this.limits.stop();
     this.stopTick();
     void this.stopSource();
+    this.dropStandby();
     const voice = this.voice;
     this.voice = null;
     if (voice) void voice.end();
@@ -612,17 +620,54 @@ export class ShellController {
   }
 
   /**
-   * Stream A's integrated runtime (the real bridge behind the demo workspace) attaches here once its mount exists. It replaces a
-   * sample source, and is never started by the shell: the real bridge's start opens the screen picker, which only the person's own
-   * click in the panel may do. The controller listens to its observations, status and checkpoints and answers every checkpoint.
+   * The real screen (stream A's bridge, alone or inside the integrated runtime) attaches here once its mount exists. It is never
+   * started by the shell: the real bridge's start opens the screen picker, which only the person's own click in the panel may do.
+   * While a sample source is running it waits in standby, and takes over the moment the bridge reports `capturing`: the sample is a
+   * labelled fallback for when no screen is shared, never mixed with a real screen. The controller listens to the real source's
+   * observations, status and checkpoints, and answers every checkpoint.
    */
   async attachLiveSource(source: ObservationSource): Promise<void> {
     if (this.state.phase !== 'live' || !this.session) {
       source.dispose();
       return;
     }
+    this.dropStandby();
+    // The sample runs (or is about to: the session's own start continues after this) until a screen is shared.
+    const sampleWanted = this.source === null && this.state.screen.sampleOn && this.state.session?.mode !== 'review';
+    if (this.source?.synthetic || sampleWanted) {
+      this.standby = source;
+      this.evidenceSources = [...this.evidenceSources.filter((x) => x !== source), source].slice(-6);
+      this.standbyOff = [source.onStatus((st) => {
+        if (this.standby === source && st.state === 'capturing') void this.promoteStandby(source, st);
+      })];
+      this.sys('The real screen is ready: choose a window in the Screen panel. Until then the sample observations run (synthetic).');
+      return;
+    }
     if (this.source) await this.stopSource();
     await this.attach(source, this.runId, false);
+  }
+
+  private async promoteStandby(source: ObservationSource, status: ScreenStatus): Promise<void> {
+    const run = this.runId;
+    this.standby = null;
+    for (const off of this.standbyOff) off();
+    this.standbyOff = [];
+    await this.stopSource();
+    if (!this.isCurrent(run) || !this.session) return;
+    this.sys('A screen is shared: the sample observations stopped. From now on the brain reads your screen.');
+    await this.attach(source, run, false);
+    this.onScreenStatus(status);
+  }
+
+  private dropStandby(): void {
+    for (const off of this.standbyOff) off();
+    this.standbyOff = [];
+    const standby = this.standby;
+    this.standby = null;
+    if (standby) {
+      void standby.stop().catch(() => {});
+      standby.dispose();
+    }
   }
 
   /** `Bearer <token>` of the live session for the real bridge's own requests, or null (placeholder API, no session). The token is never stored or logged. */

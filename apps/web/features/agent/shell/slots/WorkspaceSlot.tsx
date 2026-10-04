@@ -9,7 +9,9 @@ import type { WorkspaceAdapter } from './workspace-adapter.ts';
  * nothing outside this file: the real workspace's elements get the same marks through the mount adapter (doc-9, section 3.2).
  */
 export function WorkspaceSlot({ adapter = null }: { adapter?: WorkspaceAdapter | null }) {
-  const { controller, live: liveMount } = useShell();
+  const { controller, live } = useShell();
+  // A's integrated runtime mounts the demo workspace itself; the screen-only mount leaves it to the adapter and the stand-ins below.
+  const liveMount = live !== null && live.providesWorkspace ? live : null;
   const sessionId = useShellState((s) => s.session?.id ?? null);
   const offRecord = useShellState((s) => s.offRecord);
   const ref = useRef<HTMLElement | null>(null);
@@ -65,7 +67,7 @@ export function WorkspaceSlot({ adapter = null }: { adapter?: WorkspaceAdapter |
           <span>
             <strong>Show the real demo workspace</strong>
             <span className="as-switch__hint">
-              Its Preview is not connected to the agent until the real screen bridge is wired in: it says &quot;No agent is connected&quot; and
+              Its Preview is not connected to the agent until stream A&apos;s integrated runtime is wired in: it says &quot;No agent is connected&quot; and
               checks nothing. The sample observations do not follow what you do in it.
             </span>
           </span>

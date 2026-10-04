@@ -9,7 +9,7 @@ import { LiveMount } from '../screen/live-mount.ts';
 import { LIVE_LABEL } from '../screen/runtime-workspace-source.ts';
 import type { RuntimeWorkspaceMount, RuntimeWorkspaceOptions } from '../screen/runtime-workspace-source.ts';
 import { buildScenario } from '../screen/sample-scenarios.ts';
-import { TOKEN, createRig, must, settle } from './helpers.ts';
+import { FakeCapture, TOKEN, createRig, must, settle } from './helpers.ts';
 import type { Rig } from './helpers.ts';
 
 interface Fake {
@@ -23,7 +23,7 @@ function fakeRuntime(rig: Rig): Fake {
     const bridge = new MockScreenBridge(rig.clock.now(), (sessionId) => buildScenario('t1', sessionId));
     const entry = { options, bridge, disposed: 0, offRecord: [] as boolean[], mount: null as unknown as RuntimeWorkspaceMount };
     entry.mount = {
-      runtime: null, bridge: bridge as ScreenBridge, capture: null, workspace: null,
+      runtime: null, bridge: bridge as ScreenBridge, capture: new FakeCapture(), workspace: null,
       setOffRecord: async (on) => { entry.offRecord.push(on); },
       dispose: () => { entry.disposed += 1; },
     };
@@ -36,7 +36,7 @@ function fakeRuntime(rig: Rig): Fake {
 function setup(): { rig: Rig; fake: Fake; live: LiveMount } {
   const rig = createRig();
   const fake = fakeRuntime(rig);
-  const live = new LiveMount({ factory: fake.factory, controller: rig.controller, apiBase: 'https://api.example.invalid' });
+  const live = new LiveMount({ factory: fake.factory, controller: rig.controller, apiBase: 'https://api.example.invalid', providesWorkspace: true });
   live.setRoots({ workspace: {} as HTMLElement, screen: {} as HTMLElement });
   return { rig, fake, live };
 }
@@ -125,10 +125,77 @@ test('the sample switch never replaces the real screen', async () => {
 
 test('a runtime that cannot be mounted is noted and does not break the session', async () => {
   const rig = createRig();
-  const live = new LiveMount({ factory: () => { throw new Error('picker unavailable'); }, controller: rig.controller, apiBase: '' });
+  const live = new LiveMount({ factory: () => { throw new Error('picker unavailable'); }, controller: rig.controller, apiBase: '', providesWorkspace: true });
   live.setRoots({ workspace: {} as HTMLElement, screen: {} as HTMLElement });
   await rig.controller.start('learn');
   await settle();
   assert.equal(rig.controller.store.getState().phase, 'live');
   assert.ok(rig.controller.store.getState().events.some((e) => /could not be mounted: picker unavailable/.test(e.text)));
+});
+
+test('the sample is a labelled fallback: it runs until a screen is shared, then the real screen takes over', async () => {
+  const rig = createRig({ scenarios: true });
+  const fake = fakeRuntime(rig);
+  const live = new LiveMount({ factory: fake.factory, controller: rig.controller, apiBase: '', providesWorkspace: true });
+  live.setRoots({ workspace: {} as HTMLElement, screen: {} as HTMLElement });
+  await rig.controller.setSampleObservations(true);
+  await rig.controller.start('learn');
+  await settle();
+  const m = must(fake.mounts[0]);
+  let s = rig.controller.store.getState();
+  assert.equal(s.screen.source?.synthetic, true, 'no screen is shared yet: the sample runs, labelled synthetic');
+  assert.equal(rig.sources.length, 1);
+  rig.timers.advance(3000);
+  assert.ok(rig.controller.store.getState().observations.every((o) => o.synthetic), 'every row of the sample is marked synthetic');
+
+  // The person chooses a window in A's panel: the bridge starts and reports capturing.
+  await m.bridge.start({ sessionId: 'sess-1', sessionEpochMs: must(s.session).epochMs });
+  await settle();
+  s = rig.controller.store.getState();
+  assert.deepEqual(s.screen.source, { label: LIVE_LABEL, synthetic: false });
+  assert.equal(s.screen.state, 'capturing');
+  const before = s.observations.length;
+  rig.timers.advance(20_000);
+  assert.equal(rig.controller.store.getState().observations.length, before, 'the sample no longer emits');
+  assert.ok(rig.controller.store.getState().events.some((e) => /A screen is shared: the sample observations stopped/.test(e.text)));
+  m.bridge.advanceTo(rig.clock.now() + 5000);
+  const rows = rig.controller.store.getState().observations;
+  assert.ok(rows.length > before);
+  assert.ok(rows.slice(before).every((o) => o.synthetic === false), 'rows of the real screen are not marked synthetic');
+  await rig.controller.end();
+  assert.ok(m.disposed >= 1);
+});
+
+test('a real screen that is never shared leaves the standby disposed with the session', async () => {
+  const rig = createRig({ scenarios: true });
+  const fake = fakeRuntime(rig);
+  const live = new LiveMount({ factory: fake.factory, controller: rig.controller, apiBase: '', providesWorkspace: true });
+  live.setRoots({ workspace: {} as HTMLElement, screen: {} as HTMLElement });
+  await rig.controller.setSampleObservations(true);
+  await rig.controller.start('learn');
+  await settle();
+  await rig.controller.end();
+  assert.ok(must(fake.mounts[0]).disposed >= 1);
+});
+
+test('the mount\'s capture is registered with the controller: its state shows, and ending the session stops it', async () => {
+  const { rig, fake } = setup();
+  await rig.controller.start('learn');
+  await settle();
+  const capture = must(fake.mounts[0]).mount.capture as FakeCapture;
+  capture.emit('capturing');
+  assert.equal(rig.controller.store.getState().screen.capture.state, 'capturing');
+  await rig.controller.end();
+  assert.equal(capture.stops >= 1, true);
+});
+
+test('a screen-only mount (no workspace of its own) needs only the screen root', async () => {
+  const rig = createRig();
+  const fake = fakeRuntime(rig);
+  const live = new LiveMount({ factory: fake.factory, controller: rig.controller, apiBase: '', providesWorkspace: false });
+  assert.equal(live.providesWorkspace, false);
+  live.setRoots({ screen: {} as HTMLElement });
+  await rig.controller.start('learn');
+  await settle();
+  assert.equal(fake.mounts.length, 1);
 });

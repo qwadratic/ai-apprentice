@@ -12,6 +12,7 @@
 //   - setOffRecord(on) goes to `mount.setOffRecord`, which coordinates the workspace and the capture, also before capture started.
 import type { ActionCheckpoint, CheckpointReply, EvidenceRef, ScreenObservation, ScreenStatus, SessionStart, Unsubscribe } from '@apprentice/contracts';
 import type { ScreenBridge } from '@apprentice/contracts';
+import type { CaptureLike } from '../controller.ts';
 import type { ObservationSource } from './observation-source.ts';
 
 export interface RuntimeWorkspaceOptions {
@@ -32,7 +33,8 @@ export interface RuntimeWorkspaceMount {
   runtime: unknown;
   /** The real ScreenBridge (@apprentice/contracts). The only thing the shell's brain side sees. */
   bridge: ScreenBridge;
-  capture: unknown;
+  /** A's ScreenCapture: the controller listens to its state and stops it when the session ends. */
+  capture: CaptureLike;
   workspace: unknown;
   setOffRecord(on: boolean): Promise<void>;
   /** Releases the panel, the workspace, timers and polling. Idempotent. */
@@ -41,7 +43,7 @@ export interface RuntimeWorkspaceMount {
 
 export type CreateRuntimeWorkspace = (options: RuntimeWorkspaceOptions) => RuntimeWorkspaceMount;
 
-export const LIVE_LABEL = 'Live screen (demo workspace)';
+export const LIVE_LABEL = 'Live screen';
 
 export class RuntimeWorkspaceSource implements ObservationSource {
   readonly label = LIVE_LABEL;

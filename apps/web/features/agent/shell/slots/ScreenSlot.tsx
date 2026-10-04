@@ -50,9 +50,13 @@ export function ScreenSlot({ collapsed, onToggle }: { collapsed: boolean; onTogg
         </button>
       </div>
       <p className="as-note">
-        {live
-          ? 'Choose the window to share below. The preview stays on this page: frames are not analysed or sent yet (vision is not wired).'
-          : 'Start a mode first (right), then choose the window to share. The preview stays on this page: frames are not analysed or sent yet.'}
+        {liveMount !== null
+          ? live
+            ? 'Choose the window to share in the panel below. Shared frames are masked on this page first, then analysed by vision on our server. Until you share a window, the sample observations run and are labelled synthetic.'
+            : 'Start a mode first (right), then choose the window to share in the panel. Until you share a window, the sample observations run and are labelled synthetic.'
+          : live
+            ? 'Choose the window to share below. The preview stays on this page: frames are not analysed or sent yet (vision is not wired).'
+            : 'Start a mode first (right), then choose the window to share. The preview stays on this page: frames are not analysed or sent yet.'}
       </p>
       <div
         id="as-screen-mount"

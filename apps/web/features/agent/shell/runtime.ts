@@ -15,6 +15,7 @@ import { API_BASE } from './config.ts';
 import { ShellController } from './controller.ts';
 import type { ControllerTimers, KeyValueStorage } from './controller.ts';
 import { SampleObservationSource } from './screen/sample-source.ts';
+import { createBridgeMount } from './screen/bridge-mount.ts';
 import { LiveMount } from './screen/live-mount.ts';
 import { SAMPLE_CUSTOMERS } from './screen/sample-scenarios.ts';
 import type { CreateRuntimeWorkspace } from './screen/runtime-workspace-source.ts';
@@ -51,10 +52,11 @@ function newId(): string {
 }
 
 /**
- * Stream A's `createRuntimeWorkspace` (apps/web/features/demo-workspace/index.ts, not on main yet). When it lands, replace this
- * null with the import: the shell then mounts it per session and uses its bridge instead of the sample source. Nothing else changes.
+ * The real screen, mounted per session: stream A's capture, ScreenBridge and screen panel (PR #21), composed in bridge-mount.ts.
+ * Stream A's `createRuntimeWorkspace` (the same plus the demo workspace and its checkpoint adapter; not on main yet) replaces this
+ * one line when it lands: import it and assign it here, nothing else in the shell changes.
  */
-const createRuntimeWorkspace: CreateRuntimeWorkspace | null = null;
+const liveFactory: CreateRuntimeWorkspace = createBridgeMount;
 
 export function createRuntime(): ShellRuntime {
   const store = createClipaStore();
@@ -90,9 +92,10 @@ export function createRuntime(): ShellRuntime {
     storage: browserStorage,
   });
   note = (type, text) => controller.note(type, text);
-  const live = createRuntimeWorkspace === null ? null : new LiveMount({ factory: createRuntimeWorkspace, controller, apiBase: API_BASE });
-  // The sample source is the only observation source until stream A's bridge is wired in: it is on, and labelled synthetic.
-  if (live === null) void controller.setSampleObservations(true);
+  // providesWorkspace: false while the factory is the screen-only bridge mount; true with A's createRuntimeWorkspace.
+  const live = new LiveMount({ factory: liveFactory, controller, apiBase: API_BASE, providesWorkspace: false });
+  // The sample source is the labelled fallback for when no screen is shared: it runs until the person shares a window in the panel.
+  void controller.setSampleObservations(true);
   return {
     controller,
     clipa: store,
