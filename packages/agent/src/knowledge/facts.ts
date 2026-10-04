@@ -14,6 +14,14 @@ export function normalizeForMatch(text: string): string {
 
 const isWordChar = (c: string | undefined): boolean => c !== undefined && /[a-z0-9]/i.test(c);
 
+/**
+ * What "the email includes X" means, on both sides: what the teach-back promises the expert and what the tutor checks before Send.
+ * The email is its subject and its body together.
+ */
+export function emailText(email: { subject: string; bodyText: string }): string {
+  return `${email.subject}\n${email.bodyText}`;
+}
+
 /** The order's value for a fact, or null when the screen did not show it. */
 export function orderFactValue(order: OrderFacts, key: FactKey): string | null {
   const v = order[key];

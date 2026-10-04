@@ -7,15 +7,17 @@ import type { ActionCheckpoint, EmailDraftFacts, OrderFacts, ScreenObservation }
 import {
   ConversationPolicy,
   FakeClock,
-  confirmationOf,
   HeuristicAnswerExtractor,
+  applyTeachBackReply,
+  confirmationOf,
   createMapState,
   knownCustomerRefs,
   planFollowUps,
   reduceMap,
+  stateTeachBack,
   workingMap,
 } from "../src/index.ts";
-import type { AnswerExtractor, BrainDecision, FetchLike, MapState, PersonaId, Question, Topic } from "../src/index.ts";
+import type { AnswerExtractor, BrainDecision, FetchLike, MapState, PersonaId, Question, ReplyClassifier, TeachBack, TeachBackOutcome, Topic } from "../src/index.ts";
 import { must } from "./helpers.ts";
 
 const root = new URL("../../../fixtures/agent/", import.meta.url);
@@ -279,8 +281,28 @@ export async function buildState(opts: BuildOptions = {}): Promise<MapState> {
     });
     state = reduceMap(state, { type: "correct", extraction });
   }
-  if (opts.confirm !== false) state = reduceMap(state, confirmationOf(state, (atMs += 7000), expertTeachback("confirm")));
+  if (opts.confirm !== false) state = confirmAfterTeachBack(state, (atMs += 7000), expertTeachback("confirm"));
   return state;
+}
+
+/**
+ * The host speaks the current teach-back (stateTeachBack), then the expert replies: the only order in which a reply can confirm.
+ * A correction un-states the teach-back, so each call speaks the new one first, as a host would.
+ */
+export function replyAfterTeachBack(
+  state: MapState,
+  reply: { text: string; atMs: number; evidenceIds?: string[] },
+  extractor: AnswerExtractor,
+  classifier?: ReplyClassifier,
+  heard?: TeachBack,
+): Promise<TeachBackOutcome> {
+  return applyTeachBackReply(stateTeachBack(state).state, reply, extractor, classifier, heard);
+}
+
+/** State the working map's teach-back, then confirm it (what a host does when the expert says yes). */
+export function confirmAfterTeachBack(state: MapState, atMs: number, quote: string | null): MapState {
+  const stated = stateTeachBack(state).state;
+  return reduceMap(stated, confirmationOf(stated, atMs, quote));
 }
 
 // -- Teach cases -------------------------------------------------------------
@@ -295,13 +317,14 @@ export interface TeachCase {
 }
 
 /** A Teach case for any order and draft: the observations plus the checkpoint raised at Preview. */
-export function customTeachCase(id: string, o: OrderFacts, bodyText: string, attachTemplateImage: boolean): TeachCase {
+export function customTeachCase(id: string, o: OrderFacts, bodyText: string, attachTemplateImage: boolean, subject?: string): TeachCase {
   const feed = new Feed(`sess-teach-${id}`);
   const orderObs = feed.order(0, o);
   const emailObs = feed.email(3000, o.customerRef, {
     bodyText,
     attachments: attachTemplateImage ? [{ kind: "image", ocrText: `Order ${o.orderId} | ${o.deliveryAddress}` }] : [],
     previewState: "preview",
+    ...(subject !== undefined ? { subject } : {}),
   });
   const checkpoint = parseActionCheckpoint({
     schemaVersion: SCHEMA_VERSION,

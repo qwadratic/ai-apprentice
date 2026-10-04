@@ -6,7 +6,6 @@ import { test } from "node:test";
 import {
   ConversationPolicy,
   HeuristicAnswerExtractor,
-  applyTeachBackReply,
   buildPrediction,
   buildTeachBack,
   checkpoint,
@@ -19,7 +18,7 @@ import {
   workingMap,
 } from "../src/index.ts";
 import type { CaseOutcome } from "../src/index.ts";
-import { arr, buildState, expected, expertAnswer, expertTeachback, novicePredict, readJson, rec, startLearnSession, str, teachCase } from "./brain-helpers.ts";
+import { arr, buildState, expected, expertAnswer, expertTeachback, novicePredict, readJson, rec, startLearnSession, str, teachCase, replyAfterTeachBack } from "./brain-helpers.ts";
 import { must } from "./helpers.ts";
 
 const extractor = new HeuristicAnswerExtractor();
@@ -72,10 +71,10 @@ test("Learn -> Review -> Teach: the tutor applies the rule the expert stated, an
   const first = buildTeachBack(workingMap(state));
   assert.match(first.text, /delivery address and delivery window/);
   assert.doesNotMatch(first.text, /order number/);
-  const corrected = await applyTeachBackReply(state, { text: expertTeachback("correction"), atMs: 90_000 }, extractor);
+  const corrected = await replyAfterTeachBack(state, { text: expertTeachback("correction"), atMs: 90_000 }, extractor);
   assert.equal(corrected.outcome, "corrected");
   assert.match(corrected.teachBack?.text ?? "", /order number, delivery address and delivery window/);
-  const confirmed = await applyTeachBackReply(corrected.state, { text: expertTeachback("confirm"), atMs: 100_000 }, extractor);
+  const confirmed = await replyAfterTeachBack(corrected.state, { text: expertTeachback("confirm"), atMs: 100_000 }, extractor);
   assert.equal(confirmed.outcome, "confirmed");
   state = confirmed.state;
   assert.equal(reviewStatus(state).done, true);

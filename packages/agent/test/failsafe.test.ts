@@ -14,7 +14,6 @@ import {
   HeuristicAnswerExtractor,
   MAX_UNCLEAR,
   ReviewClarifier,
-  applyTeachBackReply,
   checkpoint,
   extractFacts,
   followUpKey,
@@ -24,10 +23,11 @@ import {
   planFollowUps,
   pressReviewButton,
   readReply,
+  stateTeachBack,
   workingMap,
 } from "../src/index.ts";
 import type { FactKey, TeachBackReply } from "../src/index.ts";
-import { buildState, scenarioCustomers, teachCase } from "./brain-helpers.ts";
+import { buildState, scenarioCustomers, teachCase, replyAfterTeachBack } from "./brain-helpers.ts";
 import { must } from "./helpers.ts";
 
 const extractor = new HeuristicAnswerExtractor();
@@ -242,9 +242,9 @@ test("replies: a confirmation only when nothing is added; additions carry their 
 });
 
 test("replies end to end: additions move the map to a new version, nothing is lost, an unclear reply changes nothing", async () => {
-  const state = await buildState({ confirm: false });
+  const state = stateTeachBack(await buildState({ confirm: false })).state;
   for (const c of REPLIES) {
-    const out = await applyTeachBackReply(state, { text: c.reply, atMs: 90 }, extractor);
+    const out = await replyAfterTeachBack(state, { text: c.reply, atMs: 90 }, extractor);
     if (c.expect === "confirm") assert.equal(out.outcome, "confirmed", c.reply);
     else assert.notEqual(out.outcome, "confirmed", `"${c.reply}" must not confirm`);
     if (c.expect === "unclear") assert.equal(out.state, state, `"${c.reply}" changes nothing`);
@@ -252,9 +252,9 @@ test("replies end to end: additions move the map to a new version, nothing is lo
   }
 
   // The order number really moves T5 to version 2, and T5 warns.
-  const addition = await applyTeachBackReply(state, { text: "That's right, and put the order number in it.", atMs: 91 }, extractor);
+  const addition = await replyAfterTeachBack(state, { text: "That's right, and put the order number in it.", atMs: 91 }, extractor);
   assert.equal(addition.outcome, "corrected");
-  const done = await applyTeachBackReply(addition.state, { text: "Sounds good.", atMs: 92 }, extractor);
+  const done = await replyAfterTeachBack(addition.state, { text: "Sounds good.", atMs: 92 }, extractor);
   assert.equal(done.outcome, "confirmed");
   const map = must(latestConfirmed(done.state));
   assert.equal(map.version, 2);
@@ -263,17 +263,17 @@ test("replies end to end: additions move the map to a new version, nothing is lo
   assert.deepEqual(v5.missingFacts, ["orderId"]);
 
   // "Yes, it is for all." brings every customer into the rule: a correction carrying the scope.
-  const all = await applyTeachBackReply(state, { text: "Yes, it is for all.", atMs: 93 }, extractor);
+  const all = await replyAfterTeachBack(state, { text: "Yes, it is for all.", atMs: 93 }, extractor);
   assert.equal(all.outcome, "corrected");
   assert.equal(must(workingMap(all.state).guardrails.find((g) => g.trigger === "customer" && !g.unexplained)).scope.kind, "all");
 
   // Customer twelve is the same: the rule now covers customer_12.
-  const twelve = await applyTeachBackReply(state, { text: "Yeah. Customer twelve is the same.", atMs: 94 }, extractor);
+  const twelve = await replyAfterTeachBack(state, { text: "Yeah. Customer twelve is the same.", atMs: 94 }, extractor);
   assert.equal(twelve.outcome, "corrected");
   assert.deepEqual(must(workingMap(twelve.state).guardrails.find((g) => g.trigger === "customer" && !g.unexplained)).scope.customers, ["customer_07", "customer_12"]);
 
   // A "correction" the heuristic cannot hold is asked about again, not applied as a no-op version.
-  const noop = await applyTeachBackReply(state, { text: "Okay, one more thing: send me a copy.", atMs: 95 }, extractor);
+  const noop = await replyAfterTeachBack(state, { text: "Okay, one more thing: send me a copy.", atMs: 95 }, extractor);
   assert.equal(noop.outcome, "unclear");
   assert.equal(noop.state, state);
 });
@@ -283,7 +283,7 @@ test("replies end to end: additions move the map to a new version, nothing is lo
 
 test("field removal ('not the window, just the address and the order number') is unclear, never half applied", async () => {
   const texts = ["Not the window, just the address and the order number.", "The window is not required, only the address and the order number."];
-  const state = await buildState({ confirm: false });
+  const state = stateTeachBack(await buildState({ confirm: false })).state;
   const before = must(workingMap(state).guardrails[0]).requiredFacts;
   assert.deepEqual(before, ["deliveryAddress", "deliveryWindow"]);
   for (const text of texts) {
@@ -292,7 +292,7 @@ test("field removal ('not the window, just the address and the order number') is
     assert.deepEqual(x.requiredFacts, [], text);
     // As a reply to the teach-back: unclear, the map is untouched.
     assert.equal(readReply(text).verdict, "unclear", text);
-    const out = await applyTeachBackReply(state, { text, atMs: 90 }, extractor);
+    const out = await replyAfterTeachBack(state, { text, atMs: 90 }, extractor);
     assert.equal(out.outcome, "unclear", text);
     assert.equal(out.state, state);
     assert.deepEqual(must(workingMap(out.state).guardrails[0]).requiredFacts, before, "nothing removed, nothing added");
@@ -377,6 +377,53 @@ const SCOPES: ScopeCase[] = [
   { text: "Not quite, it is for every customer.", topic: "correction", veto: true },
   { text: "Everyone else still gets the template.", topic: "correction" },
 ];
+
+// A qualifier next to a scope statement (a place, a group, a time, a relation) vetoes the widening and the inclusion: "for every
+// customer in Austria" is not "every customer", "starting Monday" is not "from now on", "customer twelve's sister company" is not
+// customer twelve. The first five are the reviewer's phrases.
+const QUALIFIED = [
+  "Yes, and for all customers in Austria.",
+  "Also customer twelve, it is for every customer in his group.",
+  "Customer three is the same, at their warehouse address.",
+  "Customer three likewise, starting Monday.",
+  "Same for customer twelve's sister company.",
+  "Customer nine too, from Monday.",
+  "Also customer twelve until the end of the month.",
+  "Customer three too, in Vienna.",
+  "It is for every customer in Austria.",
+  "It is for all customers at the main branch.",
+  "Also the parent of customer twelve.",
+  "Customer twelve's branch too.",
+  "Same for customer three's subsidiary.",
+  "Customer nine too, at their depot.",
+  "Customer twelve too, within the same group.",
+  "It is for everyone in the Vienna office.",
+];
+for (const text of QUALIFIED) for (const topic of ["scope", "correction"] as const) SCOPES.push({ text, topic });
+// And plain inclusions that merely mention the email are not qualified.
+SCOPES.push({ text: "Customer twelve too, and put the order number in the email.", topic: "correction", joins: ["customer_12"] });
+SCOPES.push({ text: "Customer twelve too, that's right.", topic: "correction", joins: ["customer_12"] });
+
+test("scope: a qualifier (place, group, time, relation) vetoes any widening or inclusion, as a scope answer and as a correction", async () => {
+  for (const text of QUALIFIED) {
+    for (const topic of ["scope", "correction"] as const) {
+      const x = heuristicExtract({ ...input, topic, text });
+      assert.deepEqual(x.scope.customers, [], `${topic}: "${text}"`);
+      assert.equal(x.scope.all, false, `${topic}: "${text}"`);
+      assert.deepEqual(x.requiredFacts, [], `${topic}: "${text}"`);
+    }
+    // As a reply to the teach-back: nothing is applied, the map says what it said, and the rule is never wider than before.
+    const state = stateTeachBack(await buildState({ confirm: false })).state;
+    const out = await replyAfterTeachBack(state, { text, atMs: 90 }, extractor);
+    assert.notEqual(out.outcome, "confirmed", text);
+    const g = must(workingMap(out.state).guardrails.find((x) => x.trigger === "customer" && !x.unexplained));
+    assert.deepEqual(g.scope.customers, ["customer_07"], text);
+    assert.equal(g.scope.kind, "customers", text);
+  }
+  // The same sentence without the qualifier is an inclusion.
+  assert.deepEqual(heuristicExtract({ ...input, topic: "correction", text: "Customer twelve too." }).scope.customers, ["customer_12"]);
+  assert.equal(heuristicExtract({ ...input, topic: "correction", text: "It is for every customer." }).scope.all, true);
+});
 
 test("scope: only a plain, explicit inclusion widens the rule, and never wider than stated", () => {
   assert.ok(SCOPES.length >= 40);
@@ -489,13 +536,13 @@ test("fields: required only from the essentials answer or from a correction that
 // 6. The review does not loop on an expert the heuristic cannot read
 
 test("five unclear replies produce at most two re-asks, then buttons: Confirm / Correct / Skip", async () => {
-  let state = await buildState({ confirm: false });
+  let state = stateTeachBack(await buildState({ confirm: false })).state;
   const clarifier = new ReviewClarifier();
   const itemId = "teachback:1";
   let reAsks = 0;
   let sawButtons = false;
   for (const reply of ["Hmm.", "Yes, but...", "I'm not sure.", "What?", "Uh..."]) {
-    const out = await applyTeachBackReply(state, { text: reply, atMs: 90 }, extractor);
+    const out = await replyAfterTeachBack(state, { text: reply, atMs: 90 }, extractor);
     assert.equal(out.outcome, "unclear", reply);
     assert.equal(out.state, state);
     const step = clarifier.unclear(itemId);

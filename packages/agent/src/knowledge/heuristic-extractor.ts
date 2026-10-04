@@ -234,6 +234,23 @@ const ALL_INCLUSION =
   /\b(?:it|this|that)(?: is|'s) for (?:all|every customer|everyone|everybody)\b(?! (?:the|these|those|my|our|your|his|her|their))|\bfor (?:all|every) customers?\b|\bfor (?:everyone|everybody)\b|\bapplies to (?:all|every|everyone)\b/i;
 /** A customer named together with a condition or a time: "when", "for", "on", "last year", "once", "back when", "I heard". */
 const JOIN_QUALIFIER = /\b(?:when|for|on|during|after|before|until|while|whenever|last (?:year|month|week)|once|back when|i heard|ago)\b/i;
+/**
+ * A qualifier next to a scope statement: a place, a group, a time or a relation. "For every customer in Austria" is not "every
+ * customer", "starting Monday" is not "from now on" and "customer twelve's sister company" is not customer twelve. A sentence
+ * with one widens nothing and adds no customer; it is left to the model or the expert's own words.
+ */
+const SCOPE_QUALIFIER = new RegExp(
+  [
+    // "in Austria", "at their warehouse", "from Monday", "starting Monday", "until May" (but "put it in the email" is not one)
+    String.raw`\bin\b(?! (?:the |this |that |an? )?(?:e-?mail|message|body|subject|mail|writing|text|it|there|full)\b)`,
+    String.raw`\b(?:at|from|starting|starts?|begins?|beginning|since|until|till|within|inside|outside|near)\b`,
+    // a group or a relation: "his group", "sister company", "the parent", "the branch"
+    String.raw`\b(?:groups?|region|country|branch(?:es)?|subsidiar(?:y|ies)|parent|sister|affiliates?|offices?|warehouses?|depots?|sites?|locations?|divisions?|departments?|teams?|franchises?|chains?)\b`,
+    // a possessive ("customer twelve's"), not a contraction ("that's", "it's")
+    String.raw`(?<!\b(?:it|that|he|she|there|what|who|here|let|how|where|when))['\u2019]s\b`,
+  ].join("|"),
+  "i",
+);
 const ONLY = /\b(?:only|just)\b/i;
 /** What opens a reply to the teach-back and says nothing about scope: "No,", "Not quite,", "Yes.", "Almost,". */
 const LEAD_TOKENS = /^(?:(?:no|nope|nah|not quite|not exactly|not really|almost|yes|yeah|yep|okay|ok|right|actually|well|um|uh|hmm)\b[\s,.!-]*)+/i;
@@ -253,6 +270,7 @@ function joinedByThought(thought: string, refs: readonly string[]): string[] {
 
 /** The customers of a sentence that join the rule. Each thought stands alone: "customer nine as well, but customer three not" adds only nine. */
 export function joinedCustomers(sentence: string, mentions: (text: string) => string[]): string[] {
+  if (SCOPE_QUALIFIER.test(sentence)) return [];
   return [...new Set(scopeThoughts(sentence).flatMap((t) => joinedByThought(t, mentions(t))))];
 }
 
@@ -341,7 +359,7 @@ export function heuristicExtract(input: ExtractionInput): AnswerExtraction {
         // Everyone is never read from an answer to the scope question: "Every customer gets the picture." is the default, not
         // the rule, and the heuristic cannot tell the two apart. Only an explicit amendment of the teach-back widens, and the
         // next teach-back states "for every customer" for the expert to confirm.
-        if (input.topic === "correction" && scopeThoughts(s).some((t) => ALL_INCLUSION.test(t) && !EXCLUSION.test(t) && !NEGATED.test(t))) {
+        if (input.topic === "correction" && !SCOPE_QUALIFIER.test(s) && scopeThoughts(s).some((t) => ALL_INCLUSION.test(t) && !EXCLUSION.test(t) && !NEGATED.test(t))) {
           scopeAll = true;
           allQuote ??= s;
         }

@@ -5,7 +5,7 @@
 // observations all give "unknown", never "clear". The decision to send stays with the human.
 import { ContractValidationError, SCHEMA_VERSION, assertCurrentCheckpoint } from "@apprentice/contracts";
 import type { ActionCheckpoint, CheckpointReply, EmailDraftFacts, OrderFacts, ScreenObservation } from "@apprentice/contracts";
-import { factPresent, orderFactValue } from "../knowledge/facts.ts";
+import { emailText, factPresent, orderFactValue } from "../knowledge/facts.ts";
 import { latestConfirmed, validateWorkMap } from "../knowledge/map.ts";
 import type { MapState } from "../knowledge/map.ts";
 import { guardrailsFor, labelFacts } from "../knowledge/types.ts";
@@ -154,15 +154,16 @@ export function checkpoint(input: CheckpointInput): TutorVerdict {
       : "the expert has a rule for this customer.";
 
   if (required.length === 0) {
-    return reply("unknown", `For ${customer} ${said} The map does not say what the message must contain, so I cannot check it. Ask the expert.`, evidenceIds, ruleExtra);
+    return reply("unknown", `For ${customer} ${said} The map does not say what the email must contain, so I cannot check it. Ask the expert.`, evidenceIds, ruleExtra);
   }
   const unreadable = required.filter((f) => orderFactValue(order, f) === null);
   if (unreadable.length > 0) {
-    return reply("unknown", `For ${customer} ${said} I cannot read the ${labelFacts(unreadable)} on the order, so I cannot check the message. Look at the order again.`, evidenceIds, ruleExtra);
+    return reply("unknown", `For ${customer} ${said} I cannot read the ${labelFacts(unreadable)} on the order, so I cannot check the email. Look at the order again.`, evidenceIds, ruleExtra);
   }
-  const missing = required.filter((f) => !factPresent(email.bodyText, order, f));
+  // The email is its subject and its body: the same definition the teach-back used when it said "the email must include".
+  const missing = required.filter((f) => !factPresent(emailText(email), order, f));
   if (missing.length > 0) {
-    return reply("warn", `Hold on before Send. For ${customer} ${said} Your message is still missing the ${labelFacts(missing)}.`, evidenceIds, { ...ruleExtra, missingFacts: missing });
+    return reply("warn", `Hold on before Send. For ${customer} ${said} Your email is still missing the ${labelFacts(missing)}.`, evidenceIds, { ...ruleExtra, missingFacts: missing });
   }
 
   const exception = mine.flatMap((g) => g.exceptions)[0];
@@ -170,9 +171,9 @@ export function checkpoint(input: CheckpointInput): TutorVerdict {
   if (email.attachments.length > 0) {
     extra = exception
       ? ` The extra attachment is fine: "${endSentence(exception.quote)}"`
-      : " The map does not say whether an extra attachment is fine, but what the expert asked for is in the message.";
+      : " The map does not say whether an extra attachment is fine, but what the expert asked for is in the email.";
   }
-  return reply("clear", `Clear to send. For ${customer} ${said} That is in your message.${extra}`, evidenceIds, {
+  return reply("clear", `Clear to send. For ${customer} ${said} That is in your email.${extra}`, evidenceIds, {
     ...ruleExtra,
     quotes: unique([...quotes, ...(exception && email.attachments.length > 0 ? [exception.quote] : [])]),
   });

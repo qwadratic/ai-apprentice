@@ -8,7 +8,6 @@ import {
   LlmClient,
   LlmEntityResolver,
   LlmReplyClassifier,
-  applyTeachBackReply,
   checkpoint,
   extractionIssues,
   latestConfirmed,
@@ -21,7 +20,7 @@ import {
   workingMap,
 } from "../src/index.ts";
 import type { FetchLike, LlmEvent } from "../src/index.ts";
-import { arr, buildState, expertAnswer, expertTeachback, readJson, recordedFetch, rec, str, teachCase } from "./brain-helpers.ts";
+import { arr, buildState, expertAnswer, expertTeachback, readJson, recordedFetch, rec, str, teachCase, replyAfterTeachBack } from "./brain-helpers.ts";
 import { must } from "./helpers.ts";
 
 const BASE = "https://api.example.test";
@@ -230,11 +229,11 @@ test("reply classification through the model: three confirmations, a correction 
 
   // In the review: the model's verdicts drive confirm and correct, and the isolated correction is the text extracted.
   const extractor = new HeuristicAnswerExtractor();
-  for (const reply of confirmations) assert.equal((await applyTeachBackReply(state, { text: reply, atMs: 5 }, extractor, classifier)).outcome, "confirmed", reply);
-  const corrected = await applyTeachBackReply(state, { text: expertTeachback("correction"), atMs: 6 }, extractor, classifier);
+  for (const reply of confirmations) assert.equal((await replyAfterTeachBack(state, { text: reply, atMs: 5 }, extractor, classifier)).outcome, "confirmed", reply);
+  const corrected = await replyAfterTeachBack(state, { text: expertTeachback("correction"), atMs: 6 }, extractor, classifier);
   assert.equal(corrected.outcome, "corrected");
   assert.match(corrected.teachBack?.text ?? "", /order number, delivery address and delivery window/);
-  assert.equal((await applyTeachBackReply(state, { text: "Hmm.", atMs: 7 }, extractor, classifier)).outcome, "unclear");
+  assert.equal((await replyAfterTeachBack(state, { text: "Hmm.", atMs: 7 }, extractor, classifier)).outcome, "unclear");
   assert.ok(llm.events.every((e) => e.outcome === "llm"));
 });
 
@@ -297,9 +296,9 @@ test("a whole Review on model-backed parts: paraphrases in, confirmed map out, T
     const extraction = await extractor.extract({ topic: q.topic, text: expertAnswer(q.topic), questionId: q.id, atMs: 60000, evidenceIds: q.evidenceIds, targetId: q.targetId, entityRef: q.entityRef, knownRefs: ["customer_07"] });
     state = reduceMap(state, { type: "answer", extraction });
   }
-  const corrected = await applyTeachBackReply(state, { text: expertTeachback("correction"), atMs: 90000 }, extractor, classifier);
+  const corrected = await replyAfterTeachBack(state, { text: expertTeachback("correction"), atMs: 90000 }, extractor, classifier);
   assert.equal(corrected.outcome, "corrected");
-  const confirmed = await applyTeachBackReply(corrected.state, { text: "Uh, yes, that's right.", atMs: 95000 }, extractor, classifier);
+  const confirmed = await replyAfterTeachBack(corrected.state, { text: "Uh, yes, that's right.", atMs: 95000 }, extractor, classifier);
   assert.equal(confirmed.outcome, "confirmed");
   assert.equal(t1(latestConfirmed(confirmed.state)), "warn");
   const used = llm.events.filter((e) => e.outcome === "llm").map((e) => e.task);
@@ -336,7 +335,7 @@ test("HTTP 429 busy: every model-backed part falls back to the heuristic without
     const extraction = await extractor.extract({ topic: q.topic, text: expertAnswer(q.topic), questionId: q.id, atMs: 60000, evidenceIds: q.evidenceIds, targetId: q.targetId, entityRef: q.entityRef, knownRefs: ["customer_07"] });
     state = reduceMap(state, { type: "answer", extraction });
   }
-  const confirmed = await applyTeachBackReply(state, { text: "Uh, yes, that's right.", atMs: 95000 }, extractor, classifier);
+  const confirmed = await replyAfterTeachBack(state, { text: "Uh, yes, that's right.", atMs: 95000 }, extractor, classifier);
   assert.equal(confirmed.outcome, "confirmed");
   assert.equal(t1(latestConfirmed(confirmed.state)), "warn");
   assert.ok(llm.events.every((e) => e.outcome === "fallback" && e.reason === "busy"));

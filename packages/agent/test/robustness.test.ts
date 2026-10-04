@@ -8,7 +8,6 @@ import {
   HeuristicAnswerExtractor,
   HeuristicEntityResolver,
   QuietTracker,
-  applyTeachBackReply,
   checkpoint,
   classifyReply,
   factsFingerprint,
@@ -21,24 +20,11 @@ import {
   reviewStatus,
   spokenNumber,
   valueMentioned,
+  stateTeachBack,
   workingMap,
 } from "../src/index.ts";
 import type { ScreenObservation } from "@apprentice/contracts";
-import {
-  Feed,
-  arr,
-  bodyFor,
-  buildState,
-  expertAnswer,
-  expertTeachback,
-  order,
-  readJson,
-  realisticObservations,
-  rec,
-  startLearnSession,
-  str,
-  teachCase,
-} from "./brain-helpers.ts";
+import { Feed, arr, bodyFor, buildState, expertAnswer, expertTeachback, order, readJson, realisticObservations, rec, startLearnSession, str, teachCase, replyAfterTeachBack } from "./brain-helpers.ts";
 import { must } from "./helpers.ts";
 
 const para = rec(readJson("sim/paraphrases.json"));
@@ -102,8 +88,8 @@ test("an answer that gives no reason is asked again in Review; 'I don't know' is
     state = reduceMap(state, { type: "answer", extraction: await extractor.extract({ topic: q.topic, text, questionId: q.id, atMs: 60000, evidenceIds: q.evidenceIds, targetId: q.targetId, entityRef: q.entityRef }) });
   }
   assert.equal(planFollowUps(workingMap(state)).length, 0);
-  const done = await applyTeachBackReply(state, { text: expertTeachback("correction"), atMs: 90000 }, extractor);
-  const confirmed = await applyTeachBackReply(done.state, { text: "Sounds good.", atMs: 95000 }, extractor);
+  const done = await replyAfterTeachBack(state, { text: expertTeachback("correction"), atMs: 90000 }, extractor);
+  const confirmed = await replyAfterTeachBack(done.state, { text: "Sounds good.", atMs: 95000 }, extractor);
   assert.equal(confirmed.outcome, "confirmed");
   assert.equal(t1Status(latestConfirmed(confirmed.state)), "warn");
 });
@@ -120,12 +106,12 @@ test("confirmations in any natural wording are confirmations; additions, negatio
   for (const reply of strings("unclear")) assert.equal(classifyReply(reply), "unclear", reply);
 
   // Through the review: a spoken confirmation confirms, a mumble changes nothing.
-  const state = await buildState({ confirm: false });
-  const unclear = await applyTeachBackReply(state, { text: "Hmm.", atMs: 1 }, extractor);
+  const state = stateTeachBack(await buildState({ confirm: false })).state;
+  const unclear = await replyAfterTeachBack(state, { text: "Hmm.", atMs: 1 }, extractor);
   assert.equal(unclear.outcome, "unclear");
   assert.equal(unclear.state, state);
   for (const reply of strings("confirmations")) {
-    assert.equal((await applyTeachBackReply(state, { text: reply, atMs: 2 }, extractor)).outcome, "confirmed", reply);
+    assert.equal((await replyAfterTeachBack(state, { text: reply, atMs: 2 }, extractor)).outcome, "confirmed", reply);
   }
 });
 
@@ -202,7 +188,7 @@ test("when the expert names no fields, what the screen showed typed stays the ru
   for (const q of planFollowUps(workingMap(state))) {
     state = reduceMap(state, { type: "answer", extraction: await extractor.extract({ ...input, topic: q.topic, text: expertAnswer(q.topic), targetId: q.targetId, evidenceIds: q.evidenceIds }) });
   }
-  const confirmed = await applyTeachBackReply(state, { text: "Sounds good.", atMs: 99000 }, extractor);
+  const confirmed = await replyAfterTeachBack(state, { text: "Sounds good.", atMs: 99000 }, extractor);
   assert.equal(confirmed.outcome, "confirmed");
   const map = must(latestConfirmed(confirmed.state));
   assert.deepEqual(must(map.guardrails.find((x) => x.trigger === "customer" && !x.unexplained)).requiredFacts, ["deliveryAddress", "deliveryWindow"]);
@@ -290,7 +276,7 @@ test("a realistic run with a paraphrased reason still ends in the tutor warning 
   for (const q of planFollowUps(workingMap(state))) {
     state = reduceMap(state, { type: "answer", extraction: await extractor.extract({ topic: q.topic, text: expertAnswer(q.topic), questionId: q.id, atMs: 90000, evidenceIds: q.evidenceIds, targetId: q.targetId, entityRef: q.entityRef }) });
   }
-  const done = await applyTeachBackReply(state, { text: "Okay, that's correct.", atMs: 99000 }, extractor);
+  const done = await replyAfterTeachBack(state, { text: "Okay, that's correct.", atMs: 99000 }, extractor);
   assert.equal(done.outcome, "confirmed");
   assert.equal(t1Status(latestConfirmed(done.state)), "warn");
 });

@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   HeuristicAnswerExtractor,
-  applyTeachBackReply,
   buildTeachBack,
   classifyReply,
   extractionIssues,
@@ -13,10 +12,11 @@ import {
   reduceMap,
   reviewStatus,
   teachBackDigest,
+  stateTeachBack,
   workingMap,
 } from "../src/index.ts";
 import type { AnswerExtraction, GapTopic } from "../src/index.ts";
-import { buildState, expertAnswer, expertTeachback } from "./brain-helpers.ts";
+import { buildState, expertAnswer, expertTeachback, replyAfterTeachBack } from "./brain-helpers.ts";
 import { must } from "./helpers.ts";
 
 const extractor = new HeuristicAnswerExtractor();
@@ -90,22 +90,22 @@ test("a confirmation or a correction: classifyReply, then a new version", async 
   assert.equal(classifyReply("Yes, but one thing is off."), "unclear", "a contrast: the heuristic leaves it to the model or the buttons");
 
   const state = await buildState({ confirm: false });
-  const corrected = await applyTeachBackReply(state, { text: expertTeachback("correction"), atMs: 90000 }, extractor);
+  const corrected = await replyAfterTeachBack(state, { text: expertTeachback("correction"), atMs: 90000 }, extractor);
   assert.equal(corrected.outcome, "corrected");
   assert.equal(corrected.state.versions.length, 1, "the version that was played back is kept, superseded");
   assert.equal(corrected.teachBack?.version, 2);
   assert.match(corrected.teachBack?.text ?? "", /order number, delivery address and delivery window/);
   assert.equal(latestConfirmed(corrected.state), null, "a correction is not yet a confirmation");
 
-  const confirmed = await applyTeachBackReply(corrected.state, { text: expertTeachback("confirm"), atMs: 95000 }, extractor);
+  const confirmed = await replyAfterTeachBack(corrected.state, { text: expertTeachback("confirm"), atMs: 95000 }, extractor);
   assert.equal(confirmed.outcome, "confirmed");
   assert.equal(must(latestConfirmed(confirmed.state)).version, 2);
 });
 
 test("a confirmation the map cannot back is refused and nothing changes", async () => {
   const x: AnswerExtraction = heuristicExtract({ topic: "reason", text: expertAnswer("reason"), questionId: "q", atMs: 1, evidenceIds: [], targetId: null, entityRef: "customer_07" });
-  const state = reduceMap((await buildState({ answers: [], followUps: false, confirm: false })), { type: "answer", extraction: x });
-  const out = await applyTeachBackReply(state, { text: "Yes, that's right.", atMs: 2 }, extractor);
+  const state = stateTeachBack(reduceMap((await buildState({ answers: [], followUps: false, confirm: false })), { type: "answer", extraction: x })).state;
+  const out = await replyAfterTeachBack(state, { text: "Yes, that's right.", atMs: 2 }, extractor);
   assert.equal(out.outcome, "refused");
   assert.equal(out.state, state);
   assert.ok(out.issues.some((i) => i.missing.includes("evidence")));
@@ -126,7 +126,7 @@ test("review is done when every gap is closed and the confirmed version is the w
   assert.equal(status.confirmed, null);
   assert.equal(status.done, false, "no teach-back confirmed yet");
 
-  state = (await applyTeachBackReply(state, { text: expertTeachback("confirm"), atMs: 60000 }, extractor)).state;
+  state = (await replyAfterTeachBack(state, { text: expertTeachback("confirm"), atMs: 60000 }, extractor)).state;
   assert.equal(reviewStatus(state).done, true);
   // New information re-opens the review.
   state = reduceMap(state, { type: "answer", extraction: await extractor.extract({ topic: "duration", text: "Until the end of the year.", questionId: "q", atMs: 70000, evidenceIds: ["e"], targetId: "g1", entityRef: "customer_07" }) });

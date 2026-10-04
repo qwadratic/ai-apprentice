@@ -4,7 +4,6 @@ import {
   HeuristicAnswerExtractor,
   MapConfirmationError,
   MapValidationError,
-  confirmationOf,
   createMapState,
   latestConfirmed,
   reduceMap,
@@ -13,7 +12,7 @@ import {
   workingMap,
 } from "../src/index.ts";
 import type { AnswerExtraction, MapEvent, WorkMap } from "../src/index.ts";
-import { Feed, buildState, expertAnswer, learnObservations, order } from "./brain-helpers.ts";
+import { Feed, buildState, expertAnswer, learnObservations, order, confirmAfterTeachBack } from "./brain-helpers.ts";
 import { must } from "./helpers.ts";
 
 const extractor = new HeuristicAnswerExtractor();
@@ -126,11 +125,11 @@ test("a correction seals the draft as an immutable superseded version and opens 
   assert.equal(latestConfirmed(state), v2);
 
   // Confirming again with nothing changed is a no-op.
-  assert.equal(reduceMap(state, confirmationOf(state, 99000, "Yes.")), state);
+  assert.equal(confirmAfterTeachBack(state, 99000, "Yes."), state);
 
   // New information after the confirmation: the next confirmation is a new version; the old ones are untouched.
   const later = reduceMap(state, { type: "answer", extraction: await answer("exception", "Yes, a second attachment is fine too.", { targetId: "g1" }) });
-  const reconfirmed = reduceMap(later, confirmationOf(later, 100000, "Yes."));
+  const reconfirmed = confirmAfterTeachBack(later, 100000, "Yes.");
   assert.equal(reconfirmed.versions.length, 3);
   assert.equal(must(latestConfirmed(reconfirmed)).version, 3);
   assert.deepEqual(reconfirmed.versions[1], v2);
@@ -155,7 +154,7 @@ test("the map refuses to confirm an item that has no evidence id or no quote", a
   let state = createMapState();
   state = reduceMap(state, { type: "answer", extraction: await answer("reason", expertAnswer("reason"), { evidenceIds: [] }) });
   assert.throws(
-    () => reduceMap(state, confirmationOf(state, 1, "Yes.")),
+    () => confirmAfterTeachBack(state, 1, "Yes."),
     (e: unknown) => e instanceof MapConfirmationError && e.confirmIssues.some((i) => i.kind === "guardrail" && i.missing.includes("evidence")),
   );
   // The refusal leaves the state untouched and nothing is sealed.
@@ -163,7 +162,7 @@ test("the map refuses to confirm an item that has no evidence id or no quote", a
 
   // With one evidence id and the quote it goes through.
   const ok = reduceMap(createMapState(), { type: "answer", extraction: await answer("reason", expertAnswer("reason"), { evidenceIds: ["ev-1"] }) });
-  assert.equal(must(latestConfirmed(reduceMap(ok, confirmationOf(ok, 1, "Yes.")))).guardrails[0]?.status, "confirmed");
+  assert.equal(must(latestConfirmed(confirmAfterTeachBack(ok, 1, "Yes."))).guardrails[0]?.status, "confirmed");
 
   // A confirmed map that carries an item without evidence or quote is invalid however it got there.
   const good = must(latestConfirmed(await buildState({ correction: true })));

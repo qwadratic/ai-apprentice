@@ -66,6 +66,12 @@ export interface MapState {
   readonly draft: DeepReadonly<DraftData>;
   /** Sealed versions, oldest first. Immutable. */
   readonly versions: readonly WorkMap[];
+  /**
+   * The digest of the teach-back last stated to the expert (see stateTeachBack), or null. It is set only by a `teachback_stated`
+   * event and cleared by any event that changes what the working map says, so a confirmation can only refer to what the expert
+   * was last told: a correction or a late answer makes a new version, and a "yes" before the new teach-back is stated is stale.
+   */
+  readonly lastStatedDigest: string | null;
 }
 
 export type MapEvent =
@@ -75,10 +81,12 @@ export type MapEvent =
   | { type: "correct"; extraction: AnswerExtraction }
   /** The expert confirms the teach-back. quote is their reply, when there is one. */
   /**
-   * The expert confirms a teach-back. `stated` is the digest of the teach-back they heard (TeachBack.digest): the confirmation is
-   * refused unless it states exactly the version being confirmed. Use confirmationOf() when the teach-back was of the working map.
+   * The expert confirms a teach-back. `stated` is the digest of the teach-back they heard: the confirmation is refused unless it
+   * equals `state.lastStatedDigest` and the digest of the version being confirmed. Use confirmationOf(state, ...).
    */
   | { type: "confirm"; atMs: number; quote: string | null; stated: string }
+  /** A teach-back was spoken to the expert (stateTeachBack). It counts only while it is still what the working map says. */
+  | { type: "teachback_stated"; digest: string }
   /** Customers the workspace or the scenario lists, beyond those seen on screen: what a spoken customer can be resolved to. */
   | { type: "known_customers"; refs: readonly string[] };
 
@@ -127,7 +135,7 @@ export function createMapState(knownCustomers: readonly string[] = []): MapState
     customers: [...new Set(knownCustomers)],
     typedFacts: {},
   };
-  return deepFreeze({ draft, versions: [] as WorkMap[] });
+  return deepFreeze({ draft, versions: [] as WorkMap[], lastStatedDigest: null });
 }
 
 // ---------------------------------------------------------------------------
@@ -271,6 +279,7 @@ function createGuardrail(
     condition: init.condition,
     requiredAction: "",
     requiredFacts: [],
+    assumedFacts: [],
     scope: init.scope,
     exceptions: [],
     unknowns: [],
@@ -529,6 +538,15 @@ function requiredFactsFor(d: DraftData, g: MapGuardrailData): FactKey[] {
   return FACT_KEYS.filter((f) => all.has(f));
 }
 
+/** The part of the required facts nobody told the map (neither the essentials answer nor a correction): assumed from the screen. */
+function assumedFactsFor(d: DraftData, g: MapGuardrailData, required: readonly FactKey[]): FactKey[] {
+  const extra = d.extras[g.id];
+  if (!extra) return [];
+  const origin = extra.copyOf !== null ? d.extras[extra.copyOf] : extra;
+  const said = new Set<FactKey>([...(origin?.essential ?? []), ...(origin?.corrected ?? []), ...extra.corrected]);
+  return required.filter((f) => !said.has(f));
+}
+
 /** Fixes the inferred required facts of every customer rule the expert did not name, once the screen has shown some. */
 function freezeInferred(d: DraftData): void {
   for (const g of d.guardrails) {
@@ -544,10 +562,11 @@ function projectGuardrail(d: DraftData, g: MapGuardrailData): MapGuardrailData {
   const copy = structuredClone(g);
   if (g.trigger === "customer") {
     copy.requiredFacts = requiredFactsFor(d, g);
+    copy.assumedFacts = assumedFactsFor(d, g, copy.requiredFacts);
     copy.requiredAction =
       copy.requiredFacts.length > 0
-        ? `Include the ${labelFacts(copy.requiredFacts)} in the message you send`
-        : "Unknown: the expert has not said what the message must contain";
+        ? `Include the ${labelFacts(copy.requiredFacts)} in the email you send`
+        : "Unknown: the expert has not said what the email must contain";
     const who = g.scope.kind === "all" ? "any order" : `an order of ${g.scope.customers.join(", ") || "the observed customer"}`;
     copy.condition = `Sending the delivery email for ${who}`;
   } else {
@@ -562,7 +581,7 @@ function projectGuardrail(d: DraftData, g: MapGuardrailData): MapGuardrailData {
   else if (g.reason === null) add(g.reasonUnknown ? "The expert does not know why." : "The reason was not explained.");
   if (g.trigger === "customer" && !g.unexplained) {
     if (!g.scope.explicit) add(`Scope not stated; defaults to ${g.scope.customers.join(", ") || "the observed customer"}.`);
-    if (copy.requiredFacts.length === 0) add("What the message must contain was not said.");
+    if (copy.requiredFacts.length === 0) add("What the email must contain was not said.");
   }
   copy.unknowns = unknowns;
   return copy;
@@ -656,6 +675,20 @@ function fingerprint(d: DraftData): string {
 }
 
 export function reduceMap(state: MapState, event: MapEvent): MapState {
+  if (event.type === "teachback_stated") {
+    // It counts only for what the working map says now; a teach-back of an older version states nothing.
+    const digest = teachBackDigest(workingMap(state));
+    return event.digest === digest && state.lastStatedDigest !== digest ? deepFreeze({ draft: state.draft, versions: state.versions, lastStatedDigest: digest }) : state;
+  }
+  const next = reduceDraft(state, event);
+  // Whatever changes what the working map says (a correction, a late answer, a new fact on screen) un-states the teach-back.
+  if (next.lastStatedDigest !== null && next.lastStatedDigest !== teachBackDigest(workingMap(next))) {
+    return deepFreeze({ draft: next.draft, versions: next.versions, lastStatedDigest: null });
+  }
+  return next;
+}
+
+function reduceDraft(state: MapState, event: Exclude<MapEvent, { type: "teachback_stated" }>): MapState {
   const d = structuredClone(state.draft) as DraftData;
   let versions: readonly WorkMap[] = state.versions;
   switch (event.type) {
@@ -684,16 +717,19 @@ export function reduceMap(state: MapState, event: MapEvent): MapState {
       if (issues.length > 0) throw new MapConfirmationError(issues);
       if (!d.dirty && d.sealedVersion === d.version) return state;
       if (d.sealedVersion === d.version) d.version += 1;
-      // The gate: only a version the expert heard stated, exactly, can be confirmed.
+      // The gate: only the version the expert was last told, exactly, can be confirmed.
       const heard = teachBackDigest(deepFreeze(project(d, d.version, "draft", null)));
-      if (event.stated !== heard) throw new MapValidationError("Cannot confirm", ["the confirmation does not state this version of the map (it changed since the teach-back)"]);
+      if (state.lastStatedDigest === null) throw new MapValidationError("Cannot confirm", ["no teach-back of this version was stated to the expert"]);
+      if (event.stated !== state.lastStatedDigest || event.stated !== heard) {
+        throw new MapValidationError("Cannot confirm", ["the confirmation does not state this version of the map (it changed since the teach-back)"]);
+      }
       for (const g of d.guardrails) if (eligible(g)) g.status = "confirmed";
       for (const s of d.steps) if (s.decision !== null && s.status === "inferred") s.status = "confirmed";
       versions = [...versions, seal(d, "confirmed", event.atMs, event.quote, event.stated)];
       break;
     }
   }
-  return deepFreeze({ draft: d, versions });
+  return deepFreeze({ draft: d, versions, lastStatedDigest: state.lastStatedDigest });
 }
 
 /** Seals the pre-correction draft as "superseded" (unless it is already sealed) and applies the correction to the next version. */
@@ -748,6 +784,7 @@ export function teachBackDigest(map: WorkMap): string {
       unexplained: g.unexplained,
       scope: { kind: g.scope.kind, customers: [...g.scope.customers].sort(), explicit: g.scope.explicit },
       fields: [...g.requiredFacts],
+      assumed: [...g.assumedFacts],
       exceptions: g.exceptions.map((e) => e.text),
       reason: g.reason,
       escalateTo: g.escalateTo,
@@ -757,9 +794,12 @@ export function teachBackDigest(map: WorkMap): string {
   return fnv1a(JSON.stringify(stated));
 }
 
-/** The confirmation event for a teach-back of the working map as it is now. */
+/**
+ * The confirmation event for the teach-back last stated to the expert (state.lastStatedDigest). Without one, or after the map
+ * changed, reduceMap refuses it: a confirmation is never matched against the current version, only against what was said.
+ */
 export function confirmationOf(state: MapState, atMs: number, quote: string | null): MapEvent {
-  return { type: "confirm", atMs, quote, stated: teachBackDigest(workingMap(state)) };
+  return { type: "confirm", atMs, quote, stated: state.lastStatedDigest ?? "" };
 }
 
 /** The latest version the expert confirmed, or null. This is the only version Teach may apply. */

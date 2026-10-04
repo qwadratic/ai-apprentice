@@ -4,7 +4,6 @@ import { test } from "node:test";
 import type { OrderFacts, ScreenObservation } from "@apprentice/contracts";
 import {
   HeuristicAnswerExtractor,
-  applyTeachBackReply,
   checkpoint,
   extractFacts,
   heuristicExtract,
@@ -16,19 +15,7 @@ import {
   reduceMap,
   workingMap,
 } from "../src/index.ts";
-import {
-  Feed,
-  IMAGE,
-  bodyFor,
-  buildState,
-  customTeachCase,
-  expertAnswer,
-  expertTeachback,
-  order,
-  scenarioCustomers,
-  startLearnSession,
-  teachCase,
-} from "./brain-helpers.ts";
+import { Feed, IMAGE, bodyFor, buildState, customTeachCase, expertAnswer, expertTeachback, order, scenarioCustomers, startLearnSession, teachCase, replyAfterTeachBack } from "./brain-helpers.ts";
 import { must } from "./helpers.ts";
 
 const extractor = new HeuristicAnswerExtractor();
@@ -79,7 +66,7 @@ test("'No, that's right.' confirms", async () => {
   assert.equal(readReply("No, that's not right.").verdict, "unclear", "a denial with nothing said: ask what to change");
   assert.equal(readReply("No, the order number goes in too.").verdict, "unclear", "a negation: left to the model or the buttons");
   const state = await buildState({ confirm: false });
-  assert.equal((await applyTeachBackReply(state, { text: "No, that's right.", atMs: 9 }, extractor)).outcome, "confirmed");
+  assert.equal((await replyAfterTeachBack(state, { text: "No, that's right.", atMs: 9 }, extractor)).outcome, "confirmed");
 });
 
 test("'Correct, he wants the order number in there as well.' is a correction that carries the addition", async () => {
@@ -92,11 +79,11 @@ test("'Correct, he wants the order number in there as well.' is a correction tha
   // Only the address and the window were named, so the rule starts without the order number.
   const state = await buildState({ confirm: false });
   assert.deepEqual(must(workingMap(state).guardrails[0]).requiredFacts, ["deliveryAddress", "deliveryWindow"]);
-  const out = await applyTeachBackReply(state, { text: reply, atMs: 9 }, extractor);
+  const out = await replyAfterTeachBack(state, { text: reply, atMs: 9 }, extractor);
   assert.equal(out.outcome, "corrected");
   assert.deepEqual(must(workingMap(out.state).guardrails[0]).requiredFacts, ["orderId", "deliveryAddress", "deliveryWindow"]);
   assert.match(out.teachBack?.text ?? "", /order number, delivery address and delivery window/);
-  const done = await applyTeachBackReply(out.state, { text: "Sounds good.", atMs: 10 }, extractor);
+  const done = await replyAfterTeachBack(out.state, { text: "Sounds good.", atMs: 10 }, extractor);
   assert.equal(done.outcome, "confirmed");
   assert.deepEqual(verdict("t5", latestConfirmed(done.state)).missingFacts, ["orderId"]);
 });
@@ -114,13 +101,13 @@ test("'Yes. Customer twelve too.' is a correction that brings customer_12 into t
   const before = checkpoint({ checkpoint: case12.checkpoint, observations: case12.observations, map: latestConfirmed(state) });
   assert.equal(before.status, "clear", "the rule is limited to customer_07 until the expert says otherwise");
 
-  const out = await applyTeachBackReply(state, { text: reply, atMs: 99 }, extractor);
+  const out = await replyAfterTeachBack(state, { text: reply, atMs: 99 }, extractor);
   assert.equal(out.outcome, "corrected");
   const g = must(workingMap(out.state).guardrails.find((x) => x.trigger === "customer" && !x.unexplained));
   assert.deepEqual(g.scope.customers, ["customer_07", "customer_12"]);
   assert.equal(g.scope.explicit, true);
   assert.match(out.teachBack?.text ?? "", /Scope: only for customer_07 and customer_12\./);
-  const done = await applyTeachBackReply(out.state, { text: "Yes, that's right.", atMs: 100 }, extractor);
+  const done = await replyAfterTeachBack(out.state, { text: "Yes, that's right.", atMs: 100 }, extractor);
   const after = checkpoint({ checkpoint: case12.checkpoint, observations: case12.observations, map: latestConfirmed(done.state) });
   assert.equal(after.status, "warn");
   // Other customers are still not covered.
