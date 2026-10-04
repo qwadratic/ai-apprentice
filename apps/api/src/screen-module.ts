@@ -96,7 +96,7 @@ function tokenRegistry(app: Express): Map<string, string> {
 }
 function pruneInvalidTokens(registry: Map<string, string>, hub: ScreenSessionHub): void {
   for (const [sessionId, token] of registry) {
-    try { hub.authenticate(sessionId, token); }
+    try { hub.validateToken(sessionId, token); }
     catch (error: unknown) {
       if (error instanceof SessionTransportError && ['session_not_found', 'unauthorized'].includes(error.code)) {
         registry.delete(sessionId);

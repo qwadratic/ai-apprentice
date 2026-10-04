@@ -40,15 +40,18 @@ export interface FrameUpload {
 export class ScreenSessionHub {
   readonly #sessions = new Map<string, ScreenSessionHandle>();
   readonly #createService: SessionServiceFactory; readonly #parseStatus: ScreenStatusParser;
-  readonly #now: () => number; readonly #maxSessions: number; readonly #maxEvents: number; readonly #idleTtlMs: number;
+  readonly #now: () => number; readonly #maxSessions: number; readonly #maxEvents: number;
+  readonly #idleTtlMs: number; readonly #pausedIdleTtlMs: number;
   constructor(createService: SessionServiceFactory, parseStatus: ScreenStatusParser,
-    now: () => number = Date.now, maxSessions = 8, maxEvents = 128, idleTtlMs = 30 * 60 * 1000) {
+    now: () => number = Date.now, maxSessions = 8, maxEvents = 128,
+    idleTtlMs = 60 * 1000, pausedIdleTtlMs = 30 * 60 * 1000) {
     if (!Number.isSafeInteger(maxSessions) || maxSessions < 1 || !Number.isSafeInteger(maxEvents) || maxEvents < 2 ||
-      !Number.isSafeInteger(idleTtlMs) || idleTtlMs < 1) {
+      !Number.isSafeInteger(idleTtlMs) || idleTtlMs < 1 || !Number.isSafeInteger(pausedIdleTtlMs) || pausedIdleTtlMs < 1) {
       throw new TypeError('Invalid session limits');
     }
     this.#createService = createService; this.#parseStatus = parseStatus; this.#now = now;
-    this.#maxSessions = maxSessions; this.#maxEvents = maxEvents; this.#idleTtlMs = idleTtlMs;
+    this.#maxSessions = maxSessions; this.#maxEvents = maxEvents;
+    this.#idleTtlMs = idleTtlMs; this.#pausedIdleTtlMs = pausedIdleTtlMs;
   }
   start(sessionId: string, sessionEpochMs: number, clientGeneration: number): ScreenSessionStartResult {
     if (!sessionId || sessionId.length > 200 || !Number.isSafeInteger(sessionEpochMs) || sessionEpochMs < 0 || clientGeneration !== 1) {
@@ -70,6 +73,13 @@ export class ScreenSessionHub {
     return {sessionId, generation, sessionToken, nextCursor: record.cursor, status};
   }
   authenticate(sessionId: string, token: string): ScreenSessionHandle {
+    const record = this.#requireValidToken(sessionId, token);
+    record.touchedAt = this.#now(); return record;
+  }
+  validateToken(sessionId: string, token: string): void {
+    this.#requireValidToken(sessionId, token);
+  }
+  #requireValidToken(sessionId: string, token: string): ScreenSessionHandle {
     const record = this.#sessions.get(sessionId);
     if (!record) throw new SessionTransportError('session_not_found');
     if (this.#isIdle(record)) {
@@ -80,7 +90,7 @@ export class ScreenSessionHub {
     if (supplied.length !== record.tokenHash.length || !timingSafeEqual(supplied, record.tokenHash)) {
       throw new SessionTransportError('unauthorized');
     }
-    record.touchedAt = this.#now(); return record;
+    return record;
   }
   offer(record: ScreenSessionHandle, upload: FrameUpload): ReturnType<ScreenService['offer']> {
     this.#assertGeneration(record, upload.generation);
@@ -142,7 +152,8 @@ export class ScreenSessionHub {
     for (const record of [...this.#sessions.values()].filter(record => this.#isIdle(record))) this.#remove(record);
   }
   #isIdle(record: ScreenSessionHandle): boolean {
-    return this.#now() - record.touchedAt >= this.#idleTtlMs;
+    const ttlMs = record.state === 'paused' ? this.#pausedIdleTtlMs : this.#idleTtlMs;
+    return this.#now() - record.touchedAt >= ttlMs;
   }
   #remove(record: ScreenSessionHandle): void {
     record.service.stop();
