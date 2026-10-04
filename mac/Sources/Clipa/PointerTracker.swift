@@ -55,10 +55,10 @@ final class PointerTracker: @unchecked Sendable {
         samples.removeAll()
         lock.unlock()
         settled = false
-        timer?.invalidate()
-        let timer = Timer(timeInterval: Self.interval, repeats: true) { [weak self] _ in self?.sample() }
-        RunLoop.main.add(timer, forMode: .common)
-        self.timer = timer
+        self.timer?.invalidate()
+        let ticker = Timer(timeInterval: Self.interval, repeats: true) { [weak self] _ in self?.sample() }
+        RunLoop.main.add(ticker, forMode: .common)
+        self.timer = ticker
     }
 
     /// Main thread. Forgets every sample.
