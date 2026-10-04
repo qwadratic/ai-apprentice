@@ -79,6 +79,10 @@ jobs:
             echo "::error::$sha is not on main; refusing to release it"
             exit 1
           fi
+          if [ "$EVENT" = "workflow_dispatch" ] && ! git cat-file -e "$sha:infra/ops/server.ts" 2>/dev/null; then
+            echo "::error::$sha predates the deploy webhook (no infra/ops), so the VM cannot be moved to it. Pick a commit after the webhook merge."
+            exit 1
+          fi
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           if [ "$EVENT" != "workflow_dispatch" ]; then
             head=$(git rev-parse origin/main)
@@ -242,3 +246,86 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  deploy-vm:
+    name: deploy API to the exe.dev VM
+    # Runs after the site and deploy.json are published, so the web app and the API move together.
+    # The VM verifies the HMAC, the timestamp and that the sha is on main, then deploys it with its own
+    # build, health check and rollback (infra/deploy). This job waits for the result and fails if the
+    # VM rolled back, so every backend deploy is visible here.
+    needs: [prepare, pages-deploy]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      API: https://apprentice.exe.xyz
+      SHA: ${{ needs.prepare.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      # Repeated here because "re-run failed jobs" reuses prepare's outputs and skips the other guards:
+      # a re-run must never move the API back to an older sha or past a freeze.
+      - name: Not frozen, and still the newest releasable commit
+        env:
+          FREEZE: ${{ vars.DEPLOY_FREEZE }}
+          EVENT: ${{ github.event_name }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          if [ "$FREEZE" = "1" ] && ! { [ "$EVENT" = "workflow_dispatch" ] && [ "$CONFIRM" = "true" ]; }; then
+            echo "::error::DEPLOY_FREEZE=1: not deploying the API."
+            exit 1
+          fi
+          if [ "$EVENT" = "workflow_dispatch" ]; then exit 0; fi
+          git fetch --quiet origin main
+          head=$(git rev-parse origin/main)
+          if [ "$SHA" != "$head" ] && ! git diff --quiet "$SHA" "$head" -- . ':(exclude)backlog'; then
+            echo "::error::$SHA is no longer the head of main ($head); a re-run must not deploy an older commit."
+            exit 1
+          fi
+      - name: Request the deploy
+        env:
+          DEPLOY_WEBHOOK_SECRET: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DEPLOY_WEBHOOK_SECRET}" ]; then
+            echo "::error::DEPLOY_WEBHOOK_SECRET is not set; the API cannot be deployed."
+            exit 1
+          fi
+          body=$(jq -cn --arg sha "$SHA" --argjson ts "$(date +%s)" '{sha: $sha, ts: $ts}')
+          # The secret stays in the environment, never in a command line.
+          sig=$(BODY="$body" node -e 'process.stdout.write(require("crypto").createHmac("sha256", process.env.DEPLOY_WEBHOOK_SECRET).update(process.env.BODY).digest("hex"))')
+          # octet-stream: a JSON body parser in front of /ops must leave the signed bytes untouched.
+          code=$(curl -sS -o response.json -w '%{http_code}' --max-time 30 -X POST "$API/ops/deploy" \
+            -H 'Content-Type: application/octet-stream' -H "X-Deploy-Signature: sha256=$sig" --data-raw "$body")
+          cat response.json; echo
+          if [ "$code" != "202" ] && [ "$code" != "200" ]; then
+            echo "::error::The VM refused the deploy request (HTTP $code)."
+            exit 1
+          fi
+      - name: Wait for the VM to finish
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 72); do
+            # A restarting API may answer 502 or an HTML page: treat anything that is not a JSON object as "no news yet".
+            status=$(curl -fsS --max-time 10 "$API/ops/deploy/status" 2>/dev/null) || status='{}'
+            printf '%s' "$status" | jq -e 'type == "object"' >/dev/null 2>&1 || status='{}'
+            last_sha=$(printf '%s' "$status" | jq -r '.last.sha // empty')
+            state=$(printf '%s' "$status" | jq -r '.last.state // empty')
+            deployed=$(printf '%s' "$status" | jq -r '.deployed_sha // empty')
+            echo "$(date -u +%H:%M:%S) state=${state:-?} last=${last_sha:0:12} deployed=${deployed:0:12}"
+            if [ "$last_sha" = "$SHA" ]; then
+              case "$state" in
+                ok) echo "Deployed $SHA"; printf '%s\n' "$status" | jq .; exit 0 ;;
+                failed|rolled_back) printf '%s\n' "$status" | jq .; echo "::error::The VM could not deploy $SHA ($state)."; exit 1 ;;
+              esac
+            fi
+            sleep 5
+          done
+          echo "::error::Timed out after 6 minutes waiting for the VM to deploy $SHA."
+          exit 1
+      - name: Health after deploy
+        run: curl -fsS --max-time 10 "$API/health" | jq .
