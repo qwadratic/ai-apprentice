@@ -6,7 +6,7 @@ import { ClipaLogo } from './ClipaLogo.tsx';
 import { ToneMenu } from './ToneMenu.tsx';
 
 /** The latest macOS build, published by macos-build.yml on every push to main under one fixed release tag. */
-export const MAC_DOWNLOAD_URL = 'https://github.com/qwadratic/clipa/releases/download/clipa-macos-latest/Clipa-macos.zip';
+export const MAC_DOWNLOAD_URL = 'https://github.com/qwadratic/clipa/releases/download/clipa-macos-latest/Clipa.dmg';
 
 interface HeaderProps {
   debugOpen: boolean;
@@ -31,7 +31,7 @@ export function Header({ debugOpen, onToggleDebug, headerRef }: HeaderProps) {
       <JourneyRail />
 
       <div className="as-header__tools">
-        <a className="as-btn as-btn--link" href={MAC_DOWNLOAD_URL} title="Clipa for macOS: unzip, then xattr -dr com.apple.quarantine Clipa.app">
+        <a className="as-btn as-btn--link" href={MAC_DOWNLOAD_URL} title="Clipa for macOS: open the disk image and drag Clipa to Applications. Not notarized: on the first launch, System Settings > Privacy & Security > Open Anyway.">
           macOS app
         </a>
         {offRecord ? (
