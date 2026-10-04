@@ -1,0 +1,670 @@
+{
+ "vision_result": {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "oneOf": [
+   {
+    "type": "object",
+    "required": [
+     "outcome",
+     "kind",
+     "facts"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "outcome": {
+      "const": "observation"
+     },
+     "kind": {
+      "const": "order_view"
+     },
+     "facts": {
+      "type": "object",
+      "required": [
+       "customerRef",
+       "orderId",
+       "deliveryAddress",
+       "deliveryWindow"
+      ],
+      "additionalProperties": false,
+      "properties": {
+       "customerRef": {
+        "type": [
+         "string",
+         "null"
+        ]
+       },
+       "orderId": {
+        "type": [
+         "string",
+         "null"
+        ]
+       },
+       "deliveryAddress": {
+        "type": [
+         "string",
+         "null"
+        ]
+       },
+       "deliveryWindow": {
+        "type": [
+         "string",
+         "null"
+        ]
+       }
+      }
+     }
+    }
+   },
+   {
+    "type": "object",
+    "required": [
+     "outcome",
+     "kind",
+     "facts"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "outcome": {
+      "const": "observation"
+     },
+     "kind": {
+      "const": "email_draft"
+     },
+     "facts": {
+      "type": "object",
+      "required": [
+       "recipientRef",
+       "subject",
+       "bodyText",
+       "attachments",
+       "previewState"
+      ],
+      "additionalProperties": false,
+      "properties": {
+       "recipientRef": {
+        "type": [
+         "string",
+         "null"
+        ]
+       },
+       "subject": {
+        "type": "string"
+       },
+       "bodyText": {
+        "type": "string"
+       },
+       "attachments": {
+        "type": "array",
+        "items": {
+         "type": "object",
+         "required": [
+          "kind"
+         ],
+         "additionalProperties": false,
+         "properties": {
+          "kind": {
+           "enum": [
+            "image",
+            "pdf",
+            "other"
+           ]
+          },
+          "ocrText": {
+           "type": "string"
+          }
+         }
+        }
+       },
+       "previewState": {
+        "enum": [
+         "editing",
+         "preview",
+         "sent"
+        ]
+       }
+      }
+     }
+    }
+   },
+   {
+    "type": "object",
+    "required": [
+     "outcome",
+     "kind",
+     "facts"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "outcome": {
+      "const": "observation"
+     },
+     "kind": {
+      "const": "ticket"
+     },
+     "facts": {
+      "type": "object",
+      "required": [
+       "ticketId",
+       "orderId",
+       "customerRef",
+       "status",
+       "summary"
+      ],
+      "additionalProperties": false,
+      "properties": {
+       "ticketId": {
+        "type": "string",
+        "minLength": 1
+       },
+       "orderId": {
+        "type": [
+         "string",
+         "null"
+        ]
+       },
+       "customerRef": {
+        "type": [
+         "string",
+         "null"
+        ]
+       },
+       "status": {
+        "enum": [
+         "open",
+         "done"
+        ]
+       },
+       "summary": {
+        "type": "string"
+       }
+      }
+     }
+    }
+   },
+   {
+    "type": "object",
+    "required": [
+     "outcome",
+     "kind",
+     "facts"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "outcome": {
+      "const": "observation"
+     },
+     "kind": {
+      "const": "screen_activity"
+     },
+     "facts": {
+      "type": "object",
+      "required": [
+       "app",
+       "surface",
+       "summary",
+       "change",
+       "entities",
+       "pendingAction",
+       "pendingRegionId",
+       "regions"
+      ],
+      "additionalProperties": false,
+      "properties": {
+       "app": {
+        "type": [
+         "string",
+         "null"
+        ],
+        "description": "app or site named by visible branding, else null"
+       },
+       "surface": {
+        "type": "string",
+        "minLength": 1,
+        "description": "what is open"
+       },
+       "summary": {
+        "type": "string",
+        "minLength": 1,
+        "description": "1-2 sentences of what is visible"
+       },
+       "change": {
+        "type": [
+         "string",
+         "null"
+        ],
+        "description": "visible sign of a change, else null"
+       },
+       "entities": {
+        "type": "array",
+        "maxItems": 8,
+        "items": {
+         "type": "string"
+        },
+        "description": "short visible items: names, amounts, cells, subjects"
+       },
+       "pendingAction": {
+        "type": [
+         "string",
+         "null"
+        ],
+        "description": "control about to be used, else null"
+       },
+       "pendingRegionId": {
+        "type": [
+         "string",
+         "null"
+        ],
+        "description": "id of that control's region in regions, else null"
+       },
+       "regions": {
+        "type": "array",
+        "maxItems": 6,
+        "items": {
+         "type": "object",
+         "required": [
+          "id",
+          "label",
+          "box"
+         ],
+         "additionalProperties": false,
+         "properties": {
+          "id": {
+           "type": "string",
+           "description": "unique: r1, r2, ..."
+          },
+          "label": {
+           "type": "string"
+          },
+          "box": {
+           "type": "array",
+           "minItems": 4,
+           "maxItems": 4,
+           "items": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+           },
+           "description": "[x, y, width, height], 0..1 of the processed frame; x + width <= 1 and y + height <= 1"
+          }
+         }
+        }
+       }
+      }
+     }
+    }
+   },
+   {
+    "type": "object",
+    "required": [
+     "outcome",
+     "reason"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "outcome": {
+      "const": "incomplete"
+     },
+     "reason": {
+      "enum": [
+       "unreadable",
+       "unsupported_surface"
+      ]
+     }
+    }
+   }
+  ]
+ },
+ "workspace_vision": {
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "oneOf": [
+   {
+    "type": "object",
+    "required": [
+     "outcome",
+     "kind",
+     "facts"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "outcome": {
+      "const": "observation"
+     },
+     "kind": {
+      "const": "order_view"
+     },
+     "facts": {
+      "type": "object",
+      "required": [
+       "customerRef",
+       "orderId",
+       "deliveryAddress",
+       "deliveryWindow"
+      ],
+      "additionalProperties": false,
+      "properties": {
+       "customerRef": {
+        "type": [
+         "string",
+         "null"
+        ]
+       },
+       "orderId": {
+        "type": [
+         "string",
+         "null"
+        ]
+       },
+       "deliveryAddress": {
+        "type": [
+         "string",
+         "null"
+        ]
+       },
+       "deliveryWindow": {
+        "type": [
+         "string",
+         "null"
+        ]
+       }
+      }
+     }
+    }
+   },
+   {
+    "type": "object",
+    "required": [
+     "outcome",
+     "kind",
+     "facts"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "outcome": {
+      "const": "observation"
+     },
+     "kind": {
+      "const": "email_draft"
+     },
+     "facts": {
+      "type": "object",
+      "required": [
+       "recipientRef",
+       "subject",
+       "bodyText",
+       "attachments",
+       "previewState"
+      ],
+      "additionalProperties": false,
+      "properties": {
+       "recipientRef": {
+        "type": [
+         "string",
+         "null"
+        ]
+       },
+       "subject": {
+        "type": "string"
+       },
+       "bodyText": {
+        "type": "string"
+       },
+       "attachments": {
+        "type": "array",
+        "items": {
+         "type": "object",
+         "required": [
+          "kind"
+         ],
+         "additionalProperties": false,
+         "properties": {
+          "kind": {
+           "enum": [
+            "image",
+            "pdf",
+            "other"
+           ]
+          },
+          "ocrText": {
+           "type": "string"
+          }
+         }
+        }
+       },
+       "previewState": {
+        "enum": [
+         "editing",
+         "preview",
+         "sent"
+        ]
+       }
+      }
+     }
+    }
+   },
+   {
+    "type": "object",
+    "required": [
+     "outcome",
+     "kind",
+     "facts"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "outcome": {
+      "const": "observation"
+     },
+     "kind": {
+      "const": "ticket"
+     },
+     "facts": {
+      "type": "object",
+      "required": [
+       "ticketId",
+       "orderId",
+       "customerRef",
+       "status",
+       "summary"
+      ],
+      "additionalProperties": false,
+      "properties": {
+       "ticketId": {
+        "type": "string",
+        "minLength": 1
+       },
+       "orderId": {
+        "type": [
+         "string",
+         "null"
+        ]
+       },
+       "customerRef": {
+        "type": [
+         "string",
+         "null"
+        ]
+       },
+       "status": {
+        "enum": [
+         "open",
+         "done"
+        ]
+       },
+       "summary": {
+        "type": "string"
+       }
+      }
+     }
+    }
+   },
+   {
+    "type": "object",
+    "required": [
+     "outcome",
+     "reason"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "outcome": {
+      "const": "incomplete"
+     },
+     "reason": {
+      "enum": [
+       "unreadable",
+       "unsupported_surface"
+      ]
+     }
+    }
+   }
+  ]
+ },
+ "llm_reply_classification": {
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+   "verdict",
+   "correction"
+  ],
+  "properties": {
+   "verdict": {
+    "type": "string",
+    "enum": [
+     "confirm",
+     "correct",
+     "unclear"
+    ]
+   },
+   "correction": {
+    "anyOf": [
+     {
+      "type": "string"
+     },
+     {
+      "type": "null"
+     }
+    ]
+   }
+  }
+ },
+ "llm_entity_resolution": {
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+   "ref"
+  ],
+  "properties": {
+   "ref": {
+    "anyOf": [
+     {
+      "type": "string",
+      "enum": [
+       "customer_07",
+       "customer_12"
+      ]
+     },
+     {
+      "type": "null"
+     }
+    ]
+   }
+  }
+ },
+ "llm_answer_extraction": {
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+   "rationale",
+   "quote",
+   "guardrail",
+   "exceptions",
+   "unknowns",
+   "confidence"
+  ],
+  "properties": {
+   "rationale": {
+    "anyOf": [
+     {
+      "type": "string"
+     },
+     {
+      "type": "null"
+     }
+    ]
+   },
+   "quote": {
+    "type": "string"
+   },
+   "guardrail": {
+    "anyOf": [
+     {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+       "condition",
+       "requiredAction",
+       "requiredFields",
+       "scope"
+      ],
+      "properties": {
+       "condition": {
+        "type": "string"
+       },
+       "requiredAction": {
+        "type": "string"
+       },
+       "requiredFields": {
+        "type": "array",
+        "items": {
+         "type": "string",
+         "enum": [
+          "deliveryAddress",
+          "deliveryWindow"
+         ]
+        }
+       },
+       "scope": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+         "entity"
+        ],
+        "properties": {
+         "entity": {
+          "anyOf": [
+           {
+            "type": "string",
+            "enum": [
+             "customer_07"
+            ]
+           },
+           {
+            "type": "null"
+           }
+          ]
+         }
+        }
+       }
+      }
+     },
+     {
+      "type": "null"
+     }
+    ]
+   },
+   "exceptions": {
+    "type": "array",
+    "items": {
+     "type": "string"
+    }
+   },
+   "unknowns": {
+    "type": "array",
+    "items": {
+     "type": "string"
+    }
+   },
+   "confidence": {
+    "type": "number"
+   }
+  }
+ }
+}
