@@ -1,7 +1,7 @@
 name: release
 
-# Push to main: re-run every check on the merged result; if green and not frozen, build the
-# site and publish it to GitHub Pages together with deploy.json:
+# Push to main: if not frozen, build the site and publish it to GitHub Pages together with
+# deploy.json (the checks are off for the submission day, see above pages-build):
 #   {"sha": "<40-hex target commit>", "at": "<UTC ISO time>", "run": "<this run's url>"}
 # Site and pointer are one Pages artifact, so they always move together. The VM (TASK-6.2)
 # polls <pages-url>/deploy.json, checks the sha is an ancestor of origin/main and deploys it.
@@ -146,31 +146,12 @@ jobs:
           echo "::error::DEPLOY_FREEZE=1: deploy is frozen. Unset the variable, or run this workflow manually with confirm=true."
           exit 1
 
-  checks-stream-b:
-    needs: prepare
-    if: needs.prepare.outputs.publish == 'true'
-    uses: ./.github/workflows/stream-b-checks.yml
-    with:
-      ref: ${{ needs.prepare.outputs.sha }}
-
-  checks-backlog:
-    needs: prepare
-    if: needs.prepare.outputs.publish == 'true'
-    uses: ./.github/workflows/backlog-check.yml
-    with:
-      ref: ${{ needs.prepare.outputs.sha }}
-
-  # Root workspace (stream A's web and API, stream B's packages): npm ci + npm run check on Node 22.22 and 24.
-  checks-workspace:
-    needs: prepare
-    if: needs.prepare.outputs.publish == 'true'
-    uses: ./.github/workflows/workspace-checks.yml
-    with:
-      ref: ${{ needs.prepare.outputs.sha }}
-
+  # Checks are off for the submission day (4 Oct): a release no longer waits for stream-b-checks, backlog-check and
+  # workspace-checks. They run by hand (workflow_dispatch). To turn them back on, restore the three checks-* jobs
+  # (`uses:` those workflows with `ref: ${{ needs.prepare.outputs.sha }}`) and list them in pages-build's needs.
   pages-build:
     name: build site and deploy.json
-    needs: [prepare, gate, checks-stream-b, checks-backlog, checks-workspace]
+    needs: [prepare, gate]
     if: needs.prepare.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:

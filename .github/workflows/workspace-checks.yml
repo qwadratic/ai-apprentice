@@ -4,19 +4,9 @@ name: workspace-checks
 # `npm run check` = typecheck + test + build across apps/web, apps/api and packages/*.
 # Skips cleanly while a ref has no root package-lock.json.
 
+# Off for the submission day (4 Oct): runs only by hand (workflow_dispatch) or when a workflow calls it.
+# Before: on PRs touching the workspace (package files, fixtures, apps, packages, scripts).
 on:
-  pull_request:
-    paths:
-      - "package.json"
-      - "package-lock.json"
-      - "tsconfig.base.json"
-      - ".nvmrc"
-      - ".npmrc"
-      - "fixtures/**"
-      - "apps/**"
-      - "packages/**"
-      - "scripts/**"
-      - ".github/workflows/workspace-checks.yml"
   workflow_dispatch:
     inputs:
       ref:

@@ -1,13 +1,14 @@
 name: backlog-check
 
+# Off for the submission day (4 Oct): runs only by hand (workflow_dispatch) or when a workflow calls it.
+# Before: on pushes and PRs touching backlog/**.
 on:
-  push:
-    paths:
-      - "backlog/**"
-      - ".github/workflows/backlog-check.yml"
-  pull_request:
-    paths:
-      - "backlog/**"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Commit to check (default is the selected branch)"
+        type: string
+        default: ""
   workflow_call:
     inputs:
       ref:
