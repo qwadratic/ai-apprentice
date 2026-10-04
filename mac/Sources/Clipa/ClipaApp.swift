@@ -6,6 +6,14 @@ import AppKit
 struct ClipaMain {
     @MainActor
     static func main() {
+        if CommandLine.arguments.contains("--smoke") {
+            // Headless check of the server path (see SmokeTest.swift); no menu bar, no overlay.
+            Task { @MainActor in
+                let code = await SmokeTest.run()
+                exit(code)
+            }
+            dispatchMain()
+        }
         let app = NSApplication.shared
         let delegate = AppDelegate()
         app.delegate = delegate

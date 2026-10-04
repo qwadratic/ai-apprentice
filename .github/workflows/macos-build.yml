@@ -36,3 +36,10 @@ jobs:
           name: Clipa-macos
           path: mac/build/Clipa-macos.zip
           if-no-files-found: error
+
+      # Manual runs only: the built app talks to the live Clipa server with its own code (session, conductor events and
+      # cues, one synthetic frame, the voice handshake, the hand-over). Pushes never call the server.
+      - name: Smoke test against the Clipa server (manual runs)
+        if: github.event_name == 'workflow_dispatch'
+        timeout-minutes: 3
+        run: build/Clipa.app/Contents/MacOS/Clipa --smoke

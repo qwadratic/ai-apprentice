@@ -22,6 +22,8 @@ final class VoiceAgent {
     private(set) var echoCancellation = false
     private(set) var agentSpeaking = false
     private(set) var personTalking = false
+    /// Agent audio events received in this conversation.
+    private(set) var audioChunks = 0
 
     var onAgentSpeaking: ((Bool) -> Void)?
     var onPersonTalking: ((Bool) -> Void)?
@@ -33,6 +35,7 @@ final class VoiceAgent {
     private var socket: URLSessionWebSocketTask?
     private var connection = 0
     private var microphone = false
+    private var audioOutput = true
     private let pipe = MicPipe()
 
     private var engine: AVAudioEngine?
@@ -52,12 +55,15 @@ final class VoiceAgent {
 
     // MARK: - Connection
 
-    func connect(url: URL, role: String, microphone: Bool) {
+    /// `audio: false` runs the conversation without the audio engine (no microphone, no playback): the smoke test.
+    func connect(url: URL, role: String, microphone: Bool, audio: Bool = true) {
         disconnect()
         connection += 1
         let id = connection
         self.role = role
-        self.microphone = microphone
+        self.microphone = microphone && audio
+        audioOutput = audio
+        audioChunks = 0
         ignoreAudioUpTo = -1 // event ids start again in a new conversation
         vadHighAt = 0
         vadStartedAt = 0
@@ -163,7 +169,7 @@ final class VoiceAgent {
             let meta = json["conversation_initiation_metadata_event"] as? [String: Any]
             let output = Self.sampleRate(meta?["agent_output_audio_format"] as? String)
             let input = Self.sampleRate(meta?["user_input_audio_format"] as? String)
-            startAudio(outputRate: output ?? 16000, inputRate: input ?? 16000)
+            if audioOutput { startAudio(outputRate: output ?? 16000, inputRate: input ?? 16000) }
             setState(.live, output == nil ? "unsupported agent audio format" : "")
         case "audio":
             guard let event = json["audio_event"] as? [String: Any],
@@ -171,6 +177,7 @@ final class VoiceAgent {
                   let pcm = Data(base64Encoded: encoded) else { return }
             let eventId = (event["event_id"] as? NSNumber)?.intValue ?? Int.max
             if eventId <= ignoreAudioUpTo { return }
+            audioChunks += 1
             play(pcm)
         case "ping":
             let eventId = ((json["ping_event"] as? [String: Any])?["event_id"] as? NSNumber)?.intValue ?? 0
