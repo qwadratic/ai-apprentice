@@ -289,7 +289,7 @@ export class Conductor {
   private recognized: LearnedProcess | null = null;
   private recognizedFor: string | null = null;
   private lastRecognitionAt = -Infinity;
-  /** A line to say at the next pause (so it never cuts into the person's work). */
+  /** A line to say at the next pause (so it never cuts into the person's work). Nothing sets one for now: recognition is silent. */
   private pendingSay: string | null = null;
   /** The map being built in the background as soon as Show ends, so Reflect opens with it ready. */
   private mapPrefetch: Promise<void> | null = null;
@@ -1111,9 +1111,8 @@ export class Conductor {
     if (this.liveMode === 'teach') {
       this.emit({ type: 'context', text: `[map] The expert's confirmed rules for ${match.title}: ${match.rules.map((g) => `when ${g.condition}, ${g.requiredAction}`).join('; ') || 'none'}. Do not state them unless the app asks.`.slice(0, 2000) });
     }
-    this.pendingSay = this.liveMode === 'learn'
-      ? `I know this one: ${match.title}. I will only ask about what is different.`
-      : `This is ${match.title}. I will step in if one of the expert's rules applies.`;
+    // Recognition is silent: a thought, the rules for the voice agent (Teach) and the known process for the question (Learn).
+    // An announcement ("I know this one", "This is X, I will step in") only talks around the questions and warnings.
     this.quiet(`recognised: ${match.title}`);
   }
 

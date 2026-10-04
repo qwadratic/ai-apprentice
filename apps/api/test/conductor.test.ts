@@ -332,7 +332,7 @@ test('the library lists every learned process; a rule that names no process is k
   assert.deepEqual(old.library().map((p) => [p.title, p.rules.length]), [['Keep the budget', 1]]);
 });
 
-test('Pass it on: Clipa recognises the process on screen, says so at a pause, and checks its rules first', async () => {
+test('Pass it on: Clipa recognises the process on screen silently (a thought, no announcement), and checks its rules first', async () => {
   const maps = new MapRegistry();
   maps.confirm('expert-session', TWO as never, 1);
   const r = rig({
@@ -347,7 +347,7 @@ test('Pass it on: Clipa recognises the process on screen, says so at a pause, an
   assert.deepEqual(offered.map((p) => [p.id, p.title]), [['m1-p1', 'Budget update'], ['m1-p2', 'Supplier check']]);
   assert.equal(of(r.cues, 'say').length, 0, 'never while the person works');
   await r.advance(RULES.pauseMs);
-  assert.equal(cueOf(r.cues, 'say').at(-1)?.text, 'This is Supplier check. I will step in if one of the expert\'s rules applies.');
+  assert.equal(of(r.cues, 'say').length, 0, 'no "This is X, I will step in" announcement, not even at a pause');
   await r.advance(RULES.teachCheckGapMs);
   const checked = r.calls.filter((c) => c.task === 'guardrail_check').at(-1)?.body.guardrails as Array<{ id: string; condition: string }>;
   assert.deepEqual(checked.map((g) => g.id), ['g2', 'g1', 'g3'], 'the recognised process first');
@@ -373,7 +373,7 @@ test('process_match failing or unsure is silent; Learn with a known process asks
   await l.advance(RULES.settleMs + 10);
   assert.equal(l.calls.at(-1)?.task, 'process_match');
   await l.advance(RULES.pauseMs);
-  assert.equal(cueOf(l.cues, 'say').at(-1)?.text, 'I know this one: Budget update. I will only ask about what is different.');
+  assert.equal(of(l.cues, 'say').length, 0, 'no "I know this one" announcement');
   await l.advance(RULES.settleMs + 10);
   const question = l.calls.find((c) => c.task === 'generic_question');
   const transcript = question?.body.transcript as Array<{ role: string; text: string }>;
@@ -606,10 +606,11 @@ test('thoughts: the map being built, a recognised process and a guardrail check'
   await t.send(hello('web', 'new_hire', 'expert-session'), { type: 'session', mode: 'teach', live: true, reason: null }, obs('n1', 'A contract is open.'));
   await t.advance(RULES.settleMs + 10);
   await t.advance(RULES.thoughtGapMs);
-  assert.ok(cueOf(t.cues, 'thought').some((x) => x.text === 'This looks like Supplier check'));
-  await t.advance(RULES.teachCheckGapMs);
+  assert.ok(cueOf(t.cues, 'thought').some((x) => x.text === 'This looks like Supplier check'), 'recognition keeps its thought');
+  // Recognition says nothing, so the rules are checked at the first pause (no announcement takes it any more).
   await t.advance(RULES.thoughtGapMs);
   assert.ok(cueOf(t.cues, 'thought').some((x) => x.text.startsWith('Checking: a new supplier')));
+  assert.equal(of(t.cues, 'say').length, 0);
   const poses = cueOf(t.cues, 'state').map((s) => s.clipa);
   assert.ok(poses.includes('think') && poses.at(-1) === 'listen', 'think while a model task works, then listen');
 });
@@ -1222,6 +1223,7 @@ test('workspace: Pass it on recognises the process once and the checks see the o
   for (let i = 0; i < 3; i++) { await r.send(orderFrame(`n${3 + 2 * i}`), emailFrame(`n${4 + 2 * i}`, 'Image only')); await r.advance(1_000); }
   await r.advance(RULES.pauseMs);
   assert.equal(r.calls.filter((c) => c.task === 'process_match').length, 1, 'the alternation is not another place to recognise');
+  assert.equal(of(r.cues, 'say').length, 0, 'recognition is silent');
   const check = r.calls.find((c) => c.task === 'guardrail_check');
   assert.ok(check, 'the rules were checked at the pause');
   assert.deepEqual([...new Set((check.body.observations as Array<{ surface: string }>).map((o) => o.surface))].sort(), ['email draft', 'order view']);
