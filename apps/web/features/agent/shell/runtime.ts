@@ -8,6 +8,7 @@ import { createAgentApi } from './api.ts';
 import type { FetchLike } from './api.ts';
 import { AgentBrain } from './brain/agent-brain.ts';
 import { POINT_HOLD_MS, createDirectorPresenter } from './clipa/director-presenter.ts';
+import { startDrift } from './clipa/drift.ts';
 import { InputGuard, watchPageInput } from './clipa/input-guard.ts';
 import { createClipaStore } from './clipa/presenter.ts';
 import type { ClipaStore } from './clipa/presenter.ts';
@@ -163,6 +164,24 @@ export function createRuntime(): ShellRuntime {
     if (text === '') presenter.say('');
     if (target) pointAt(target);
   };
+  // Clipa near the cursor while she rests at home (clipa/drift.ts); anything that moves her takes over.
+  const actor = (): HTMLElement | null => director.element.parentElement;
+  const drift = startDrift({ win: window, actor, resting: () => director.state === 'dock' });
+  const stopDriftWake = director.subscribe((event) => { if (event.type === 'state') drift.wake(); });
+  /**
+   * The conductor's `attention` cue: a quick glow, three pulses (one soft glow with reduced motion). Where she goes comes as its
+   * own motion (the face points at a new target), so here she only flashes, and the drift holds still meanwhile.
+   */
+  const flash = (): void => {
+    const el = actor();
+    if (el === null || typeof el.animate !== 'function') return;
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const glow = 'drop-shadow(0 0 6px rgba(94, 234, 212, 0.95)) drop-shadow(0 0 16px rgba(44, 196, 184, 0.75))';
+    const ms = reduced ? 900 : 1200;
+    drift.hold(ms);
+    el.animate([{ filter: 'none' }, { filter: glow, offset: 0.5 }, { filter: 'none' }], { duration: reduced ? ms : ms / 3, iterations: reduced ? 1 : 3, easing: 'ease-in-out' });
+    if (!reduced) director.element.animate([{ scale: '1' }, { scale: '1.08', offset: 0.5 }, { scale: '1' }], { duration: ms / 3, iterations: 3, easing: 'ease-in-out' });
+  };
   // `?conductor=off` keeps the in-browser brain in the lead (the fallback); otherwise the page is a face of the conductor.
   const query = new URLSearchParams(window.location.search);
   const conductorOn = query.get('conductor') !== 'off';
@@ -190,6 +209,7 @@ export function createRuntime(): ShellRuntime {
         base: API_BASE, version: WEB_FACE_VERSION, present,
         // The rail marks the guide's stage as next and shows its line under the rail.
         guide: (step) => store.setGuide?.(step),
+        attention: () => flash(),
       },
     } : {}),
   });
@@ -215,6 +235,8 @@ export function createRuntime(): ShellRuntime {
       live?.dispose();
       stopWatching();
       stopInputClock();
+      stopDriftWake();
+      drift.dispose();
       presenter.dispose();
     },
   };

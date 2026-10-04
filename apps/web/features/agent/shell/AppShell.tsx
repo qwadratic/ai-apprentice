@@ -6,6 +6,7 @@ import { Header } from './components/Header.tsx';
 import { SessionControls } from './components/SessionControls.tsx';
 import { StatusBar } from './components/StatusBar.tsx';
 import { setClipaFavicon } from './components/ClipaLogo.tsx';
+import { ClipaThought } from './conductor/ClipaThought.tsx';
 import { ShellContext, useShellState } from './hooks.ts';
 import { STAGES } from './journey/rail.ts';
 import { watchReflectSelection } from './journey/reflect-pointing.ts';
@@ -118,6 +119,7 @@ export function AppShell() {
           </div>
         </ModeLayout>
         <DebugDrawer open={debugOpen} onClose={() => setDebugOpen(false)} />
+        <ClipaThought />
       </div>
     </ShellContext.Provider>
   );

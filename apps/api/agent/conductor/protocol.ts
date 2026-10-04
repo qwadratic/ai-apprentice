@@ -60,7 +60,14 @@ export type Cue =
   | { type: 'presence'; size: Presence; anchor: 'corner' | 'target' }
   | { type: 'open_web'; page: 'review' | 'teach' | 'summary'; url: string; text: string }
   | { type: 'cancel'; cueId: string }
-  | { type: 'quiet'; reason: string };
+  | { type: 'quiet'; reason: string }
+  // Additive (v1.2): a face that does not know these ignores them. The conductor sends them to the web only for now.
+  /** A thought bubble: a short line about what Clipa is working on. Shown beside her, never spoken. */
+  | { type: 'thought'; text: string }
+  /** The person should look somewhere else (an ask about a region, a warning, the next stage): Clipa flashes and goes there. */
+  | { type: 'attention'; target: Target | null }
+  /** The person asked for a stage by voice: the face opens it the way a click on its stage does. */
+  | { type: 'stage'; mode: Mode };
 
 export interface CueEnvelope { seq: number; cueId: string; atMs: number; mode: Mode | null; persona: Persona; for: Audience; cue: Cue; expiresAtMs: number | null }
 

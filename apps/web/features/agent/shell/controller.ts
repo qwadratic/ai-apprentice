@@ -80,6 +80,8 @@ export interface ConductorOptions {
   present?(text: string | null, target: Target | null | undefined, kind?: ConductorLineKind): void;
   /** The conductor's journey step for the rail (its `guide` cue), or null to clear it. */
   guide?(step: { phase: string; step: string; text: string } | null): void;
+  /** The floating Clipa flashes briefly (the conductor's `attention` cue); where she goes comes as a `present` motion. */
+  attention?(target: Target | null): void;
 }
 
 /** The conductor's pose as the shell's Clipa state, for the poses that the voice signals do not already show. */
@@ -516,6 +518,9 @@ export class ShellController {
       now: () => this.deps.now(),
       send: (event) => this.conductorSend(event),
       timers: this.deps.timers,
+      attention: (target) => this.deps.conductor?.attention?.(target),
+      // The person asked for a stage by voice: exactly what a click on its tab of the journey rail does.
+      stage: (mode) => this.setMode(mode),
     };
   }
 
