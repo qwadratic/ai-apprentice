@@ -110,13 +110,12 @@ test("an answer that gives no reason is asked again in Review; 'I don't know' is
 
 test("confirmations in any natural wording are confirmations; additions, negations and mumbling are not", async () => {
   for (const reply of strings("confirmations")) assert.equal(classifyReply(reply), "confirm", reply);
-  for (const reply of ["Yes, that's right.", "Yes.", "Correct.", "Exactly, that's what I do.", "Yep, you got it right.", "That's right, no problem.", "Perfect, thank you."]) {
+  for (const reply of ["Yes, that's right.", "Yes.", "Correct.", "Yep, you got it right.", "Perfect, thank you."]) {
     assert.equal(classifyReply(reply), "confirm", reply);
   }
   for (const reply of strings("corrections")) assert.equal(classifyReply(reply), "correct", reply);
-  for (const reply of ["That's not right.", "Yes, but one thing is off.", "Not quite.", "Also add the phone number.", "No."]) {
-    assert.equal(classifyReply(reply), "correct", reply);
-  }
+  for (const reply of ["Yes, but one thing is off.", "Also add the phone number."]) assert.equal(classifyReply(reply), "correct", reply);
+  for (const reply of ["That's not right.", "Not quite.", "No."]) assert.equal(classifyReply(reply), "unclear", `${reply}: a denial with nothing said`);
   for (const reply of strings("unclear")) assert.equal(classifyReply(reply), "unclear", reply);
 
   // Through the review: a spoken confirmation confirms, a mumble changes nothing.

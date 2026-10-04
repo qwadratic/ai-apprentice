@@ -78,7 +78,7 @@ test("a hedge in front of a real reason keeps the reason", () => {
 test("'No, that's right.' confirms", async () => {
   assert.equal(readReply("No, that's right.").verdict, "confirm");
   assert.equal(readReply("No, that is correct.").verdict, "confirm");
-  assert.equal(readReply("No, that's not right.").verdict, "correct");
+  assert.equal(readReply("No, that's not right.").verdict, "unclear", "a denial with nothing said: ask what to change");
   assert.equal(readReply("No, the order number goes in too.").verdict, "correct");
   const state = await buildState({ confirm: false });
   assert.equal((await applyTeachBackReply(state, { text: "No, that's right.", atMs: 9 }, extractor)).outcome, "confirmed");
@@ -145,7 +145,7 @@ test("'Customer three is the usual case.' does not put customer_03 into the rule
   // Customers the expert does put into the scope still join it.
   assert.deepEqual(heuristicExtract({ ...input, topic: "scope", text: "Customer three too.", knownRefs: known }).scope.customers, ["customer_03"]);
   assert.deepEqual(heuristicExtract({ ...input, topic: "scope", text: "Only customer seven gets it.", knownRefs: known }).scope.customers, ["customer_07"]);
-  assert.deepEqual(heuristicExtract({ ...input, topic: "scope", text: "Customer three.", knownRefs: known }).scope.customers, ["customer_03"]);
+  assert.deepEqual(heuristicExtract({ ...input, topic: "scope", text: "Customer three.", knownRefs: known }).scope.customers, [], "a bare name is not an explicit inclusion");
   // Naming a customer in another answer is not a scope statement.
   assert.deepEqual(heuristicExtract({ ...input, topic: "reason", text: "Customer three asked for it because of his phone.", knownRefs: known }).scope.customers, []);
 });

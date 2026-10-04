@@ -104,54 +104,86 @@ export function buildTeachBack(map: WorkMap): TeachBack {
 
 export type TeachBackReply = "confirm" | "correct" | "unclear";
 
-const FILLER = /^(?:(?:well|so|um|uh|er|hmm|oh|ah|okay|ok|alright|all right|yeah|yes|yep|yup|sure)\b[\s,.!-]*)+/i;
-const AFFIRM = /\b(yes|yep|yeah|yup|correct|right|exactly|confirmed?|sounds (good|right|correct)|looks (good|right|correct)|that works|that's (right|correct|it|good|fine|perfect)|perfect|spot on|agreed|go ahead|good|fine|okay|ok|sure)\b/i;
-// The agreement at the start of a reply: "Okay, that's correct.", "Uh, yes, that's right.", "Sounds good."
-const AFFIRM_LEAD =
-  /^(?:[\s,.!;:-]*(?:yes|yep|yeah|yup|correct|right|exactly|okay|ok|sure|perfect|absolutely|alright|agreed|good|fine|that'?s (?:right|correct|it|good|fine|perfect)|sounds (?:good|right|correct)|looks (?:good|right|correct)))+[\s,.!;:-]*/i;
-// "No, that's right" agrees: the "no" answers "did I get anything wrong?".
-const NO_THATS_RIGHT = /^\W*no[\s,.!-]+(?=(?:that'?s|that is|it'?s|you'?re|you are)\s+(?:absolutely |exactly |completely |perfectly )?(?:right|correct)\b)/i;
-// Words that turn an agreement into a correction.
-const HEDGE =
-  /\b(but|except|one thing|correction|almost|not quite|wrong|actually|however|missing|forgot|also|add|instead|incorrect)\b|\b(not|isn't|aren't|wasn't) (quite |exactly |really |entirely )?(right|correct|true|good|fine|accurate|it|what)\b|^\W*no\b(?!\s+(problem|worries|issue|doubt))/i;
-const UNSURE = /\b(not sure|don't know|do not know|no idea|hmm+|repeat|again|pardon|what\?|come again)\b/i;
-// Something added after an agreement: "Correct, he wants the order number in there as well." "Yes. Customer twelve too."
-const PLEASANTRY = /\bthank(?:s| you)\b[^.!?]*|\b(?:great|nice|good job|well done|appreciate it)\b[^.!?]*/gi;
-const ADDITION_STRONG = /\b(as well|too|also|in addition|additionally|plus|on top of|missing|forgot|add(?:ed)?)\b|\band (?:the|his|her|their|an?|customer)\b/i;
-const ADDITION_WEAK = /\b(needs?|wants?|must|should)\b/i;
-const words = (s: string): number => s.split(/\s+/).filter(Boolean).length;
+// Reading the expert's reply to the teach-back is FAIL-SAFE: a reply is a confirmation only when nothing substantive is left
+// after the confirmation tokens are taken away. Anything added is a correction carrying the addition; anything that cannot be
+// parsed is "unclear" and Review asks again. Never a confirmation that drops added content.
 
-/** The agreement stripped from the start of a reply, and what follows it. */
-function afterAgreement(body: string): string | null {
-  const lead = AFFIRM_LEAD.exec(body);
-  if (lead === null) return null;
-  const rest = body.slice(lead[0].length).trim();
-  return rest.length > 0 ? rest : null;
-}
+// Confirmation tokens, longest phrase first. "no, that's right" agrees: the "no" answers "did I get anything wrong?".
+const CONFIRMATION = [
+  "no,? that(?:'?s| is) (?:absolutely |exactly |completely |perfectly )?(?:right|correct)",
+  "that(?:'?s| is) (?:absolutely |exactly |completely |perfectly )?(?:right|correct|it|good|fine|perfect|great|true)",
+  "you(?:'ve| have)? got it(?: right)?",
+  "got it",
+  "sounds? (?:good|right|correct|great|fine|perfect)",
+  "looks? (?:good|right|correct|great|fine|perfect)",
+  "that works",
+  "spot on",
+  "all good",
+  "go ahead",
+  "(?:and )?thank you(?: very much)?",
+  "(?:and )?thanks(?: a lot| very much)?",
+  "very much",
+  "yes|yeah|yep|yup|yea|correct|right|exactly|absolutely|definitely|indeed|agreed|perfect|great|good|fine|okay|ok|sure|alright|all right|nice|cool|true",
+];
+const FILLER = "um+|uh+|er+m?|hm+|hmm+|ah+|oh+|well|like|you know|i mean";
+// Denials and doubts say nothing by themselves.
+const DENIAL = "no|nope|nah|not quite|not exactly|not really|not right|not correct|not true|wrong|incorrect|almost|never";
+const DOUBT = "i'?m not sure|not sure|i don'?t know|don'?t know|no idea|what|pardon|sorry|repeat(?: that)?|again|come again|say that|one more time|huh|what do you mean|can you|could you";
+// Words that can stay after the confirmation tokens without adding anything: "sounds good TO ME", "yes IT IS".
+const NEUTRAL = new Set(["to", "me", "it", "is", "are", "was", "that", "this", "i", "you", "we", "so", "very", "really", "quite", "then", "there", "here", "the", "a", "my", "your", "for", "of", "all"]);
+// Words that connect or hedge but carry no content of their own: "yes, AND." cannot be parsed.
+const MARKERS = new Set(["and", "but", "or", "also", "too", "as", "well", "just", "not", "if", "he", "she", "they", "his", "her", "their", "our", "an", "in", "on", "at", "with", "be", "these", "those", "its", "that's", "it's", "i'm", "you're", "thats"]);
+
+const normalise = (text: string): string =>
+  text
+    .toLowerCase()
+    .replace(/[‘’]/g, "'")
+    .replace(/[^a-z0-9' ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const stripAll = (core: string, phrases: readonly string[]): string => {
+  const re = new RegExp(`(?:^| )(?:${phrases.join("|")})(?= |$)`, "gi");
+  let prev: string;
+  let out = core;
+  do {
+    prev = out;
+    out = out.replace(re, " ").replace(/\s+/g, " ").trim();
+  } while (out !== prev);
+  return out;
+};
+
+// The leading run of confirmation tokens, fillers and denials of the ORIGINAL text (to cut the correction out of it verbatim).
+const LEAD = new RegExp(`^(?:[\\s,.!;:-]*(?:${[...CONFIRMATION, FILLER, DENIAL].join("|")})(?![a-z']))+[\\s,.!;:-]*`, "i");
+
+const words = (core: string): string[] => core.split(" ").filter((w) => w.length > 0);
 
 /**
- * Reads the expert's reply to the teach-back: a confirmation, a correction, or unclear. Agreement can come first ("Okay,
- * that's correct", "Uh, yes, that's right", "Sounds good", "No, that's right"). An addition after the agreement ("Correct, he wants
- * the order number in there as well", "Yes. Customer twelve too.") makes it a correction and is returned as the correction;
- * so do a "but", a negation or a missing piece. A reply with no agreement and no content ("Hmm", "I'm not sure") is unclear.
- * Keyword heuristic; LlmReplyClassifier is the model-backed one.
+ * Reads the expert's reply to the teach-back.
+ *  - confirm: nothing substantive is left once the confirmation tokens (yes, right, correct, that's right, no that's right,
+ *    sounds good, thanks...) and fillers are removed.
+ *  - correct: something substantive is left. It is returned as the correction (cut out of the reply verbatim when the reply
+ *    opens with agreement or denial); the reply is never treated as a plain confirmation.
+ *  - unclear: only doubt, denial or noise is left ("Hmm.", "I'm not sure.", "No."): Review asks again.
+ * Keyword heuristic and fail-safe; LlmReplyClassifier is the model-backed one.
  */
 export function readReply(text: string): ReplyVerdict {
-  const body = text
-    .trim()
-    .replace(FILLER, (m) => (AFFIRM.test(m) ? m : ""))
-    .replace(NO_THATS_RIGHT, "");
-  const rest = afterAgreement(body);
-  if (HEDGE.test(body)) return { verdict: "correct", correction: rest };
-  if (UNSURE.test(body)) return { verdict: "unclear", correction: null };
-  if (AFFIRM.test(body)) {
-    const meat = (rest ?? "").replace(PLEASANTRY, "").trim();
-    const adds = ADDITION_STRONG.test(meat) || (ADDITION_WEAK.test(meat) && words(meat) >= 4 && !/^that'?s what\b/i.test(meat));
-    if (meat.length > 0 && adds) return { verdict: "correct", correction: rest };
-    if (words(body) <= 25) return { verdict: "confirm", correction: null };
+  const core = normalise(text);
+  if (core.length === 0) return { verdict: "unclear", correction: null };
+  const rest = stripAll(core, [...CONFIRMATION, FILLER]);
+  const confirmedSomething = rest !== stripAll(core, [FILLER]);
+  if (rest.length === 0) return { verdict: confirmedSomething ? "confirm" : "unclear", correction: null };
+  // What is left once denials, doubts and neutral words are taken away is the content of the reply.
+  const substance = stripAll(rest, [DENIAL, DOUBT, FILLER]);
+  const content = words(substance).filter((w) => !NEUTRAL.has(w) && !MARKERS.has(w));
+  if (content.length > 0) {
+    const lead = LEAD.exec(text.trim());
+    const cut = lead === null ? "" : text.trim().slice(lead[0].length).trim();
+    return { verdict: "correct", correction: cut.length > 0 ? cut : null };
   }
-  if (words(body) <= 2) return { verdict: "unclear", correction: null };
-  return { verdict: "correct", correction: null };
+  // No content. Neutral leftovers after a confirmation are still a confirmation; anything else cannot be parsed.
+  const onlyNeutral = substance === rest && words(rest).every((w) => NEUTRAL.has(w));
+  return { verdict: confirmedSomething && onlyNeutral ? "confirm" : "unclear", correction: null };
 }
 
 export function classifyReply(text: string): TeachBackReply {
@@ -219,6 +251,10 @@ export async function applyTeachBackReply(
     entityRef: null,
     knownRefs: knownCustomerRefs(state),
   });
+  // Fail-safe: a correction that changes nothing the map can hold (no field, no scope, no reason) is not applied as one.
+  if (extraction.requiredFacts.length === 0 && !extraction.scope.all && extraction.scope.customers.length === 0 && extraction.rationale === null && !extraction.retracts) {
+    return { outcome: "unclear", state, teachBack: null, issues: [] };
+  }
   const next = reduceMap(state, { type: "correct", extraction });
   return { outcome: "corrected", state: next, teachBack: buildTeachBack(workingMap(next)), issues: [] };
 }
