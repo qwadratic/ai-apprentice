@@ -1,0 +1,160 @@
+/*
+ * Journey progress strip. Classes only (clipa-strip*), no bare element selectors. Colours come from the shell's
+ * --as-* tokens when the strip sits inside .apprentice-shell, with plain fallbacks for any other page.
+ */
+.clipa-strip {
+  --cs-text: var(--as-text, #14211f);
+  --cs-muted: var(--as-muted, #4f605c);
+  --cs-line: var(--as-border, #cbd7d4);
+  --cs-accent: var(--as-accent, #0a766f);
+  --cs-accent-text: var(--as-accent-text, #ffffff);
+  --cs-ok: var(--as-ok, #0b6b4c);
+  --cs-ok-soft: var(--as-ok-soft, #d9f0e6);
+  --cs-surface: var(--as-surface, #ffffff);
+  --cs-focus: var(--as-focus, #0a766f);
+  color: var(--cs-text);
+  font: 13px/1.3 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  .clipa-strip {
+    --cs-text: var(--as-text, #e5eeec);
+    --cs-muted: var(--as-muted, #a3b6b2);
+    --cs-line: var(--as-border, #2f4240);
+    --cs-accent: var(--as-accent, #2cc4b8);
+    --cs-accent-text: var(--as-accent-text, #04201d);
+    --cs-ok: var(--as-ok, #6fdcb0);
+    --cs-ok-soft: var(--as-ok-soft, #123a2c);
+    --cs-surface: var(--as-surface, #162120);
+    --cs-focus: var(--as-focus, #2cc4b8);
+  }
+}
+
+.clipa-strip__list {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.clipa-strip__item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+  text-align: center;
+}
+
+/* The connector to the item on the left. */
+.clipa-strip__item + .clipa-strip__item::before {
+  content: '';
+  position: absolute;
+  top: 18px;
+  right: 50%;
+  width: 100%;
+  height: 2px;
+  background: var(--cs-line);
+  z-index: 0;
+}
+.clipa-strip__item--done + .clipa-strip__item::before,
+.clipa-strip__item--skipped + .clipa-strip__item::before {
+  background: var(--cs-ok);
+}
+
+.clipa-strip__btn {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 4px 2px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: default;
+}
+button.clipa-strip__btn {
+  cursor: pointer;
+  border-radius: 8px;
+}
+button.clipa-strip__btn:focus-visible {
+  outline: 2px solid var(--cs-focus);
+  outline-offset: 2px;
+}
+
+.clipa-strip__mark {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  box-sizing: border-box;
+  border: 2px solid var(--cs-line);
+  border-radius: 50%;
+  background: var(--cs-surface);
+  color: var(--cs-muted);
+  font-weight: 700;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+.clipa-strip__label {
+  overflow: hidden;
+  max-width: 100%;
+  color: var(--cs-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clipa-strip__item--current .clipa-strip__mark {
+  border-color: var(--cs-accent);
+  background: var(--cs-accent);
+  color: var(--cs-accent-text);
+}
+.clipa-strip__item--current .clipa-strip__label {
+  color: var(--cs-text);
+  font-weight: 700;
+}
+.clipa-strip__item--done .clipa-strip__mark {
+  border-color: var(--cs-ok);
+  background: var(--cs-ok-soft);
+  color: var(--cs-ok);
+}
+.clipa-strip__item--done .clipa-strip__label {
+  color: var(--cs-text);
+}
+.clipa-strip__item--skipped .clipa-strip__mark {
+  border-style: dashed;
+}
+
+.clipa-strip__detail {
+  max-width: 100%;
+  color: var(--cs-muted);
+  font-size: 12px;
+}
+.clipa-strip__who {
+  margin: 6px 0 0;
+  color: var(--cs-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* Visible to screen readers only: the status in words, so colour is never the only cue. */
+.clipa-strip__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .clipa-strip__mark {
+    transition: none;
+  }
+}

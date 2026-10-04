@@ -5,10 +5,10 @@
   "type": "module",
   "description": "Clipa motion: the <clipa-buddy> web component and a director that moves it (dock, notice, approach, speak, listen, think, ack, retreat, warn, point, off). Dependency-free; tsc compiles src/ to dist/, which together with static/ is the demo site.",
   "engines": { "node": ">=22.22" },
-  "exports": { ".": "./src/index.ts" },
+  "exports": { ".": "./src/index.ts", "./journey": "./journey/index.ts" },
   "scripts": {
-    "typecheck": "tsc --noEmit -p . && tsc --noEmit -p test && tsc --noEmit -p scripts",
-    "test": "node --test \"test/*.test.ts\"",
+    "typecheck": "tsc --noEmit -p . && tsc --noEmit -p test && tsc --noEmit -p scripts && tsc --noEmit -p journey",
+    "test": "node --test \"test/*.test.ts\" \"journey/test/*.test.ts\"",
     "build": "tsc -p tsconfig.build.json && node scripts/copy-static.ts",
     "e2e": "npm run build && node scripts/e2e.ts"
   },
