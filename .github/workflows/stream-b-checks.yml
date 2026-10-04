@@ -87,3 +87,18 @@ jobs:
           else
             echo "::notice::skipping Clipa motion (no package-lock.json yet)"
           fi
+
+      # The briefing board (TASK-3.11) lives in the root workspace (React, contracts, @apprentice/agent), so it needs the root install.
+      # release.yml may check a commit from before the board existed, so test for the directory first.
+      - name: Briefing board tests
+        run: |
+          set -euo pipefail
+          dir=apps/web/features/agent/workmap
+          if [ -d "$dir/test" ]; then
+            npm ci
+            npm run build --workspace @apprentice/contracts
+            cd apps/web
+            node --import ./features/agent/workmap/test/register.mjs --test "features/agent/workmap/test/*.test.ts"
+          else
+            echo "::notice::skipping briefing board (not on this commit)"
+          fi

@@ -1,0 +1,779 @@
+{
+  "generatedBy": "apps/web/features/agent/workmap/fixtures/generate.ts",
+  "synthetic": true,
+  "note": "Synthetic customer_07 Learn session played through packages/agent with the scripted expert. Frames are generated placeholders, not screen captures.",
+  "sessionId": "sess-mock-learn-01",
+  "durationMs": 27000,
+  "evidence": [
+    {
+      "schemaVersion": 1,
+      "id": "ev-f-0001",
+      "kind": "frame",
+      "assetRef": "mock://frames/f-0001.png",
+      "startMs": 0,
+      "endMs": 1000
+    },
+    {
+      "schemaVersion": 1,
+      "id": "ev-f-0003",
+      "kind": "frame",
+      "assetRef": "mock://frames/f-0003.png",
+      "startMs": 5000,
+      "endMs": 6000
+    },
+    {
+      "schemaVersion": 1,
+      "id": "ev-clip-template-replaced",
+      "kind": "clip",
+      "assetRef": "mock://clips/template-replaced.webm",
+      "startMs": 8000,
+      "endMs": 20000
+    },
+    {
+      "schemaVersion": 1,
+      "id": "ev-f-0004",
+      "kind": "frame",
+      "assetRef": "mock://frames/f-0004.png",
+      "startMs": 8000,
+      "endMs": 9000
+    },
+    {
+      "schemaVersion": 1,
+      "id": "ev-f-0005",
+      "kind": "frame",
+      "assetRef": "mock://frames/f-0005.png",
+      "startMs": 11000,
+      "endMs": 12000
+    },
+    {
+      "schemaVersion": 1,
+      "id": "ev-f-0007",
+      "kind": "frame",
+      "assetRef": "mock://frames/f-0007.png",
+      "startMs": 14000,
+      "endMs": 15000
+    },
+    {
+      "schemaVersion": 1,
+      "id": "ev-f-0011",
+      "kind": "frame",
+      "assetRef": "mock://frames/f-0011.png",
+      "startMs": 20000,
+      "endMs": 21000
+    },
+    {
+      "schemaVersion": 1,
+      "id": "ev-f-0014",
+      "kind": "frame",
+      "assetRef": "mock://frames/f-0014.png",
+      "startMs": 25000,
+      "endMs": 26000
+    }
+  ],
+  "observations": [
+    {
+      "schemaVersion": 1,
+      "id": "obs-001",
+      "sessionId": "sess-mock-learn-01",
+      "sequence": 1,
+      "timestampMs": 0,
+      "source": "vision",
+      "frameId": "f-0001",
+      "sourceRevision": "rev-order-1",
+      "entityRef": "customer_07",
+      "evidenceIds": [
+        "ev-f-0001"
+      ],
+      "kind": "order_view",
+      "facts": {
+        "customerRef": "customer_07",
+        "orderId": "ORD-2041",
+        "deliveryAddress": "14 Sample Lane, 1010 Exampletown",
+        "deliveryWindow": "2026-10-12 14:00-16:00"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "hb-01",
+      "sessionId": "sess-mock-learn-01",
+      "sequence": 2,
+      "timestampMs": 4800,
+      "source": "workspace",
+      "frameId": null,
+      "sourceRevision": null,
+      "entityRef": null,
+      "evidenceIds": [],
+      "kind": "input_activity",
+      "facts": {
+        "surface": "email",
+        "typing": true,
+        "idleMs": 0,
+        "lastInputAtMs": 4800
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "obs-003",
+      "sessionId": "sess-mock-learn-01",
+      "sequence": 3,
+      "timestampMs": 5000,
+      "source": "vision",
+      "frameId": "f-0003",
+      "sourceRevision": "rev-email-1",
+      "entityRef": "customer_07",
+      "evidenceIds": [
+        "ev-f-0003"
+      ],
+      "kind": "email_draft",
+      "facts": {
+        "recipientRef": "customer_07",
+        "subject": "Delivery details for order ORD-2041",
+        "bodyText": "",
+        "attachments": [],
+        "previewState": "editing"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "hb-02",
+      "sessionId": "sess-mock-learn-01",
+      "sequence": 4,
+      "timestampMs": 6800,
+      "source": "workspace",
+      "frameId": null,
+      "sourceRevision": null,
+      "entityRef": null,
+      "evidenceIds": [],
+      "kind": "input_activity",
+      "facts": {
+        "surface": "email",
+        "typing": false,
+        "idleMs": 2000,
+        "lastInputAtMs": 4800
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "hb-03",
+      "sessionId": "sess-mock-learn-01",
+      "sequence": 5,
+      "timestampMs": 7800,
+      "source": "workspace",
+      "frameId": null,
+      "sourceRevision": null,
+      "entityRef": null,
+      "evidenceIds": [],
+      "kind": "input_activity",
+      "facts": {
+        "surface": "email",
+        "typing": true,
+        "idleMs": 0,
+        "lastInputAtMs": 7800
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "obs-004",
+      "sessionId": "sess-mock-learn-01",
+      "sequence": 6,
+      "timestampMs": 8000,
+      "source": "vision",
+      "frameId": "f-0004",
+      "sourceRevision": "rev-email-2",
+      "entityRef": "customer_07",
+      "evidenceIds": [
+        "ev-f-0004"
+      ],
+      "kind": "email_draft",
+      "facts": {
+        "recipientRef": "customer_07",
+        "subject": "Delivery details for order ORD-2041",
+        "bodyText": "",
+        "attachments": [
+          {
+            "kind": "image",
+            "ocrText": "Order ORD-2041 | Deliver to: 14 Sample Lane, 1010 Exampletown | Window: 2026-10-12 14:00-16:00"
+          }
+        ],
+        "previewState": "editing"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "hb-04",
+      "sessionId": "sess-mock-learn-01",
+      "sequence": 7,
+      "timestampMs": 9800,
+      "source": "workspace",
+      "frameId": null,
+      "sourceRevision": null,
+      "entityRef": null,
+      "evidenceIds": [],
+      "kind": "input_activity",
+      "facts": {
+        "surface": "email",
+        "typing": false,
+        "idleMs": 2000,
+        "lastInputAtMs": 7800
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "hb-05",
+      "sessionId": "sess-mock-learn-01",
+      "sequence": 8,
+      "timestampMs": 10800,
+      "source": "workspace",
+      "frameId": null,
+      "sourceRevision": null,
+      "entityRef": null,
+      "evidenceIds": [],
+      "kind": "input_activity",
+      "facts": {
+        "surface": "email",
+        "typing": true,
+        "idleMs": 0,
+        "lastInputAtMs": 10800
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "obs-005",
+      "sessionId": "sess-mock-learn-01",
+      "sequence": 9,
+      "timestampMs": 11000,
+      "source": "vision",
+      "frameId": "f-0005",
+      "sourceRevision": "rev-email-3",
+      "entityRef": "customer_07",
+      "evidenceIds": [
+        "ev-f-0005",
+        "ev-clip-template-replaced"
+      ],
+      "kind": "email_draft",
+      "facts": {
+        "recipientRef": "customer_07",
+        "subject": "Delivery details for order ORD-2041",
+        "bodyText": "",
+        "attachments": [],
+        "previewState": "editing"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "hb-06",
+      "sessionId": "sess-mock-learn-01",
+      "sequence": 10,
+      "timestampMs": 12800,
+      "source": "workspace",
+      "frameId": null,
+      "sourceRevision": null,
+      "entityRef": null,
+      "evidenceIds": [],
+      "kind": "input_activity",
+      "facts": {
+        "surface": "email",
+        "typing": false,
+        "idleMs": 2000,
+        "lastInputAtMs": 10800
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "hb-07",
+      "sessionId": "sess-mock-learn-01",
+      "sequence": 11,
+      "timestampMs": 13000,
+      "source": "workspace",
+      "frameId": null,
+      "sourceRevision": null,
+      "entityRef": null,
+      "evidenceIds": [],
+      "kind": "input_activity",
+      "facts": {
+        "surface": "email",
+        "typing": true,
+        "idleMs": 0,
+        "lastInputAtMs": 13000
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "obs-007",
+      "sessionId": "sess-mock-learn-01",
+      "sequence": 12,
+      "timestampMs": 14000,
+      "source": "vision",
+      "frameId": "f-0007",
+      "sourceRevision": "rev-email-4",
+      "entityRef": "customer_07",
+      "evidenceIds": [
+        "ev-f-0007"
+      ],
+      "kind": "email_draft",
+      "facts": {
+        "recipientRef": "customer_07",
+        "subject": "Delivery details for order ORD-2041",
+        "bodyText": "Hello, here are the delivery details for order ORD-2041.\nAddress: 14 Sample Lane, 1010 Exampletown",
+        "attachments": [],
+        "previewState": "editing"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "hb-08",
+      "sessionId": "sess-mock-learn-01",
+      "sequence": 13,
+      "timestampMs": 15000,
+      "source": "workspace",
+      "frameId": null,
+      "sourceRevision": null,
+      "entityRef": null,
+      "evidenceIds": [],
+      "kind": "input_activity",
+      "facts": {
+        "surface": "email",
+        "typing": true,
+        "idleMs": 200,
+        "lastInputAtMs": 14800
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "hb-09",
+      "sessionId": "sess-mock-learn-01",
+      "sequence": 14,
+      "timestampMs": 17000,
+      "source": "workspace",
+      "frameId": null,
+      "sourceRevision": null,
+      "entityRef": null,
+      "evidenceIds": [],
+      "kind": "input_activity",
+      "facts": {
+        "surface": "email",
+        "typing": true,
+        "idleMs": 100,
+        "lastInputAtMs": 16900
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "hb-10",
+      "sessionId": "sess-mock-learn-01",
+      "sequence": 15,
+      "timestampMs": 19000,
+      "source": "workspace",
+      "frameId": null,
+      "sourceRevision": null,
+      "entityRef": null,
+      "evidenceIds": [],
+      "kind": "input_activity",
+      "facts": {
+        "surface": "email",
+        "typing": true,
+        "idleMs": 100,
+        "lastInputAtMs": 18900
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "obs-011",
+      "sessionId": "sess-mock-learn-01",
+      "sequence": 16,
+      "timestampMs": 20000,
+      "source": "vision",
+      "frameId": "f-0011",
+      "sourceRevision": "rev-email-5",
+      "entityRef": "customer_07",
+      "evidenceIds": [
+        "ev-f-0011"
+      ],
+      "kind": "email_draft",
+      "facts": {
+        "recipientRef": "customer_07",
+        "subject": "Delivery details for order ORD-2041",
+        "bodyText": "Hello, here are the delivery details for order ORD-2041.\nAddress: 14 Sample Lane, 1010 Exampletown\nDelivery window: 2026-10-12 14:00-16:00",
+        "attachments": [],
+        "previewState": "editing"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "hb-11",
+      "sessionId": "sess-mock-learn-01",
+      "sequence": 17,
+      "timestampMs": 21900,
+      "source": "workspace",
+      "frameId": null,
+      "sourceRevision": null,
+      "entityRef": null,
+      "evidenceIds": [],
+      "kind": "input_activity",
+      "facts": {
+        "surface": "email",
+        "typing": false,
+        "idleMs": 2000,
+        "lastInputAtMs": 19900
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "hb-12",
+      "sessionId": "sess-mock-learn-01",
+      "sequence": 18,
+      "timestampMs": 23900,
+      "source": "workspace",
+      "frameId": null,
+      "sourceRevision": null,
+      "entityRef": null,
+      "evidenceIds": [],
+      "kind": "input_activity",
+      "facts": {
+        "surface": "email",
+        "typing": false,
+        "idleMs": 4000,
+        "lastInputAtMs": 19900
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "hb-13",
+      "sessionId": "sess-mock-learn-01",
+      "sequence": 19,
+      "timestampMs": 24800,
+      "source": "workspace",
+      "frameId": null,
+      "sourceRevision": null,
+      "entityRef": null,
+      "evidenceIds": [],
+      "kind": "input_activity",
+      "facts": {
+        "surface": "email",
+        "typing": true,
+        "idleMs": 0,
+        "lastInputAtMs": 24800
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "obs-014",
+      "sessionId": "sess-mock-learn-01",
+      "sequence": 20,
+      "timestampMs": 25000,
+      "source": "vision",
+      "frameId": "f-0014",
+      "sourceRevision": "rev-email-6",
+      "entityRef": "customer_07",
+      "evidenceIds": [
+        "ev-f-0014"
+      ],
+      "kind": "email_draft",
+      "facts": {
+        "recipientRef": "customer_07",
+        "subject": "Delivery details for order ORD-2041",
+        "bodyText": "Hello, here are the delivery details for order ORD-2041.\nAddress: 14 Sample Lane, 1010 Exampletown\nDelivery window: 2026-10-12 14:00-16:00",
+        "attachments": [],
+        "previewState": "preview"
+      }
+    },
+    {
+      "schemaVersion": 1,
+      "id": "hb-14",
+      "sessionId": "sess-mock-learn-01",
+      "sequence": 21,
+      "timestampMs": 26800,
+      "source": "workspace",
+      "frameId": null,
+      "sourceRevision": null,
+      "entityRef": null,
+      "evidenceIds": [],
+      "kind": "input_activity",
+      "facts": {
+        "surface": "email",
+        "typing": false,
+        "idleMs": 2000,
+        "lastInputAtMs": 24800
+      }
+    }
+  ],
+  "stage": "review-start",
+  "map": {
+    "version": 1,
+    "status": "draft",
+    "confirmed": false,
+    "sealedAtMs": null,
+    "confirmation": null,
+    "steps": [
+      {
+        "id": "step-1",
+        "kind": "action",
+        "goal": "Read the order essentials",
+        "action": "Opened order ORD-2041 for customer_07",
+        "status": "observed",
+        "atMs": 0,
+        "evidenceIds": [
+          "ev-f-0001"
+        ],
+        "decision": null,
+        "guardrailIds": []
+      },
+      {
+        "id": "step-2",
+        "kind": "action",
+        "goal": "Tell the customer the delivery details",
+        "action": "Started an email to the customer",
+        "status": "observed",
+        "atMs": 5000,
+        "evidenceIds": [
+          "ev-f-0003"
+        ],
+        "decision": null,
+        "guardrailIds": []
+      },
+      {
+        "id": "step-3",
+        "kind": "action",
+        "goal": "Tell the customer the delivery details",
+        "action": "Attached the order template image",
+        "status": "observed",
+        "atMs": 8000,
+        "evidenceIds": [
+          "ev-f-0004"
+        ],
+        "decision": null,
+        "guardrailIds": []
+      },
+      {
+        "id": "step-4",
+        "kind": "judgment",
+        "goal": "Decide how to deliver the details",
+        "action": "Removed the image attachment",
+        "status": "inferred",
+        "atMs": 11000,
+        "evidenceIds": [
+          "ev-f-0005",
+          "ev-clip-template-replaced"
+        ],
+        "decision": {
+          "summary": "Dropped the template image",
+          "reason": "his phone blocks pictures in our emails",
+          "quote": "Customer_07 asked me for it in writing, because his phone blocks pictures in our emails.",
+          "evidenceIds": [
+            "ev-f-0005",
+            "ev-clip-template-replaced"
+          ]
+        },
+        "guardrailIds": [
+          "g1"
+        ]
+      },
+      {
+        "id": "step-5",
+        "kind": "judgment",
+        "goal": "Decide how to deliver the details",
+        "action": "Wrote the order number, delivery address and delivery window into the message",
+        "status": "inferred",
+        "atMs": 14000,
+        "evidenceIds": [
+          "ev-f-0007",
+          "ev-f-0011"
+        ],
+        "decision": {
+          "summary": "Typed order details into the message",
+          "reason": null,
+          "quote": "The address and the delivery window.",
+          "evidenceIds": [
+            "ev-f-0007",
+            "ev-f-0011"
+          ]
+        },
+        "guardrailIds": [
+          "g1"
+        ]
+      },
+      {
+        "id": "step-6",
+        "kind": "judgment",
+        "goal": "Check before sending",
+        "action": "Opened Preview before Send",
+        "status": "inferred",
+        "atMs": 25000,
+        "evidenceIds": [
+          "ev-f-0014"
+        ],
+        "decision": {
+          "summary": "Named a reason to stop before Send",
+          "reason": null,
+          "quote": "If I can't tell which customer an order belongs to, I stop and ask the account manager first.",
+          "evidenceIds": [
+            "ev-f-0014"
+          ]
+        },
+        "guardrailIds": [
+          "g2"
+        ]
+      }
+    ],
+    "guardrails": [
+      {
+        "id": "g1",
+        "trigger": "customer",
+        "condition": "Sending the delivery email for an order of customer_07",
+        "requiredAction": "Include the delivery address and delivery window in the email you send",
+        "requiredFacts": [
+          "deliveryAddress",
+          "deliveryWindow"
+        ],
+        "assumedFacts": [],
+        "scope": {
+          "kind": "customers",
+          "customers": [
+            "customer_07"
+          ],
+          "explicit": false
+        },
+        "exceptions": [],
+        "unknowns": [
+          "Scope not stated; defaults to customer_07."
+        ],
+        "reason": "his phone blocks pictures in our emails",
+        "reasonUnknown": false,
+        "quote": "Customer_07 asked me for it in writing, because his phone blocks pictures in our emails.",
+        "quoteAtMs": 12900,
+        "quotes": [
+          "Customer_07 asked me for it in writing, because his phone blocks pictures in our emails.",
+          "The address and the delivery window."
+        ],
+        "scopeQuote": null,
+        "escalateTo": null,
+        "duration": null,
+        "status": "proposed",
+        "unexplained": false,
+        "evidenceIds": [
+          "ev-f-0005",
+          "ev-clip-template-replaced",
+          "ev-f-0011"
+        ]
+      },
+      {
+        "id": "g2",
+        "trigger": "unknown_entity",
+        "condition": "The expert's trigger: \"I can't tell which customer an order belongs to\"",
+        "requiredAction": "Stop and ask the account manager before sending",
+        "requiredFacts": [],
+        "assumedFacts": [],
+        "scope": {
+          "kind": "all",
+          "customers": [],
+          "explicit": true
+        },
+        "exceptions": [],
+        "unknowns": [
+          "The reason was not explained."
+        ],
+        "reason": null,
+        "reasonUnknown": false,
+        "quote": "If I can't tell which customer an order belongs to, I stop and ask the account manager first.",
+        "quoteAtMs": 26900,
+        "quotes": [
+          "If I can't tell which customer an order belongs to, I stop and ask the account manager first."
+        ],
+        "scopeQuote": null,
+        "escalateTo": "the account manager",
+        "duration": null,
+        "status": "proposed",
+        "unexplained": false,
+        "evidenceIds": [
+          "ev-f-0014"
+        ]
+      }
+    ],
+    "unknowns": [
+      "g1: Scope not stated; defaults to customer_07.",
+      "g2: The reason was not explained."
+    ],
+    "answered": [
+      {
+        "topic": "reason",
+        "entityRef": "customer_07",
+        "questionId": "q-reason",
+        "targetId": null,
+        "atMs": 12900,
+        "evidenceIds": [
+          "ev-f-0005",
+          "ev-clip-template-replaced"
+        ]
+      },
+      {
+        "topic": "essentials",
+        "entityRef": "customer_07",
+        "questionId": "q-essentials",
+        "targetId": null,
+        "atMs": 22800,
+        "evidenceIds": [
+          "ev-f-0011"
+        ]
+      },
+      {
+        "topic": "guardrail",
+        "entityRef": "customer_07",
+        "questionId": "q-guardrail",
+        "targetId": null,
+        "atMs": 26900,
+        "evidenceIds": [
+          "ev-f-0014"
+        ]
+      }
+    ]
+  },
+  "gaps": [
+    {
+      "id": "q-R-1",
+      "topic": "scope",
+      "text": "Is this only for customer_07, or do other customers get the same treatment?",
+      "evidenceIds": [
+        "ev-f-0005",
+        "ev-clip-template-replaced",
+        "ev-f-0011"
+      ],
+      "targetId": "g1",
+      "entityRef": "customer_07"
+    },
+    {
+      "id": "q-R-2",
+      "topic": "exception",
+      "text": "Is there an exception? For example, would an extra attachment still be fine?",
+      "evidenceIds": [
+        "ev-f-0005",
+        "ev-clip-template-replaced",
+        "ev-f-0011"
+      ],
+      "targetId": "g1",
+      "entityRef": "customer_07"
+    },
+    {
+      "id": "q-R-3",
+      "topic": "why_stop",
+      "text": "You said you stop and ask in that situation. Why is that?",
+      "evidenceIds": [
+        "ev-f-0014"
+      ],
+      "targetId": "g2",
+      "entityRef": null
+    },
+    {
+      "id": "q-R-4",
+      "topic": "duration",
+      "text": "Does this hold for customer_07 until further notice, and who decides when it changes?",
+      "evidenceIds": [
+        "ev-f-0005",
+        "ev-clip-template-replaced",
+        "ev-f-0011"
+      ],
+      "targetId": "g1",
+      "entityRef": "customer_07"
+    }
+  ],
+  "blockers": []
+}

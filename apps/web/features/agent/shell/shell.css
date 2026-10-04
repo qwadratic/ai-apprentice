@@ -195,24 +195,6 @@
 .apprentice-shell .as-right { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .apprentice-shell .as-right { position: sticky; top: 76px; max-height: calc(100vh - 92px); overflow: auto; padding-right: 2px; }
 
-/* Each mode has its own layout. Every slot stays mounted (A's screen and workspace roots must survive a switch):
-   modes only hide or reorder. Learn records: screen and workspace lead. Review is a knowledge view: the mode view
-   is wide, Clipa and the session sit beside it, and the screen and workspace are hidden. Teach puts the new hire's
-   case first and the screen preview under it. */
-.apprentice-shell .as-main[data-mode="review"] { grid-template-columns: minmax(0, 1fr); }
-.apprentice-shell .as-main[data-mode="review"] .as-left { display: none; }
-.apprentice-shell .as-main[data-mode="review"] .as-right {
-  position: static; max-height: none; overflow: visible; padding-right: 0;
-  display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); align-items: start;
-  grid-template-areas: "mode clipa" "mode session" "mode replay";
-}
-.apprentice-shell .as-main[data-mode="review"] .as-mode { grid-area: mode; }
-.apprentice-shell .as-main[data-mode="review"] .as-clipa-card { grid-area: clipa; }
-.apprentice-shell .as-main[data-mode="review"] .as-session { grid-area: session; }
-.apprentice-shell .as-main[data-mode="review"] .as-replay { grid-area: replay; }
-.apprentice-shell .as-main[data-mode="teach"] .as-left .as-workspace { order: 1; }
-.apprentice-shell .as-main[data-mode="teach"] .as-left .as-screen { order: 2; }
-
 .apprentice-shell .as-card {
   background: var(--as-surface);
   border: 1px solid var(--as-border);
@@ -404,7 +386,6 @@
 /* ---- Narrow screens --------------------------------------------------------- */
 @media (max-width: 900px) {
   .apprentice-shell .as-main { grid-template-columns: minmax(0, 1fr); }
-  .apprentice-shell .as-main[data-mode="review"] .as-right { grid-template-columns: minmax(0, 1fr); grid-template-areas: "clipa" "session" "mode" "replay"; }
   .apprentice-shell .as-right { order: -1; position: static; max-height: none; overflow: visible; }
   .apprentice-shell .as-brand { flex: 1 1 100%; }
 }
