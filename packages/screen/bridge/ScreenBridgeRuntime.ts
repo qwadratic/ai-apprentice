@@ -39,6 +39,13 @@ interface ActiveSession {
   screenToken: string | null;
   controller: AbortController;
   privacyGeneration: number;
+  serverReady: boolean;
+  lifecycleTail: Promise<void>;
+  serverState: ScreenStatus['state'];
+  startReady: Promise<void>;
+  resolveStart(): void;
+  rejectStart(error: unknown): void;
+  startController: AbortController;
 }
 
 export function createScreenBridgeRuntime(options: ScreenBridgeRuntimeOptions): ScreenBridgeRuntime {
@@ -60,6 +67,9 @@ class Runtime implements ScreenBridgeRuntime {
   #disposed = false;
   #offRecord = false;
   #objectUrls = new Set<string>();
+  #captureCommand = false;
+  #review: ActiveSession | null = null;
+  #reviewController = new AbortController();
 
   constructor(options: ScreenBridgeRuntimeOptions) {
     if (!options || typeof options.apiBase !== 'string' || typeof options.authHeader !== 'function' ||
@@ -81,9 +91,15 @@ class Runtime implements ScreenBridgeRuntime {
       else if (snapshot.state === 'stopped') this.#emitStatus('stopped', snapshot.reason);
       else if (snapshot.state === 'error') this.#emitStatus('error', snapshot.reason);
     });
-    this.capture.onInvalidate(() => {
+    this.capture.onInvalidate(event => {
       const active = this.#active;
-      if (active) this.#invalidateRequests(active);
+      if (!active) return;
+      active.serverReady = false;
+      this.#invalidateRequests(active);
+      if (!this.#captureCommand && active.serverGeneration > 0) {
+        this.#emitStatus('paused', event.reason);
+        void this.#enqueueLifecycle(active, 'pause', event.reason).catch(() => undefined);
+      }
     });
     this.bridge = {
       start: value => this.#start(value), pause: () => this.#pause(true), resume: () => this.#resume(true),
@@ -102,6 +118,7 @@ class Runtime implements ScreenBridgeRuntime {
     if (this.#disposed) return;
     this.#disposed = true;
     this.#closeActive();
+    this.#reviewController.abort(); this.#review = null;
     this.capture.dispose();
     for (const url of this.#objectUrls) URL.revokeObjectURL(url);
     this.#objectUrls.clear();
@@ -112,33 +129,48 @@ class Runtime implements ScreenBridgeRuntime {
     if (this.#disposed) throw new Error('Screen bridge has been disposed.');
     const session = parseSessionStart(value);
     this.#closeActive();
+    this.#reviewController.abort(); this.#reviewController = new AbortController(); this.#review = null;
     this.#offRecord = false;
     const localGeneration = ++this.#generation;
     const controller = new AbortController();
-    const active: ActiveSession = {session, localGeneration, serverGeneration: 0, cursor: 0, screenToken: null, controller, privacyGeneration: 0};
+    let resolveStart!: () => void;
+    let rejectStart!: (error: unknown) => void;
+    const startReady = new Promise<void>((resolve, reject) => { resolveStart = resolve; rejectStart = reject; });
+    void startReady.catch(() => undefined);
+    const active: ActiveSession = {session, localGeneration, serverGeneration: 0, cursor: 0, screenToken: null, controller,
+      privacyGeneration: 0, serverReady: false, lifecycleTail: Promise.resolve(), serverState: 'stopped', startReady,
+      resolveStart, rejectStart, startController: new AbortController()};
     this.#active = active;
     // Deliberately invoke capture before constructing or awaiting the HTTP request.
     const captureStart = this.capture.start(session);
     // start() synchronously advances capture privacy generation before opening the picker.
     this.#renewRequests(active);
     try {
-      const response = await this.#request(active, 'start', {sessionEpochMs: session.sessionEpochMs, clientGeneration: 1}, true);
+      const response = await this.#request(active, 'start', {sessionEpochMs: session.sessionEpochMs, clientGeneration: 1}, true,
+        active.startController.signal);
       const body = await jsonRecord(response);
       exactKeys(body, ['sessionId', 'generation', 'nextCursor', 'status'], ['sessionId', 'generation', 'sessionToken', 'nextCursor', 'status']);
       if (body.sessionId !== session.sessionId) throw new TransportError('session_mismatch');
       active.serverGeneration = integer(body.generation, 'generation', 1);
       active.cursor = integer(body.nextCursor, 'nextCursor', 0);
       if ('sessionToken' in body) active.screenToken = token(body.sessionToken);
-      parseScreenStatus(body.status);
+      active.serverState = parseScreenStatus(body.status).state;
+      active.resolveStart();
       await captureStart;
+      await active.lifecycleTail;
+      const selected = this.capture.getSnapshot();
+      if (selected.state === 'paused' && active.serverState === 'capturing') {
+        await this.#enqueueLifecycle(active, 'pause', selected.reason);
+      }
       this.#renewRequests(active);
       if (!this.#current(active)) return;
       const snapshot = this.capture.getSnapshot();
       this.#emitStatus(snapshot.state === 'capturing' ? 'capturing' : 'paused', snapshot.reason);
       if (snapshot.state === 'capturing') this.#schedulePoll(active, 0);
     } catch (error) {
+      active.rejectStart(error);
       await captureStart.catch(() => undefined);
-      if (this.#current(active)) {
+      if (this.#active === active && this.#generation === active.localGeneration) {
         this.capture.stop(); this.#emitStatus('error', transportReason(error)); this.#closeActive();
       }
       throw error;
@@ -149,10 +181,12 @@ class Runtime implements ScreenBridgeRuntime {
     const active = this.#active;
     if (!active) return;
     if (offRecord) this.#offRecord = true;
-    this.capture.pause('user-paused');
+    active.serverReady = false;
+    this.#captureCommand = true;
+    try { this.capture.pause('user-paused'); } finally { this.#captureCommand = false; }
     this.#invalidateRequests(active);
     this.#emitStatus('paused', offRecord ? 'off_record' : 'user-paused');
-    await this.#lifecycle(active, 'pause', offRecord ? 'off_record' : 'user-paused');
+    await this.#enqueueLifecycle(active, 'pause', offRecord ? 'off_record' : 'user-paused');
   }
 
   async #resume(appOwned: boolean): Promise<void> {
@@ -160,28 +194,45 @@ class Runtime implements ScreenBridgeRuntime {
     if (!active) return;
     if (this.#offRecord && !appOwned) return;
     if (appOwned) this.#offRecord = false;
+    active.serverReady = false;
     if (!this.capture.resume()) {
       const snapshot = this.capture.getSnapshot();
       this.#emitStatus('paused', snapshot.reason ?? 'resume-refused');
       return;
     }
     this.#renewRequests(active);
-    await this.#lifecycle(active, 'resume');
-    if (this.#current(active)) { this.#emitStatus('capturing'); this.#schedulePoll(active, 0); }
+    const privacyGeneration = active.privacyGeneration;
+    try {
+      await this.#enqueueLifecycle(active, 'resume');
+      if (this.#current(active, privacyGeneration) && !this.#offRecord && this.capture.getSnapshot().state === 'capturing') {
+        active.serverReady = true; this.#emitStatus('capturing'); this.#schedulePoll(active, 0);
+      }
+    } catch (error) {
+      if (this.#current(active, privacyGeneration)) {
+        this.#captureCommand = true; try { this.capture.pause('user-paused'); } finally { this.#captureCommand = false; }
+        this.#emitStatus('error', transportReason(error));
+      }
+      throw error;
+    }
   }
 
   async #stop(appOwned: boolean): Promise<void> {
     const active = this.#active;
     if (!active) { this.capture.stop(); return; }
-    this.capture.stop(); this.#invalidateRequests(active); this.#emitStatus('stopped', 'stopped');
-    try { await this.#lifecycle(active, 'stop'); } finally { if (this.#active === active) this.#closeActive(appOwned); }
+    active.serverReady = false;
+    this.#captureCommand = true; try { this.capture.stop(); } finally { this.#captureCommand = false; }
+    this.#invalidateRequests(active); this.#emitStatus('stopped', 'stopped');
+    try {
+      await this.#enqueueLifecycle(active, 'stop');
+      this.#review = active; this.#reviewController.abort(); this.#reviewController = new AbortController();
+    } finally { if (this.#active === active) this.#closeActive(appOwned); }
   }
 
   async #upload(frame: ProcessedFrame, lease: FrameLease): Promise<void> {
     const active = this.#active;
-    if (!active || !this.#current(active) || this.#offRecord || !lease.isCurrent() || frame.sessionId !== active.session.sessionId) return;
+    if (!active || !active.serverReady || !this.#current(active) || this.#offRecord || !lease.isCurrent() || frame.sessionId !== active.session.sessionId) return;
     const data = base64(new Uint8Array(await frame.image.arrayBuffer()));
-    if (!this.#current(active) || this.#offRecord || !lease.isCurrent()) return;
+    if (!active.serverReady || !this.#current(active) || this.#offRecord || !lease.isCurrent()) return;
     const response = await this.#request(active, 'frames', {generation: active.serverGeneration, frameId: frame.frameId,
       timestampMs: frame.timestampMs, processed: true, mediaType: 'image/png', data,
       provenance: {...frame.provenance, captureGeneration: frame.generation}});
@@ -190,8 +241,9 @@ class Runtime implements ScreenBridgeRuntime {
         typeof body.ok !== 'boolean' || typeof body.outcome !== 'string') throw new TransportError('invalid_frame_response');
   }
 
-  #schedulePoll(active: ActiveSession, delay = this.#options.pollIntervalMs ?? 1000): void {
-    if (!this.#current(active) || this.#offRecord || this.capture.getSnapshot().state !== 'capturing') return;
+  #schedulePoll(active: ActiveSession, delay = this.#options.pollIntervalMs ?? 1000,
+    privacyGeneration = active.privacyGeneration): void {
+    if (!active.serverReady || !this.#current(active, privacyGeneration) || this.#offRecord || this.capture.getSnapshot().state !== 'capturing') return;
     if (this.#pollTimer !== null) clearTimeout(this.#pollTimer);
     this.#pollTimer = setTimeout(() => { this.#pollTimer = null; void this.#poll(active); }, delay);
   }
@@ -219,29 +271,34 @@ class Runtime implements ScreenBridgeRuntime {
         this.#publish(this.#statuses, status);
       }
     } catch (error) {
-      if (this.#current(active) && !isAbort(error)) this.#emitStatus('error', transportReason(error));
-    } finally { this.#schedulePoll(active); }
+      if (this.#current(active, privacyGeneration) && !isAbort(error)) this.#emitStatus('error', transportReason(error));
+    } finally { this.#schedulePoll(active, this.#options.pollIntervalMs ?? 1000, privacyGeneration); }
   }
 
-  async #lifecycle(active: ActiveSession, command: 'pause' | 'resume' | 'stop', reason?: string): Promise<void> {
-    if (!active.serverGeneration) return;
-    try {
+  #enqueueLifecycle(active: ActiveSession, command: 'pause' | 'resume' | 'stop', reason?: string): Promise<void> {
+    const operation = active.lifecycleTail.then(async () => {
+      await active.startReady;
       const controller = new AbortController();
-      const response = await this.#request(active, 'lifecycle', {generation: active.serverGeneration, command, ...(reason ? {reason} : {})}, true, controller.signal);
+      const response = await this.#request(active, 'lifecycle', {generation: active.serverGeneration, command, ...(reason ? {reason} : {})}, false, controller.signal);
       const body = await jsonRecord(response);
       exactKeys(body, ['sessionId', 'generation', 'nextCursor', 'status']);
       if (body.sessionId !== active.session.sessionId) throw new TransportError('session_mismatch');
       active.serverGeneration = integer(body.generation, 'generation', active.serverGeneration + 1);
       active.cursor = integer(body.nextCursor, 'nextCursor', 0);
-      parseScreenStatus(body.status);
-    } catch (error) { if (!isAbort(error) && this.#active === active) this.#emitStatus('error', transportReason(error)); }
+      active.serverState = parseScreenStatus(body.status).state;
+    });
+    active.lifecycleTail = operation.catch(() => undefined);
+    return operation;
   }
 
   async #resolveEvidence(evidenceId: string): Promise<EvidenceRef> {
-    const active = this.#requireActive();
-    const privacyGeneration = active.privacyGeneration;
+    const active = this.#active ?? this.#review;
+    if (!active) throw new Error('Screen bridge has no session evidence context.');
     if (typeof evidenceId !== 'string' || !evidenceId) throw new TypeError('Evidence id required.');
-    const response = await this.#request(active, `evidence/${encodeURIComponent(evidenceId)}`);
+    const isActive = this.#active === active;
+    const privacyGeneration = active.privacyGeneration;
+    const reviewSignal = this.#reviewController.signal;
+    const response = await this.#request(active, `evidence/${encodeURIComponent(evidenceId)}`, undefined, false, isActive ? undefined : reviewSignal);
     const body = await jsonRecord(response); exactKeys(body, ['ok', 'evidence']);
     if (body.ok !== true) throw new TransportError('evidence_failed');
     const evidence = record(body.evidence, 'evidence');
@@ -249,9 +306,9 @@ class Runtime implements ScreenBridgeRuntime {
     if (evidence.id !== evidenceId || typeof evidence.assetRef !== 'string' || !evidence.assetRef ||
         !Number.isSafeInteger(evidence.startMs) || !Number.isSafeInteger(evidence.endMs) ||
         (evidence.endMs as number) < (evidence.startMs as number)) throw new TransportError('invalid_evidence');
-    const assetResponse = await this.#request(active, `evidence/${encodeURIComponent(evidenceId)}/asset`);
+    const assetResponse = await this.#request(active, `evidence/${encodeURIComponent(evidenceId)}/asset`, undefined, false, isActive ? undefined : reviewSignal);
     const blob = await assetResponse.blob();
-    if (!this.#current(active, privacyGeneration) || this.#offRecord) throw new TransportError('evidence_invalidated');
+    if (this.#disposed || (isActive ? !this.#current(active, privacyGeneration) : this.#review !== active || reviewSignal.aborted)) throw new TransportError('evidence_invalidated');
     const assetRef = URL.createObjectURL(blob);
     this.#objectUrls.add(assetRef);
     return {assetRef, startMs: evidence.startMs as number, endMs: evidence.endMs as number};
@@ -274,11 +331,13 @@ class Runtime implements ScreenBridgeRuntime {
     return response;
   }
 
-  #requireActive(): ActiveSession { if (!this.#active) throw new Error('Screen bridge is not active.'); return this.#active; }
   #current(active: ActiveSession, privacyGeneration = active.privacyGeneration): boolean { return !this.#disposed && this.#active === active && this.#generation === active.localGeneration && active.privacyGeneration === privacyGeneration && !active.controller.signal.aborted; }
   #invalidateRequests(active: ActiveSession): void { active.privacyGeneration++; active.controller.abort(); if (this.#pollTimer !== null) clearTimeout(this.#pollTimer); this.#pollTimer = null; }
   #renewRequests(active: ActiveSession): void { active.controller = new AbortController(); }
-  #closeActive(clearOffRecord = true): void { if (this.#active) this.#invalidateRequests(this.#active); this.#active = null; if (clearOffRecord) this.#offRecord = false; ++this.#generation; }
+  #closeActive(clearOffRecord = true): void {
+    if (this.#active) { this.#active.startController.abort(); this.#invalidateRequests(this.#active); }
+    this.#active = null; if (clearOffRecord) this.#offRecord = false; ++this.#generation;
+  }
   #emitStatus(state: ScreenStatus['state'], reason?: string): void {
     const active = this.#active; if (!active) return;
     this.#publish(this.#statuses, parseScreenStatus({schemaVersion: 1, sessionId: active.session.sessionId, state, ...(reason ? {reason} : {})}));
