@@ -11,7 +11,7 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 const base = (conversationId: string): string => `https://api.elevenlabs.io/v1/convai/conversations/${encodeURIComponent(conversationId)}`;
 
 export interface ElevenLabsClient {
-  signedUrl(): Promise<{ status: number; signedUrl?: string }>;
+  signedUrl(agentId: string): Promise<{ status: number; signedUrl?: string }>;
   getConversation(conversationId: string): Promise<ConversationResult>;
   /** After /finish has answered: wait for a finished transcript if only a partial one is stored, then fetch the audio. */
   finishInBackground(sessionId: string, conversationId: string, partial: boolean): Promise<void>;
@@ -45,8 +45,8 @@ export function createElevenLabsClient(config: AgentConfig, files: SessionFiles)
     return { status: r.status, ext, bytes: size };
   };
   return {
-    async signedUrl() {
-      const url = `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${encodeURIComponent(config.interviewerAgentId)}`;
+    async signedUrl(agentId: string) {
+      const url = `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${encodeURIComponent(agentId)}`;
       const r = await config.fetch(url, { headers, signal: AbortSignal.timeout(10_000) });
       if (!r.ok) { await r.arrayBuffer().catch(() => {}); return { status: r.status }; }
       const j: unknown = await r.json();

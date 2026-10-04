@@ -78,6 +78,24 @@ test('signed-url can require a session token, and reports missing configuration'
   assert.deepEqual(await r.json(), { ok: false, error: 'elevenlabs_not_configured', missing: ['ELEVENLABS_AGENT_ID_INTERVIEWER', 'ELEVENLABS_API_KEY'] });
 });
 
+test('signed-url: role picks the interviewer or the tutor agent; unknown roles and a missing tutor are refused', async (t) => {
+  const stub = elevenStub();
+  const { base } = await start(t, { fetch: stub.fetch, elevenLabsAgentIdTutor: 'agent_tutor_test' });
+  const get = (query: string) => fetch(`${base}/api/agent/elevenlabs/signed-url${query}`, { headers: { Origin: ORIGIN } });
+  assert.equal((await get('')).status, 200);
+  assert.equal((await get('?role=interviewer')).status, 200);
+  assert.equal((await get('?role=tutor')).status, 200);
+  assert.deepEqual(stub.calls.map((c) => new URL(c.url).searchParams.get('agent_id')), [EL_AGENT, EL_AGENT, 'agent_tutor_test']);
+  const bad = await get('?role=admin');
+  assert.equal(bad.status, 400);
+  assert.deepEqual(await bad.json(), { ok: false, error: 'invalid_role' });
+  assert.equal((await get('?role=tutor&role=interviewer')).status, 400);
+  const noTutor = await start(t, { fetch: elevenStub().fetch });
+  const r = await fetch(`${noTutor.base}/api/agent/elevenlabs/signed-url?role=tutor`, { headers: { Origin: ORIGIN } });
+  assert.equal(r.status, 503);
+  assert.deepEqual(await r.json(), { ok: false, error: 'elevenlabs_not_configured', missing: ['ELEVENLABS_AGENT_ID_TUTOR'] });
+});
+
 test('events: token required, own session only, appended as JSONL', async (t) => {
   const { base, dir } = await start(t);
   const a = await issue(base);

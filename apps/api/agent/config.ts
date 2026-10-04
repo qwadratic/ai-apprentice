@@ -76,6 +76,8 @@ export interface AgentConfig {
   runnerToken: string;
   elevenLabsApiKey: string;
   interviewerAgentId: string;
+  /** The agent Teach connects to (its own voice and prompt); empty when not configured. */
+  tutorAgentId: string;
   agentIds: ReadonlySet<string>;
   limits: Limits;
   timing: Timing;
@@ -139,6 +141,7 @@ export function resolveConfig(options: AgentOptions = {}, env: NodeJS.ProcessEnv
     runnerToken: options.runnerToken ?? env.RUNNER_TOKEN ?? '',
     elevenLabsApiKey: options.elevenLabsApiKey ?? env.ELEVENLABS_API_KEY ?? '',
     interviewerAgentId: interviewer,
+    tutorAgentId: tutor,
     agentIds: new Set([interviewer, tutor].filter(Boolean)),
     limits, timing,
     fetch: options.fetch ?? ((input, init) => fetch(input, init)),
