@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@qwadratic'
 created_date: '2026-10-03 21:10'
-updated_date: '2026-10-03 22:22'
+updated_date: '2026-10-04 00:51'
 labels:
   - stream-b
   - contract
@@ -28,12 +28,12 @@ Estimate: about 2 h of agent time. Card key: B-mocks-contract.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 `node --test` in packages/agent passes with no network, no keys and no root install (Node 22.22)
-- [ ] #2 Replaying the fixture through FakeScreenBridge emits ordered ScreenObservations whose timestampMs are relative to sessionEpochMs; after pause() no observation is emitted; after resume() the timeline continues without a jump
-- [ ] #3 FakeVoiceAdapter can be driven by a script and emits transcript, user-speaking, mode and 'spoken' events through the same interface the real adapter will implement
-- [ ] #4 contract-draft.ts covers ScreenObservation, ScreenStatus, ScreenEvidence, ActionCheckpoint (observationIds must include the latest order and email observations) and the checkpoint reply with schemaVersion 1; the facts schema covers order (customerRef, orderId, deliveryAddress, deliveryWindow), email draft (recipientRef, subject, bodyText, attachments[{kind, ocrText?}], previewState), ticket and the input_activity heartbeat
-- [ ] #5 schema.ts and the in-memory KnowledgeStore exist with validators and unit tests, so B-tutor, B-knowledge-engine, B-policy and B-app-shell can start from them without further coordination
-- [ ] #6 fixtures/agent/sandbox-requirements.md lists screens, fields, two customer_07 orders, another customer, an unknown customer, a spare customer_12 case for the live new-fact test, the Preview -> Send flow, the input_activity heartbeat and reset; it is linked from TASK-1 and TASK-2 for @kigulx; no file outside packages/agent and fixtures/agent is changed
+- [x] #1 `node --test` in packages/agent passes with no network, no keys and no root install (Node 22.22)
+- [x] #2 Replaying the fixture through FakeScreenBridge emits ordered ScreenObservations whose timestampMs are relative to sessionEpochMs; after pause() no observation is emitted; after resume() the timeline continues without a jump
+- [x] #3 FakeVoiceAdapter can be driven by a script and emits transcript, user-speaking, mode and 'spoken' events through the same interface the real adapter will implement
+- [x] #4 contract-draft.ts covers ScreenObservation, ScreenStatus, ScreenEvidence, ActionCheckpoint (observationIds must include the latest order and email observations) and the checkpoint reply with schemaVersion 1; the facts schema covers order (customerRef, orderId, deliveryAddress, deliveryWindow), email draft (recipientRef, subject, bodyText, attachments[{kind, ocrText?}], previewState), ticket and the input_activity heartbeat
+- [x] #5 schema.ts and the in-memory KnowledgeStore exist with validators and unit tests, so B-tutor, B-knowledge-engine, B-policy and B-app-shell can start from them without further coordination
+- [x] #6 fixtures/agent/sandbox-requirements.md lists screens, fields, two customer_07 orders, another customer, an unknown customer, a spare customer_12 case for the live new-fact test, the Preview -> Send flow, the input_activity heartbeat and reset; it is linked from TASK-1 and TASK-2 for @kigulx; no file outside packages/agent and fixtures/agent is changed
 <!-- AC:END -->
 
 ## Definition of Done
@@ -42,6 +42,12 @@ Estimate: about 2 h of agent time. Card key: B-mocks-contract.
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Bookkeeping 4 Oct: ACs were met when merged (55 node tests, no network); boxes ticked late.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
