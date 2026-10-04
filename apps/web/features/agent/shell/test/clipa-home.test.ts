@@ -110,6 +110,24 @@ test('pointAt sends her beside the target and home after the hold; a later move 
   presenter.dispose();
 });
 
+test('speakAt plays a line that needs no answer, beside a target or at home, and copies it to the store', async () => {
+  const applied: unknown[] = [];
+  const director = new PointingDirector();
+  director.apply = async (decision?: unknown): Promise<ClipaResult> => { applied.push(decision); return { ok: true }; };
+  const store = createClipaStore();
+  const presenter = createDirectorPresenter({ store, director, guard: new InputGuard(() => 0), events: null });
+  presenter.speakAt('  Look at the open gap. ', { surface: 'ui', hint: 'board_gap' });
+  presenter.speakAt('Welcome back.');
+  presenter.speakAt('   ');
+  await pause(0);
+  assert.deepEqual(applied, [
+    { decision: 'ASK_NOW', utterance: { text: 'Look at the open gap.' }, expectsAnswer: false, clipa: { state: 'approach', target: { surface: 'ui', hint: 'board_gap' } } },
+    { decision: 'ASK_NOW', utterance: { text: 'Welcome back.' }, expectsAnswer: false },
+  ]);
+  assert.equal(store.getSnapshot().bubble, 'Welcome back.');
+  presenter.dispose();
+});
+
 test('a clipa:point event on the page reaches the presenter; malformed requests are ignored; dispose stops listening', async () => {
   const events = new EventTarget();
   const director = new PointingDirector();

@@ -8,6 +8,7 @@
 //   - pointAt(target) sends her beside any element (a UI name such as the board's selected item, or a workspace target) in the
 //     pointing pose, and back home after `holdMs` unless something else moved her meanwhile. The page asks for it with a
 //     `clipa:point` event on the document (requestClipaPoint), so code that has no handle on the presenter can use it too.
+//   - speakAt(text, target?) plays a line that needs no answer (the conductor's `say` and `guide` cues) the same way as a decision.
 import { estimateSpeechMs } from '../../clipa/src/index.ts';
 import type { ClipaDecision, ClipaResult, ClipaState as DirectorState, ClipaTarget } from '../../clipa/src/index.ts';
 import type { BrainDecision } from '../brain/types.ts';
@@ -122,6 +123,11 @@ function pointRequest(detail: unknown): ClipaPointRequest | null {
 export interface DirectorPresenter extends ClipaPresenter {
   /** The sequence that is playing, or null. Resolves when it has run (not when the person has answered). */
   readonly playing: Promise<unknown> | null;
+  /**
+   * A line that needs no answer (the conductor's `say` or `guide` cue): she flies beside the target, or stands up at home on the
+   * rail without one, and shows the line in her bubble while it is spoken. The store gets the text too (the line under the rail).
+   */
+  speakAt(text: string, target?: ClipaTarget): void;
   /** Beside the target in the pointing pose; home again after holdMs (0: she stays until something else moves her). */
   pointAt(target: ClipaTarget, holdMs?: number): void;
   dispose(): void;
@@ -176,25 +182,34 @@ export function createDirectorPresenter(options: DirectorPresenterOptions): Dire
     }
   };
 
+  const playDecision = (decision: ClipaDecision, text: string): void => {
+    moveToken += 1;
+    clearHome();
+    const job = director
+      .apply(decision, { durationMs: estimateSpeechMs(text) + SPEECH_PADDING_MS })
+      .finally(() => { if (playing === job) playing = null; });
+    playing = job;
+  };
+
   return {
     get playing() { return playing; },
     setState(state) {
       store.setState(state);
       const commands = commandsFor(state, previous, director.state, playing !== null);
-    if (commands.length > 0) moveToken += 1;
-    for (const command of commands) run(command);
+      if (commands.length > 0) moveToken += 1;
+      for (const command of commands) run(command);
       previous = state;
     },
     say(text) { store.say(text); },
     setTarget(rect: TargetRect | null) { store.setTarget(rect); },
     play(decision) {
-      const text = decision.utterance?.text ?? '';
-      moveToken += 1;
-      clearHome();
-      const job = director
-        .apply(toClipaDecision(decision), { durationMs: estimateSpeechMs(text) + SPEECH_PADDING_MS })
-        .finally(() => { if (playing === job) playing = null; });
-      playing = job;
+      playDecision(toClipaDecision(decision), decision.utterance?.text ?? '');
+    },
+    speakAt(text, target) {
+      const line = text.trim();
+      if (line === '') return;
+      store.say(line);
+      playDecision({ decision: 'ASK_NOW', utterance: { text: line }, expectsAnswer: false, ...(target ? { clipa: { state: 'approach', target } } : {}) }, line);
     },
     ack() { void director.ack(); },
     noteInput(typing) { guard.setTyping(typing); },

@@ -402,6 +402,8 @@
 .apprentice-shell .as-main[data-mode="teach"] { grid-template-columns: minmax(0, 2fr) minmax(300px, 1fr); }
 .apprentice-shell .as-main[data-mode="teach"] .as-left .as-workspace { order: 1; }
 .apprentice-shell .as-main[data-mode="teach"] .as-left .as-screen { order: 2; }
+/* A tutor's warning moves the warning area to the top of the side column (browsers without :has keep the order). */
+.apprentice-shell .as-main[data-mode="teach"] .as-right:has(.as-checkpoint--warn) .as-mode { order: -1; }
 
 .apprentice-shell .as-card {
   background: var(--as-surface);
