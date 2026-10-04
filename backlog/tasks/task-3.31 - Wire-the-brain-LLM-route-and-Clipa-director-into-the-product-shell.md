@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@qwadratic'
 created_date: '2026-10-04 01:59'
-updated_date: '2026-10-04 02:15'
+updated_date: '2026-10-04 04:15'
 labels:
   - stream-b
 dependencies: []
@@ -45,3 +45,16 @@ Replace the shell's NullBrain (apps/web/features/agent/shell) with packages/agen
 6. Align B fixtures with the workspace (customer_07 ref, DEMO-1201/1202, explicit acknowledgement on warn/unknown, Reset starts a new session).
 7. Pages root swap stays a separate follow-up.
 <!-- SECTION:PLAN:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+4 Oct 04:20 UTC, handoff. Branch task-3.31-fixes at b8559bc (cut from main ae52ad2), pushed, no PR yet. Root npm run check passes (web 170/0), plus a local headless browser run. Fixes:
+1. 'Mode flapping' was the SDK's speaking/listening log; it is now VOICE_MODE and logged only on change. Tabs only switch the view; an explicit 'End X and start Y' button switches sessions.
+2. Learn writes the SKIP reason every 20 s and shows it. Key presses on our page reach the policy's typing channel.
+3. Teach checkpoint: screen/checkpoint-binding.ts keeps the shell's port on the workspace. Outside Teach, Preview answers unknown with 'Start Teach first'.
+4. A per-frame vision error now shows 'last frame skipped', not 'stopped'.
+5. Review with a thin map says 'Run Learn first' (this edits ReviewView.tsx).
+Root cause of 3 and 4 is in stream A's code: the runtime.bridge.onStatus handler in apps/web/features/demo-workspace/mountRuntimeWorkspace.ts disconnects the checkpoint port and drops the heartbeats on any status other than capturing; stream A should fix it there.
+Next: open the PR, merge after CI, post the head to the devops session for the VM rerun (TASK-3.42). Screenshots: coordinator scratchpad fix-*.png.
+<!-- SECTION:NOTES:END -->

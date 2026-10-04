@@ -7,6 +7,7 @@ status: In Progress
 assignee:
   - '@qwadratic'
 created_date: '2026-10-04 04:06'
+updated_date: '2026-10-04 04:15'
 labels:
   - stream-b
 dependencies: []
@@ -35,3 +36,21 @@ Shell side of the generic mode: render screen_activity observations, send a [scr
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+4 Oct 04:20 UTC, handoff. Branch task-3.37-generic-shell at f9d7481 (WIP on top of task-3.31-fixes b8559bc), pushed. It compiles and the existing tests pass. The new code has no tests and no browser run.
+Written:
+- brain/generic.ts: local screen_activity type and guard; [screen] line sent only on change (all kinds); language detection; Learn pause rule (2.5 s quiet, at most 4 per 10 min, at least 45 s apart) with generic_question and a template fallback; Teach guardrail_check that speaks a warn; Review map_synthesis, then gaps one by one, then map_synthesis, teach-back and reply_classification confirm/correct.
+- AgentBrain routes screen_activity there (genericState(), takeDirty()).
+- The controller posts the tasks with the session token, aborts on off-record and session end, sets region highlights, and stores the generic map and observations in shell state.
+Not done:
+1. GenericSampleSource (a synthetic mail-client script emitting screen_activity, evidence as data: SVG, sample-kind selector in SessionControls).
+2. ScreenSlot highlight boxes over A's preview video, with data-clipa-surface=screen and data-clipa-hint=<regionId>, and Clipa pointing at the first one.
+3. Unit tests for GenericMind with a fake post.
+4. Browser run of Learn, Review and Teach with the generic sample and #43 deployed.
+5. Replace the local type once stream A adds screen_activity (TASK-3.41).
+Note: typing in another app (a mail client) cannot be seen from our page, so pauses must come from voice silence and screen changes.
+Container tips: Chromium needs --disable-http2 --disable-quic, and API calls went through curl (coordinator scratchpad net.mjs).
+<!-- SECTION:NOTES:END -->
