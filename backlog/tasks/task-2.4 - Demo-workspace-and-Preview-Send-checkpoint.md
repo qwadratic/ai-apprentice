@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@kigulx'
 created_date: '2026-10-03 21:16'
-updated_date: '2026-10-03 23:39'
+updated_date: '2026-10-04 01:18'
 labels:
   - stream-a
   - workspace
@@ -49,4 +49,6 @@ Create the assigned isolated worktree from the published assignment revision. Im
 
 <!-- SECTION:NOTES:BEGIN -->
 Publication slice prepared from worker commits 9a19f4c and aa927c6 on current main f315f54. Coordinator reproduced all 30 Node 22.22 tests and strict TypeScript checking. This PR publishes the independent synthetic workspace only; real ScreenBridge observations, correlated checkpoint replies and shell integration remain In Progress. Follow-up assigned to the existing demo worker on GPT-5.6 Sol.
+
+Canonical doc-7 follow-up applied to the PR12 candidate: the workspace consumes only trusted ordered vision observations plus opaque order/email revisions, validates ActionCheckpoint and CheckpointReply with @apprentice/contracts, rechecks registry freshness after the reply, and rejects mismatched session, sequence, checkpointId, basedOn or capture revisions. Input activity includes session-relative lastInputAtMs and exact idleMs. Capture must store order/email observations independently with frame-time surface plus opaque revision and invalidate them on pause/generation; no DOM-facts fallback. Task remains In Progress pending runtime/capture/B integration and merged CI.
 <!-- SECTION:NOTES:END -->

@@ -1,14 +1,12 @@
 import { demoCases, type DemoCase, type Attachment } from './cases.ts';
 import { createInputActivityReporter, type ActivityClock, type WorkspaceActivity, type WorkspaceSurface } from './activity.ts';
 
-export type VersionScope = { sessionId: string; taskGeneration: number; draftRevision: number };
+export type OpaqueRevisions = { order: string; email: string };
+export type VersionScope = { sessionId: string; taskGeneration: number; draftRevision: number; revisions: OpaqueRevisions };
 export type CheckOutcome = { status: 'clear' | 'warn' | 'unknown'; message: string; evidenceIds: string[] };
-export type ObservationReferences = { scope: VersionScope; orderId: string; emailId: string };
-// These are local dependency-injection ports, not a ScreenBridge contract.
-// The adapter must capture and observe the visible screen before returning references.
+// This local dependency-injection port is not a second ScreenBridge contract.
 export type CheckpointPort = {
-  observeCurrentScreen(scope: VersionScope, signal: AbortSignal): Promise<ObservationReferences>;
-  evaluate(observationIds: readonly string[], signal: AbortSignal): Promise<CheckOutcome>;
+  check(scope: VersionScope, signal: AbortSignal): Promise<CheckOutcome>;
 };
 export type CheckState =
   | { status: 'idle' }
@@ -24,6 +22,7 @@ export type WorkspaceState = {
 type Options = {
   sessionId: string; checkpoint?: CheckpointPort; cases?: readonly DemoCase[]; timeoutMs?: number;
   now?: () => number; onInputActivity?: (activity: WorkspaceActivity) => void; activityClock?: ActivityClock;
+  createRevision?: () => string;
 };
 
 function sameScope(a: VersionScope, b: VersionScope): boolean {
@@ -38,15 +37,18 @@ export function createWorkspace(options: Options) {
   const cases = options.cases ?? demoCases;
   if (!options.sessionId.trim() || !cases.length) throw new Error('A session and at least one case are required.');
   const now = options.now ?? Date.now;
+  let revisionSequence = 0;
+  const createRevision = options.createRevision ?? (() => `workspace-revision-${++revisionSequence}`);
   const activity = createInputActivityReporter(options.onInputActivity, options.activityClock);
   let checkpoint = options.checkpoint;
   let disposed = false;
   let requestSequence = 0;
   let active: { id: number; scope: VersionScope; abort: AbortController; timer: ReturnType<typeof setTimeout>; done: () => void } | undefined;
   const listeners = new Set<(state: WorkspaceState) => void>();
-  const first = cases[0];
+  const first = cases[0]!;
   let state: WorkspaceState = {
-    scope: { sessionId: options.sessionId, taskGeneration: 0, draftRevision: 0 }, caseId: first.id,
+    scope: { sessionId: options.sessionId, taskGeneration: 0, draftRevision: 0,
+      revisions: { order: createRevision(), email: createRevision() } }, caseId: first.id,
     order: structuredClone(first.order), draft: structuredClone(first.draft), offRecord: false, check: { status: 'idle' }, acknowledged: false,
     sent: null, ticket: { summary: '', status: 'open' },
   };
@@ -61,9 +63,11 @@ export function createWorkspace(options: Options) {
     previous.abort.abort();
     previous.done();
   }
-  function invalidate() {
+  function invalidate(revision: 'order' | 'email' | 'both' | 'none' = 'email') {
     cancel();
     state.scope.draftRevision++;
+    if (revision === 'order' || revision === 'both') state.scope.revisions.order = createRevision();
+    if (revision === 'email' || revision === 'both') state.scope.revisions.email = createRevision();
     state.check = { status: 'idle' };
     state.acknowledged = false;
   }
@@ -71,7 +75,7 @@ export function createWorkspace(options: Options) {
     alive();
     if (state.sent) return false;
     state.draft = { ...state.draft, ...structuredClone(patch) };
-    invalidate();
+    invalidate('email');
     emit();
     return true;
   }
@@ -84,7 +88,7 @@ export function createWorkspace(options: Options) {
     const selected = cases.find(item => item.id === caseId);
     if (!selected) throw new Error('Unknown demo case.');
     activity.reset();
-    invalidate();
+    invalidate('both');
     state = { ...state, scope: { ...state.scope, taskGeneration: state.scope.taskGeneration + 1 },
       caseId, order: structuredClone(selected.order), draft: structuredClone(selected.draft),
       sent: null, ticket: { summary: '', status: 'open' } };
@@ -105,7 +109,8 @@ export function createWorkspace(options: Options) {
     }
     const port = checkpoint;
     const id = ++requestSequence;
-    const scope = { ...state.scope };
+    invalidate('email');
+    const scope = structuredClone(state.scope);
     const abort = new AbortController();
     let complete!: () => void;
     const completion = new Promise<void>(resolve => { complete = resolve; });
@@ -117,7 +122,7 @@ export function createWorkspace(options: Options) {
       cancel();
       emit();
     }
-    const timer = setTimeout(() => finish({ status: 'error', message: 'Check timed out. Preview again before sending.' }), options.timeoutMs ?? 10_000);
+    const timer = setTimeout(() => finish({ status: 'error', message: 'Check timed out. Preview again before sending.' }), options.timeoutMs ?? 4_000);
     active = { id, scope, abort, timer, done: complete };
     state.check = { status: 'pending', requestId: id };
     state.acknowledged = false;
@@ -125,12 +130,7 @@ export function createWorkspace(options: Options) {
     // Detached work is bounded by completion/timeout; an adapter may ignore abort.
     void (async () => {
       try {
-        const refs = await port.observeCurrentScreen({ ...scope }, abort.signal);
-        if (!current()) return;
-        if (!refs?.scope || !sameScope(scope, refs.scope) || !refs.orderId?.trim() || !refs.emailId?.trim() || refs.orderId === refs.emailId) {
-          throw new Error('Current order and email observations are unavailable.');
-        }
-        const reply = await port.evaluate([refs.orderId, refs.emailId], abort.signal);
+        const reply = await port.check(structuredClone(scope), abort.signal);
         if (!current()) return;
         if (!validOutcome(reply)) throw new Error('The agent returned an invalid check result.');
         finish({ ...structuredClone(reply), requestId: id });
@@ -147,19 +147,19 @@ export function createWorkspace(options: Options) {
     },
     editOrder(patch: Partial<DemoCase['order']>) {
       alive(); if (state.sent) return false;
-      state.order = { ...state.order, ...structuredClone(patch) }; invalidate(); emit(); return true;
+      state.order = { ...state.order, ...structuredClone(patch) }; invalidate('order'); emit(); return true;
     },
     setSession(sessionId: string) {
       alive(); if (!sessionId.trim()) throw new Error('A session is required.');
       if (sessionId === state.scope.sessionId) return;
-      activity.reset(); invalidate(); state.scope.sessionId = sessionId; emit();
+      activity.reset(); invalidate('both'); state.scope.sessionId = sessionId; emit();
     },
-    setCheckpoint(port?: CheckpointPort) { alive(); invalidate(); checkpoint = port; emit(); },
+    setCheckpoint(port?: CheckpointPort) { alive(); invalidate('none'); checkpoint = port; emit(); },
     setOffRecord(offRecord: boolean) {
       alive(); if (state.offRecord === offRecord) return;
       state.offRecord = offRecord;
       if (offRecord) activity.pause(); else activity.resume();
-      invalidate(); emit();
+      invalidate('none'); emit();
     },
     acknowledgeRisk(acknowledged: boolean) {
       alive();
@@ -169,6 +169,7 @@ export function createWorkspace(options: Options) {
     send() {
       alive(); if (!canSend()) return false;
       state.sent = { ...structuredClone(state.draft), sentAtMs: now() };
+      state.scope.revisions.email = createRevision();
       state.ticket = { summary: `Simulated email sent for ${state.order.id}.`, status: 'open' };
       emit(); return true;
     },
