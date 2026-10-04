@@ -1,11 +1,11 @@
 ---
 id: TASK-3.46
 title: Web shell as a Clipa Conductor client
-status: In Progress
+status: Done
 assignee:
   - '@qwadratic'
 created_date: '2026-10-04 05:00'
-updated_date: '2026-10-04 05:02'
+updated_date: '2026-10-04 05:40'
 labels:
   - stream-b
 dependencies: []
@@ -22,10 +22,10 @@ The server conductor (doc-12 v1.1, PR #49) decides what Clipa says and does. The
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The shell sends the event stream and renders every cue type
-- [ ] #2 Learn on any shared screen: ask cues are spoken at pauses and their regions are highlighted
-- [ ] #3 Review: the board shows the map; voice edits appear as new versions; the teach-back is confirmed by voice
-- [ ] #4 A ?join= link from macOS joins the same conductor
+- [x] #1 The shell sends the event stream and renders every cue type
+- [x] #2 Learn on any shared screen: ask cues are spoken at pauses and their regions are highlighted
+- [x] #3 Review: the board shows the map; voice edits appear as new versions; the teach-back is confirmed by voice
+- [x] #4 A ?join= link from macOS joins the same conductor
 <!-- AC:END -->
 
 ## Definition of Done
@@ -34,3 +34,19 @@ The server conductor (doc-12 v1.1, PR #49) decides what Clipa says and does. The
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Merged in PR #52 (d2f979a) and PR #53 (192375f). The web shell is a conductor client.
+- Events: hello, mode and session, share, activity, talking and transcript, ui, cue_done, off_record.
+- Cue stream: a fetch-streamed SSE with reconnect after the last seq.
+- Rendering: ask, warn, say, teachback and spoken guide lines go to the voice as [ASK]. Region boxes are drawn over the screen preview. The map shows on WorkMapBoard through fromGenericMap. Guides drive the rail.
+- Joining: a ?join= link from macOS joins the same conductor. ?conductor=off falls back to the in-browser brain.
+- One session for the whole journey.
+- #53: the web welcome line follows Start, then share; lines use Show, Reflect and Pass it on; the Start button carries data-clipa-target.
+Tests: 51 new web tests plus 1 conductor test; root npm run check and CI are green. Per Ivan's rule there was no agent browser run, so the flow needs a check by hand.
+Known gaps:
+- The Pass it on summary still comes from the in-browser brain.
+- With one session id, a second /finish may store no log for later stages (debug only).
+<!-- SECTION:FINAL_SUMMARY:END -->
