@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "note": "Recorded outputs of the server's LLM route (POST /api/agent/llm/:task), keyed by the request they answer. Tests replay them through an injected fetch, so no network and no model is needed. Shapes follow the route's contract. Synthetic.",
+  "answer_extraction": [
+    {
+      "answerText": "He asked for it in writing, his phone blocks pictures in our emails.",
+      "output": {
+        "rationale": "his phone blocks pictures in our emails",
+        "quote": "his phone blocks pictures in our emails",
+        "guardrail": {
+          "condition": "order of customer_07",
+          "requiredAction": "include the order details in the message",
+          "requiredFields": ["delivery address", "delivery window"],
+          "scope": { "entity": "customer_07" }
+        },
+        "exceptions": [],
+        "unknowns": [],
+        "confidence": 0.86
+      }
+    },
+    {
+      "answerText": "His phone strips images, so I write the details out myself.",
+      "output": {
+        "rationale": "his phone strips images",
+        "quote": "His phone strips images",
+        "guardrail": null,
+        "exceptions": [],
+        "unknowns": ["whether other devices have the same problem"],
+        "confidence": 0.81
+      }
+    },
+    {
+      "answerText": "Customer_07 phone hides pictures in our emails, that's why I handle it myself.",
+      "output": {
+        "rationale": "phone hides pictures in our emails",
+        "quote": "phone hides pictures in our emails",
+        "guardrail": {
+          "condition": "order of customer_07",
+          "requiredAction": "include the details in the message",
+          "requiredFields": ["address", "time"],
+          "scope": { "entity": "customer seven" }
+        },
+        "exceptions": [],
+        "unknowns": [],
+        "confidence": 0.78
+      }
+    },
+    {
+      "answerText": "It's his phone. It blocks pictures in our emails.",
+      "output": {
+        "rationale": "his phone blocks pictures in our emails",
+        "quote": "It's his phone. It blocks pictures in our emails.",
+        "guardrail": null,
+        "exceptions": [],
+        "unknowns": [],
+        "confidence": 0.74
+      }
+    },
+    {
+      "answerText": "He asked for it in writing because his phone blocks pictures.",
+      "output": {
+        "rationale": "his phone blocks pictures",
+        "quote": "because his phone blocks pictures",
+        "guardrail": null,
+        "exceptions": [],
+        "unknowns": [],
+        "confidence": 0.9
+      }
+    },
+    {
+      "answerText": "Yes, a second attachment is fine, as long as the details are in the message.",
+      "output": {
+        "rationale": null,
+        "quote": "a second attachment is fine",
+        "guardrail": null,
+        "exceptions": ["a second attachment is fine", "as long as the details are in the message"],
+        "unknowns": [],
+        "confidence": 0.8
+      }
+    }
+  ],
+  "reply_classification": [
+    { "reply": "Okay, that's correct.", "output": { "verdict": "confirm", "correction": null } },
+    { "reply": "Sounds good.", "output": { "verdict": "confirm", "correction": null } },
+    { "reply": "Uh, yes, that's right.", "output": { "verdict": "confirm", "correction": null } },
+    {
+      "reply": "One correction: the order number goes in as well as the address and the delivery window.",
+      "output": { "verdict": "correct", "correction": "the order number goes in as well as the address and the delivery window" }
+    },
+    { "reply": "Hmm.", "output": { "verdict": "unclear", "correction": null } }
+  ],
+  "entity_resolution": [
+    { "spoken": "customer Sample", "output": { "ref": "customer_07" } },
+    { "spoken": "customer Nobody", "output": { "ref": null } },
+    { "spoken": "customer Invented", "output": { "ref": "customer_99" } }
+  ]
+}

@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "actor": "novice (scripted)",
+  "note": "Read only by the page's autoplay driver. A draft is filled in from fixtures/agent/teach/<case>.json; the predict text is what the novice answers when the tutor asks what they would do. onStop says what the novice does when the tutor holds them back before Send.",
+  "cases": [
+    {
+      "case": "t1",
+      "predict": { "thinkMs": 900, "text": "I would attach the usual order template picture and send it." },
+      "onStop": "fix",
+      "fix": { "text": "Hello, here are your delivery details.\nOrder: ORD-2057\nAddress: 7 Placeholder Road, 1020 Exampletown\nDelivery window: 2026-10-14 09:00-11:00" }
+    },
+    {
+      "case": "t2",
+      "predict": { "thinkMs": 600, "text": "I would write the order number, address and delivery window out and add the template picture too." },
+      "onStop": "send"
+    },
+    {
+      "case": "t3",
+      "predict": { "thinkMs": 600, "text": "Nothing special, the usual template picture is enough." },
+      "onStop": "send"
+    },
+    {
+      "case": "t4",
+      "predict": { "thinkMs": 700, "text": "I don't know this customer, so I would check with someone first." },
+      "onStop": "hold"
+    },
+    {
+      "case": "t5",
+      "predict": { "thinkMs": 700, "text": "I would write the address and the delivery window out." },
+      "onStop": "fix",
+      "fix": { "text": "\nOrder: ORD-2071" }
+    },
+    {
+      "case": "t6",
+      "predict": { "thinkMs": 700, "text": "I would just send the usual picture." },
+      "onStop": "hold"
+    }
+  ]
+}

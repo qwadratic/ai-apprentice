@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "t2",
+  "title": "Same customer, full details written out plus the image",
+  "orderId": "ORD-2063",
+  "draft": {
+    "bodyText": "Hello, here are your delivery details.\nOrder: ORD-2063\nAddress: 22 Mockingbird Yard, 1030 Exampletown\nDelivery window: 2026-10-15 13:00-15:00",
+    "attachTemplateImage": true
+  }
+}

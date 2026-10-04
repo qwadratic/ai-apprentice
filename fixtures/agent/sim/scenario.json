@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "label": "Simulation: scripted expert and novice, synthetic data",
+  "customers": [
+    { "ref": "customer_07", "name": "Sample Customer 07", "contactRef": "contact_customer_07" },
+    { "ref": "customer_03", "name": "Example Trading 03", "contactRef": "contact_customer_03" },
+    { "ref": "customer_09", "name": "Placeholder Works 09", "contactRef": "contact_customer_09" },
+    { "ref": "customer_12", "name": "Mock Supplies 12", "contactRef": "contact_customer_12" }
+  ],
+  "orders": [
+    { "id": "ORD-2041", "customerRef": "customer_07", "deliveryAddress": "14 Sample Lane, 1010 Exampletown", "deliveryWindow": "2026-10-12 14:00-16:00" },
+    { "id": "ORD-2057", "customerRef": "customer_07", "deliveryAddress": "7 Placeholder Road, 1020 Exampletown", "deliveryWindow": "2026-10-14 09:00-11:00" },
+    { "id": "ORD-2063", "customerRef": "customer_07", "deliveryAddress": "22 Mockingbird Yard, 1030 Exampletown", "deliveryWindow": "2026-10-15 13:00-15:00" },
+    { "id": "ORD-2071", "customerRef": "customer_07", "deliveryAddress": "3 Fixture Street, 1010 Exampletown", "deliveryWindow": "2026-10-16 10:00-12:00" },
+    { "id": "ORD-1902", "customerRef": "customer_03", "deliveryAddress": "9 Demo Avenue, 2000 Sampleburg", "deliveryWindow": "2026-10-13 08:00-10:00" },
+    { "id": "ORD-4410", "customerRef": null, "deliveryAddress": "5 Anonymous Close, 3000 Nowhere", "deliveryWindow": "2026-10-17 15:00-17:00" },
+    { "id": "ORD-3305", "customerRef": "customer_09", "deliveryAddress": "18 Test Terrace, 4000 Mocktown", "deliveryWindow": "2026-10-14 16:00-18:00" }
+  ]
+}

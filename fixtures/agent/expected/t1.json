@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "case": "t1",
+  "note": "Expected results for the tutor tests T1-T6. Read only by tests, never by agent code or the Work Map.",
+  "status": "warn",
+  "policy": "WARN",
+  "ruleApplied": true,
+  "mapVersion": 2,
+  "missingFacts": ["orderId", "deliveryAddress", "deliveryWindow"],
+  "mustCiteEvidence": true,
+  "mustQuoteExpert": true
+}
