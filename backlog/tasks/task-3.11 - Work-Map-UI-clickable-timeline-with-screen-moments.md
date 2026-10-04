@@ -1,9 +1,11 @@
 ---
 id: TASK-3.11
 title: 'Work Map UI: clickable timeline with screen moments'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@qwadratic'
 created_date: '2026-10-03 21:11'
+updated_date: '2026-10-04 03:21'
 labels:
   - stream-b
   - workmap
@@ -39,3 +41,9 @@ Estimate: about 1.5 h of agent time. Card key: B-workmap-ui.
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+4 Oct 03:35 UTC: Ivan wants the screen understanding visible: a storyboard (раскадровка) of the session — keyframes per step with what changed, the reasoning and the schema facts — as the Review briefing board (doc-10 step 4). Built as an isolated component in apps/web/features/agent/workmap, wired into Review after #36.
+<!-- SECTION:NOTES:END -->
