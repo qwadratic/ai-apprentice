@@ -290,6 +290,8 @@ export class Conductor {
    * or skipped), and when the stage or the record changes.
    */
   private openWarn: string | null = null;
+  /** The voice agent started saying the warning that is out: it was heard, even if the person's typing cut it short. */
+  private warnHeard = false;
   /** The learned process Clipa recognised on screen in this stage, and the app it was recognised in. */
   private recognized: LearnedProcess | null = null;
   private recognizedFor: string | null = null;
@@ -461,8 +463,9 @@ export class Conductor {
 
   private cancelActive(): void {
     if (this.active && !this.active.done) {
-      // A warning that was never said is not an open warning: the rule is warned about again at the next pause.
-      if (this.active.type === 'warn') this.openWarn = null;
+      // A warning that was never said is not an open warning: the rule is warned about again at the next pause. One the voice
+      // agent had started saying was heard: the person typed over its end, and the fix still gets its ready line.
+      if (this.active.type === 'warn' && !this.warnHeard) this.openWarn = null;
       this.emit({ type: 'cancel', cueId: this.active.cueId });
     }
     this.active = null;
@@ -584,6 +587,7 @@ export class Conductor {
         if (e.by === 'person') this.personTalking = e.active; else this.agentTalking = e.active;
         this.lastBusyAt = now;
         if (e.by === 'agent') {
+          if (e.active && this.active?.type === 'warn' && !this.active.done) this.warnHeard = true;
           // The voice agent may also speak on its own: a nudge waits as long after it as after one of Clipa's lines.
           this.lastSpokeAt = now;
           this.pose(e.active ? 'speak' : 'listen');
@@ -1489,6 +1493,7 @@ export class Conductor {
     // One warning per rule: while it is open (said, and not fixed yet) the same rule is not warned about again.
     if (this.openWarn === out.guardrailId) { this.pose('listen'); return; }
     this.openWarn = out.guardrailId;
+    this.warnHeard = false;
     const latest = observations[observations.length - 1];
     const latestId = typeof latest?.id === 'string' ? latest.id : '';
     const rule = rules.find((g) => g.id === out.guardrailId);

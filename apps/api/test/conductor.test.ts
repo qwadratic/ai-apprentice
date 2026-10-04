@@ -1380,6 +1380,23 @@ test('Pass it on: a warning that was never said (cancelled by typing, skipped by
   });
 });
 
+test('Pass it on: a warning the person typed over while the voice agent was saying it was heard: the fix still gets its ready line', async () => {
+  await withRules({ nudges: false }, async () => {
+    const { r, verdict } = await warnRig();
+    await r.advance(RULES.pauseMs);
+    const warn = of(r.cues, 'warn')[0]!;
+    await r.send({ type: 'talking', by: 'agent', active: true }); // the voice agent starts saying it
+    await r.send({ type: 'activity', state: 'typing' }); // the person starts on the fix over its end
+    assert.deepEqual(cueOf(r.cues, 'cancel').map((c) => c.cueId), [warn.cueId], 'its end is cut, as before');
+    await r.send({ type: 'talking', by: 'agent', active: false }, { type: 'cue_done', cueId: warn.cueId, outcome: 'interrupted' }, { type: 'activity', state: 'pause' });
+    await editAndPause(r, 'n3', 'Image only, still');
+    assert.equal(of(r.cues, 'warn').length, 1, 'heard once: not warned again while it is open');
+    verdict.now = CLEAR;
+    await editAndPause(r, 'n4', 'Delivery at 12 Sample Street');
+    assert.deepEqual(said(r.cues), [RESOLVED]);
+  });
+});
+
 test('Pass it on: a warning does not outlive the off-the-record switch or a new stage: no ready line for it', async () => {
   const resets: ClientEvent[][] = [
     [{ type: 'off_record', on: true }, { type: 'off_record', on: false }],
