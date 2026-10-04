@@ -108,6 +108,19 @@ Every request carries `Origin: app://apprentice-macos` and the session token as 
 - **Roles.** Show uses `role=interviewer`; Pass it on uses `role=tutor`.
 - **Secrets.** The signed URL is a secret: it is never logged, and connection errors are reported by code only.
 
+### Smoke test
+
+`Clipa.app/Contents/MacOS/Clipa --smoke` runs headless, with no menu bar, no overlay, no capture and no audio devices. It uses the app's own client code against the live server:
+
+1. creates a session and reads the cue stream;
+2. sends the conductor events;
+3. starts the screen session and uploads one synthetic JPEG frame through the uploader;
+4. opens the ElevenLabs WebSocket and pushes one second of synthetic audio through the microphone converter;
+5. has the agent say one `[ASK]` line;
+6. ends the stage and waits for `open_web`.
+
+It prints statuses only and exits non-zero on failure. CI runs it on manual runs (`workflow_dispatch`) only, so a push never calls the server.
+
 ## Permissions
 
 | Permission | Why | Without it |
@@ -154,6 +167,7 @@ Sources/Clipa/
   ScreenStreamer.swift           SCStream capture, change detection, JPEG
   FrameUploader.swift            one in flight, latest wins, pacing, latency log
   VoiceAgent.swift               ElevenLabs Conversational AI WebSocket, microphone and playback
+  SmokeTest.swift                Clipa --smoke, the headless server-path check
   OverlayController.swift        presence, flight to a target, speech bubble
   BuddyView.swift, BuddyModel.swift, OverlayWindow.swift   Clipa and the click-through overlay
   IdleMonitor.swift              typing / working / pause / idle / away
@@ -165,7 +179,7 @@ scripts/build-app.sh
 
 ## Honest limits
 
-- **Not run on a Mac yet.** The macos-15 CI build compiles the app and assembles it, and the server contract was checked from a script: session, screen start, a JPEG frame accepted, events, cues, `open_web` on End. The app itself has not run on a Mac yet. Screen capture, the microphone path (voice processing, format conversion), playback and the overlay motion are untested on real hardware.
+- **Not run interactively on a Mac yet.** The macos-15 CI build compiles and assembles the app. `Clipa --smoke` (below) runs the server path with the app's own code on the CI Mac. Screen capture, the real microphone (voice processing), playback through the speakers and the overlay motion are untested on real hardware.
 - **No masking on macOS frames yet.** Frames leave the Mac as they are on screen: no masks, no redaction. Use synthetic demo data only. Off the record stops the stream and the voice, but does not recall frames or audio already sent. The screen pipeline does not clean speech.
 - **Main display only.** Pointing maps onto the main display, and the overlay sits on every screen.
 - **Typing detection.** It needs Input Monitoring on current macOS. Without it, Clipa may start a question while you type; the conductor still waits for pauses in what it sees.
