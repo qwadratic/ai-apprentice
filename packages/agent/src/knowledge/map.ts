@@ -74,7 +74,11 @@ export type MapEvent =
   /** The expert corrects the teach-back; the extraction is of their reply. */
   | { type: "correct"; extraction: AnswerExtraction }
   /** The expert confirms the teach-back. quote is their reply, when there is one. */
-  | { type: "confirm"; atMs: number; quote: string | null }
+  /**
+   * The expert confirms a teach-back. `stated` is the digest of the teach-back they heard (TeachBack.digest): the confirmation is
+   * refused unless it states exactly the version being confirmed. Use confirmationOf() when the teach-back was of the working map.
+   */
+  | { type: "confirm"; atMs: number; quote: string | null; stated: string }
   /** Customers the workspace or the scenario lists, beyond those seen on screen: what a spoken customer can be resolved to. */
   | { type: "known_customers"; refs: readonly string[] };
 
@@ -564,14 +568,14 @@ function projectGuardrail(d: DraftData, g: MapGuardrailData): MapGuardrailData {
   return copy;
 }
 
-function project(d: DraftData, version: number, status: WorkMapData["status"], sealed: { atMs: number; quote: string | null } | null): WorkMapData {
+function project(d: DraftData, version: number, status: WorkMapData["status"], sealed: { atMs: number; quote: string | null; stated?: string } | null): WorkMapData {
   const guardrails = d.guardrails.map((g) => projectGuardrail(d, g));
   return {
     version,
     status,
     confirmed: status === "confirmed",
     sealedAtMs: sealed?.atMs ?? null,
-    confirmation: status === "confirmed" && sealed ? { quote: sealed.quote, atMs: sealed.atMs } : null,
+    confirmation: status === "confirmed" && sealed ? { quote: sealed.quote, atMs: sealed.atMs, statedDigest: sealed.stated ?? "" } : null,
     steps: structuredClone(d.steps),
     guardrails,
     unknowns: guardrails.flatMap((g) => g.unknowns.map((u) => `${g.id}: ${u}`)),
@@ -617,6 +621,10 @@ export function validateWorkMap(map: WorkMap): string[] {
     ids.add(item.id);
   }
   if (map.confirmed) {
+    // The confirmation must state exactly this version: a map whose teach-back digest does not match is not a confirmed one.
+    if (map.confirmation === null || map.confirmation.statedDigest !== teachBackDigest(map)) {
+      problems.push("the confirmation does not state this version of the map");
+    }
     for (const g of map.guardrails) {
       if (g.status !== "confirmed") continue;
       const missing = missingOf(g.evidenceIds, g.quote);
@@ -631,9 +639,9 @@ export function validateWorkMap(map: WorkMap): string[] {
   return problems;
 }
 
-function seal(d: DraftData, status: "superseded" | "confirmed", atMs: number, quote: string | null): WorkMap {
+function seal(d: DraftData, status: "superseded" | "confirmed", atMs: number, quote: string | null, stated?: string): WorkMap {
   freezeInferred(d);
-  const sealed = deepFreeze(project(d, d.version, status, { atMs, quote }));
+  const sealed = deepFreeze(project(d, d.version, status, { atMs, quote, ...(stated !== undefined ? { stated } : {}) }));
   d.sealedVersion = d.version;
   d.dirty = false;
   return sealed;
@@ -676,9 +684,12 @@ export function reduceMap(state: MapState, event: MapEvent): MapState {
       if (issues.length > 0) throw new MapConfirmationError(issues);
       if (!d.dirty && d.sealedVersion === d.version) return state;
       if (d.sealedVersion === d.version) d.version += 1;
+      // The gate: only a version the expert heard stated, exactly, can be confirmed.
+      const heard = teachBackDigest(deepFreeze(project(d, d.version, "draft", null)));
+      if (event.stated !== heard) throw new MapValidationError("Cannot confirm", ["the confirmation does not state this version of the map (it changed since the teach-back)"]);
       for (const g of d.guardrails) if (eligible(g)) g.status = "confirmed";
       for (const s of d.steps) if (s.decision !== null && s.status === "inferred") s.status = "confirmed";
-      versions = [...versions, seal(d, "confirmed", event.atMs, event.quote)];
+      versions = [...versions, seal(d, "confirmed", event.atMs, event.quote, event.stated)];
       break;
     }
   }
@@ -708,7 +719,47 @@ export function knownCustomerRefs(state: MapState): string[] {
 
 /** The working draft as a map (status "draft"). It is what the teach-back describes. */
 export function workingMap(state: MapState): WorkMap {
-  return deepFreeze(project(structuredClone(state.draft) as DraftData, state.draft.version, "draft", null));
+  const d = structuredClone(state.draft) as DraftData;
+  // A draft that changed after a seal is the next version already: the teach-back states that number.
+  const version = d.sealedVersion === d.version && d.dirty ? d.version + 1 : d.version;
+  return deepFreeze(project(d, version, "draft", null));
+}
+
+/** FNV-1a, 32 bit: a short fingerprint, not a security feature. */
+function fnv1a(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+}
+
+/**
+ * The fingerprint of what a teach-back STATES: the version and, for every guardrail, its scope, the fields required, the
+ * exceptions and the reason (or that it is unknown). Two maps with the same digest say the same thing to the expert.
+ */
+export function teachBackDigest(map: WorkMap): string {
+  const stated = {
+    version: map.version,
+    guardrails: map.guardrails.map((g) => ({
+      id: g.id,
+      trigger: g.trigger,
+      unexplained: g.unexplained,
+      scope: { kind: g.scope.kind, customers: [...g.scope.customers].sort(), explicit: g.scope.explicit },
+      fields: [...g.requiredFacts],
+      exceptions: g.exceptions.map((e) => e.text),
+      reason: g.reason,
+      escalateTo: g.escalateTo,
+      condition: g.trigger === "customer" ? null : g.condition,
+    })),
+  };
+  return fnv1a(JSON.stringify(stated));
+}
+
+/** The confirmation event for a teach-back of the working map as it is now. */
+export function confirmationOf(state: MapState, atMs: number, quote: string | null): MapEvent {
+  return { type: "confirm", atMs, quote, stated: teachBackDigest(workingMap(state)) };
 }
 
 /** The latest version the expert confirmed, or null. This is the only version Teach may apply. */

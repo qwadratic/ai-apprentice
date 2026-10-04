@@ -7,6 +7,7 @@ import type { ActionCheckpoint, EmailDraftFacts, OrderFacts, ScreenObservation }
 import {
   ConversationPolicy,
   FakeClock,
+  confirmationOf,
   HeuristicAnswerExtractor,
   createMapState,
   knownCustomerRefs,
@@ -278,7 +279,7 @@ export async function buildState(opts: BuildOptions = {}): Promise<MapState> {
     });
     state = reduceMap(state, { type: "correct", extraction });
   }
-  if (opts.confirm !== false) state = reduceMap(state, { type: "confirm", atMs: (atMs += 7000), quote: expertTeachback("confirm") });
+  if (opts.confirm !== false) state = reduceMap(state, confirmationOf(state, (atMs += 7000), expertTeachback("confirm")));
   return state;
 }
 

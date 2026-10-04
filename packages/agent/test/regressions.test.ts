@@ -119,7 +119,7 @@ test("'Yes. Customer twelve too.' is a correction that brings customer_12 into t
   const g = must(workingMap(out.state).guardrails.find((x) => x.trigger === "customer" && !x.unexplained));
   assert.deepEqual(g.scope.customers, ["customer_07", "customer_12"]);
   assert.equal(g.scope.explicit, true);
-  assert.match(out.teachBack?.text ?? "", /customer_07, customer_12/);
+  assert.match(out.teachBack?.text ?? "", /Scope: only for customer_07 and customer_12\./);
   const done = await applyTeachBackReply(out.state, { text: "Yes, that's right.", atMs: 100 }, extractor);
   const after = checkpoint({ checkpoint: case12.checkpoint, observations: case12.observations, map: latestConfirmed(done.state) });
   assert.equal(after.status, "warn");

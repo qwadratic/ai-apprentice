@@ -98,7 +98,7 @@ export function checkpoint(input: CheckpointInput): TutorVerdict {
   const { order, email } = seen;
 
   if (map === null || !map.confirmed) {
-    return reply("unknown", "There is no confirmed Work Map yet, so I do not know what the expert would want here. Ask the expert.", []);
+    return reply("unknown", "The rule is not confirmed by the expert yet (there is no confirmed Work Map), so I do not know what is right here. Ask the expert.", []);
   }
   const invalid = validateWorkMap(map);
   if (invalid.length > 0) {

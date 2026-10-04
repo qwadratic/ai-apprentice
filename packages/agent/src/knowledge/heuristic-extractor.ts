@@ -55,12 +55,27 @@ const NEGATION =
   /\b(?:not|no|never|without|except|ignore|irrelevant|skip)\b|n't\b|\bdoes ?n[o']t matter\b|\bno need\b/i;
 const NOT_ONLY = /\bnot (?:only|just|merely)\b/gi;
 
-/** The order fields the text asks for. A clause that says a field is not wanted ("the time doesn't matter") does not count. */
-export function extractFacts(text: string): FactKey[] {
+/**
+ * Words next to a field name that mean the field is NOT what the expert asks the email to carry: it is somewhere else
+ * ("on the ticket", "on file"), already known ("he knows", "stays the same"), or someone else's ("of our warehouse").
+ * A clause with one of these names no field.
+ */
+const FIELD_NEIGHBOUR_VETO =
+  /\b(?:tickets?|he knows|she knows|they know|knows|stays? the same|already|on file|in the system|in our system|on the order|warehouse|(?:address|window|time|number) of|of our|of the (?:warehouse|company|office|depot|supplier))\b/i;
+/** A correction adds a field to the email: "put X in it", "include X", "X goes in", "in there", "in the email". */
+const ADDS_TO_EMAIL =
+  /\b(?:put|puts|include|includes|including|add|adds|write|type|mention)\b|\bgoes in\b|\b(?:in|into) (?:the )?(?:email|e-mail|message|body|there|it)\b/i;
+
+/**
+ * The order fields the text asks for. A clause that says a field is not wanted ("the time doesn't matter") or that puts it
+ * somewhere else does not count. With `addsOnly` (a correction) a clause counts only when it adds the field to the email.
+ */
+export function extractFacts(text: string, options: { addsOnly?: boolean } = {}): FactKey[] {
   const found = new Set<FactKey>();
   for (const raw of text.split(/[,;.!?]+|\s+(?:but|except|instead of|rather than)\s+/i)) {
     const clause = raw.replace(NOT_ONLY, " only ");
-    if (NEGATION.test(clause)) continue;
+    if (NEGATION.test(clause) || FIELD_NEIGHBOUR_VETO.test(clause)) continue;
+    if (options.addsOnly === true && !ADDS_TO_EMAIL.test(clause)) continue;
     for (const key of namedFields(clause)) found.add(key);
   }
   return FACT_KEYS.filter((k) => found.has(k));
@@ -76,7 +91,7 @@ export function extractFacts(text: string): FactKey[] {
  * handle it. (Restrictions and "I don't know" are kept: they can only narrow a rule or leave it unknown.)
  */
 const VETO =
-  /\?|n't\b|'d\b|\b(?:not|no|never|nobody|nothing|none|nor|neither|maybe|perhaps|probably|possibly|presumably|apparently|supposedly|likely|unlikely|i think|i guess|i suppose|i assume|i assumed|assumed|assume|i believe|i imagine|i reckon|i feel|i doubt|doubt|i wish|wish|might|could|would|should|if|unless|whether|eventually|used to|anymore|any more|mostly|mainly|usually|honestly|sort of|kind of|somewhat|seems?|but|although|though|actually|however|except|unsure|unclear)\b/i;
+  /\?|n't\b|'d\b|\b(?:not|no|never|nobody|nothing|none|nor|neither|maybe|perhaps|probably|possibly|presumably|apparently|supposedly|likely|unlikely|i think|i guess|i suppose|i assume|i assumed|assumed|assume|i believe|i imagine|i reckon|i feel|i doubt|doubt|i wish|wish|might|could|would|should|if|unless|whether|eventually|used to|anymore|any more|mostly|mainly|usually|honestly|sort of|kind of|somewhat|seems?|but|although|though|actually|however|except|unsure|unclear|or so i heard|i heard|as far as i know|at least|old|older|former|formerly|previous|previously|back then|ago|last (?:year|month|week)|recently|once|now has|now have|new)\b|\bin (?:19|20)\d\d\b/i;
 
 export function isVetoed(text: string): boolean {
   return VETO.test(text.replace(/[‘’]/g, "'"));
@@ -216,7 +231,9 @@ const INCLUSION =
   /\b(?:too|also|as well|likewise|both|plus)\b|\bsame (?:for|goes for|applies to|here|thing)\b|\bsame as (?:him|her|them|customer\b|that one|this one|the first)|\b(?:is|are) the same(?! as\b)|\bsame\b[\s.!]*$/i;
 /** An explicit inclusion of everyone: "for every customer", "every customer gets it", "everyone needs it". */
 const ALL_INCLUSION =
-  /\b(?:for|to|with) (?:all|every|each|any) (?:of (?:the|our) )?customers?\b|\b(?:all|every|each) customers? (?:get|gets|need|needs|want|wants|should|must|have|has|are|is|do|does)\b|\beveryone (?:gets|needs|wants|should|must|has)\b|\beverybody (?:gets|needs|wants|should|must|has)\b|\bfor (?:everyone|everybody)\b|\b(?:it|this|that)(?: is|'s) for all\b(?! (?:the|these|those|my|our|your|his|her|their))|\b(?:applies|same) (?:to|for) (?:all|every|everyone)\b/i;
+  /\b(?:it|this|that)(?: is|'s) for (?:all|every customer|everyone|everybody)\b(?! (?:the|these|those|my|our|your|his|her|their))|\bfor (?:all|every) customers?\b|\bfor (?:everyone|everybody)\b|\bapplies to (?:all|every|everyone)\b/i;
+/** A customer named together with a condition or a time: "when", "for", "on", "last year", "once", "back when", "I heard". */
+const JOIN_QUALIFIER = /\b(?:when|for|on|during|after|before|until|while|whenever|last (?:year|month|week)|once|back when|i heard|ago)\b/i;
 const ONLY = /\b(?:only|just)\b/i;
 /** What opens a reply to the teach-back and says nothing about scope: "No,", "Not quite,", "Yes.", "Almost,". */
 const LEAD_TOKENS = /^(?:(?:no|nope|nah|not quite|not exactly|not really|almost|yes|yeah|yep|okay|ok|right|actually|well|um|uh|hmm)\b[\s,.!-]*)+/i;
@@ -229,6 +246,8 @@ function scopeThoughts(sentence: string): string[] {
 /** The customers named in one thought that join the rule: an explicit inclusion, and no exclusion or negation in that thought. */
 function joinedByThought(thought: string, refs: readonly string[]): string[] {
   if (refs.length === 0 || EXCLUSION.test(thought) || NEGATED.test(thought)) return [];
+  // A customer with a condition or a time qualifier is not an inclusion ("same for X" is: its "for" is part of the phrase).
+  if (JOIN_QUALIFIER.test(thought.replace(/\bsame for\b/gi, "same"))) return [];
   return INCLUSION.test(thought) || (refs.length >= 2 && /\band\b/i.test(thought)) ? [...refs] : [];
 }
 
@@ -319,7 +338,10 @@ export function heuristicExtract(input: ExtractionInput): AnswerExtraction {
           for (const ref of joined) scopeCustomers.add(ref);
           joinQuote ??= s;
         }
-        if (scopeThoughts(s).some((t) => ALL_INCLUSION.test(t) && !EXCLUSION.test(t) && !NEGATED.test(t))) {
+        // Everyone is never read from an answer to the scope question: "Every customer gets the picture." is the default, not
+        // the rule, and the heuristic cannot tell the two apart. Only an explicit amendment of the teach-back widens, and the
+        // next teach-back states "for every customer" for the expert to confirm.
+        if (input.topic === "correction" && scopeThoughts(s).some((t) => ALL_INCLUSION.test(t) && !EXCLUSION.test(t) && !NEGATED.test(t))) {
           scopeAll = true;
           allQuote ??= s;
         }
@@ -360,8 +382,11 @@ export function heuristicExtract(input: ExtractionInput): AnswerExtraction {
     unknowns.push("The expert does not know why.");
   }
 
-  const requiredFacts = veto ? [] : extractFacts(text);
-  const factSentence = veto ? null : (sentences.find((s) => extractFacts(s).length > 0) ?? null);
+  // A field is required only from an answer to the essentials question, or from a correction that adds it to the email.
+  const factsOf = (t: string): FactKey[] =>
+    veto ? [] : input.topic === "essentials" ? extractFacts(t) : input.topic === "correction" ? extractFacts(t, { addsOnly: true }) : [];
+  const requiredFacts = factsOf(text);
+  const factSentence = sentences.find((s) => factsOf(s).length > 0) ?? null;
 
   let quote: string;
   let evidenceOfClaim: boolean;

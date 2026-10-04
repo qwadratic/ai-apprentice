@@ -9,7 +9,7 @@ import type { GapTopic } from "../policy/topics.ts";
 import type { ReviewItem } from "../policy/types.ts";
 import type { AnswerExtractor } from "./extractor.ts";
 import { isVetoed } from "./heuristic-extractor.ts";
-import { MapConfirmationError, confirmIssues, knownCustomerRefs, latestConfirmed, reduceMap, workingMap } from "./map.ts";
+import { MapConfirmationError, confirmIssues, confirmationOf, knownCustomerRefs, latestConfirmed, reduceMap, teachBackDigest, workingMap } from "./map.ts";
 import type { ConfirmIssue, MapState } from "./map.ts";
 import { isAnswered, labelFacts } from "./types.ts";
 import type { MapGuardrail, Question, Topic, WorkMap } from "./types.ts";
@@ -86,30 +86,41 @@ export interface TeachBack {
   text: string;
   evidenceIds: string[];
   version: number;
+  /** The fingerprint of what this teach-back states (teachBackDigest). A confirmation is valid only for this digest. */
+  digest: string;
 }
 
-/** A short spoken summary of the map for the expert to confirm or correct. */
+const listOf = (items: readonly string[]): string => (items.length < 2 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`);
+
+/**
+ * The spoken summary of the map for the expert to confirm or correct. It states every guardrail explicitly: the scope ("only for
+ * customer_07", "for every customer"), the fields required, the exception (or that none was stated) and the reason (or "reason
+ * unknown"). Nothing is applied in Teach until the expert has confirmed exactly this version.
+ */
 export function buildTeachBack(map: WorkMap): TeachBack {
   const parts: string[] = [`Let me play it back (version ${map.version}).`];
   const evidenceIds: string[] = [];
   for (const g of map.guardrails) {
     for (const id of g.evidenceIds) if (!evidenceIds.includes(id)) evidenceIds.push(id);
-    const why = g.reason !== null ? ` because ${g.reason}` : "";
+    const reason = g.reason !== null ? `Reason: ${g.reason}.` : "Reason unknown.";
     if (g.unexplained) {
-      parts.push(`For ${g.scope.customers.join(", ")} you do something similar, but you do not know why, so I will not treat it as a rule.`);
+      parts.push(`For ${listOf(g.scope.customers)} you do something similar, but you do not know why, so I will not treat it as a rule.`);
     } else if (g.trigger === "customer") {
-      const who = g.scope.kind === "all" ? "every customer" : g.scope.customers.join(", ") || "this customer";
-      const what = g.requiredFacts.length > 0 ? `include the ${labelFacts(g.requiredFacts)} in the message` : "something the expert has not spelled out yet";
-      const exc = g.exceptions[0] ? ` Exception: ${g.exceptions[0].text}` : "";
-      parts.push(`For ${who}, when you send the delivery email: ${what}${why}.${exc}`);
+      const scope =
+        g.scope.kind === "all"
+          ? "for every customer"
+          : `only for ${listOf(g.scope.customers) || "this customer"}${g.scope.explicit ? "" : " (you did not say; I assume it from the screen)"}`;
+      const what = g.requiredFacts.length > 0 ? `the email must include the ${labelFacts(g.requiredFacts)}` : "I do not know yet what the email must include";
+      const exc = g.exceptions.length > 0 ? `Exception: ${g.exceptions.map((e) => e.text).join(" ")}` : "No exception stated.";
+      parts.push(`Scope: ${scope}. ${what[0]?.toUpperCase() ?? ""}${what.slice(1)}. ${exc} ${reason}`);
     } else if (g.trigger === "unknown_entity") {
-      parts.push(`If you cannot match an order to a customer, you stop and ask ${g.escalateTo ?? "someone"} before sending${why}.`);
+      parts.push(`If you cannot match an order to a customer, you stop and ask ${g.escalateTo ?? "someone"} before sending. ${reason}`);
     } else {
-      parts.push(`You also stop and ask ${g.escalateTo ?? "someone"} when: ${g.condition}${why}.`);
+      parts.push(`You also stop and ask ${g.escalateTo ?? "someone"} when: ${g.condition}. ${reason}`);
     }
   }
   parts.push("Did I get that right?");
-  return { text: parts.join(" "), evidenceIds, version: map.version };
+  return { text: parts.join(" "), evidenceIds, version: map.version, digest: teachBackDigest(map) };
 }
 
 export type TeachBackReply = "confirm" | "correct" | "unclear";
@@ -229,7 +240,9 @@ export type TeachBackOutcome =
   /** The map cannot be confirmed (an item lacks evidence or a quote); nothing changed. */
   | { outcome: "refused"; state: MapState; teachBack: null; issues: ConfirmIssue[] }
   /** The reply was neither a confirmation nor a correction; nothing changed, ask again. */
-  | { outcome: "unclear"; state: MapState; teachBack: null; issues: [] };
+  | { outcome: "unclear"; state: MapState; teachBack: null; issues: [] }
+  /** The map changed since the teach-back the expert heard: nothing is confirmed; state the current version again. */
+  | { outcome: "stale"; state: MapState; teachBack: TeachBack; issues: [] };
 
 /**
  * Applies the expert's reply to the teach-back: confirm, or correct (a new version, extracted behind the AnswerExtractor).
@@ -240,13 +253,19 @@ export async function applyTeachBackReply(
   reply: { text: string; atMs: number; evidenceIds?: string[] },
   extractor: AnswerExtractor,
   classifier: ReplyClassifier = new HeuristicReplyClassifier(),
+  /** The teach-back the expert heard, when it is not the current one. */
+  heard?: TeachBack,
 ): Promise<TeachBackOutcome> {
-  const current = workingMap(state);
-  const read = await classifier.classify(buildTeachBack(current).text, reply.text);
+  const current = buildTeachBack(workingMap(state));
+  // The gate: a reply answers the teach-back it followed. If the map moved on since, nothing is confirmed.
+  if (heard !== undefined && heard.digest !== current.digest) return { outcome: "stale", state, teachBack: current, issues: [] };
+  let read = await classifier.classify(current.text, reply.text);
+  // A confirmation is a reply that is only confirmation tokens, whoever classified it: a model cannot confirm what the words do not.
+  if (read.verdict === "confirm" && readReply(reply.text).verdict !== "confirm") read = { verdict: "unclear", correction: null };
   if (read.verdict === "unclear") return { outcome: "unclear", state, teachBack: null, issues: [] };
   if (read.verdict === "confirm") {
     try {
-      return { outcome: "confirmed", state: reduceMap(state, { type: "confirm", atMs: reply.atMs, quote: reply.text.trim() }), teachBack: null, issues: [] };
+      return { outcome: "confirmed", state: reduceMap(state, confirmationOf(state, reply.atMs, reply.text.trim())), teachBack: null, issues: [] };
     } catch (e) {
       if (e instanceof MapConfirmationError) return { outcome: "refused", state, teachBack: null, issues: e.confirmIssues };
       throw e;
@@ -332,6 +351,8 @@ export class ReviewClarifier {
 
 export type ButtonOutcome =
   | { outcome: "confirmed"; state: MapState }
+  /** The map changed since the teach-back the expert heard: nothing was confirmed. */
+  | { outcome: "stale"; state: MapState; teachBack: TeachBack }
   /** The expert wants to correct: the host takes their words (voice or text) and passes them to applyTeachBackReply. */
   | { outcome: "needs_words"; state: MapState }
   | { outcome: "skipped"; state: MapState }
@@ -348,6 +369,8 @@ export function pressReviewButton(
   itemId: string,
   button: ReviewButton,
   atMs: number,
+  /** The teach-back the expert heard, when the buttons belong to one. */
+  heard?: TeachBack,
 ): ButtonOutcome {
   if (button === "skip") {
     clarifier.skip(itemId);
@@ -358,8 +381,10 @@ export function pressReviewButton(
     clarifier.understood(itemId);
     return { outcome: "confirmed", state };
   }
+  const current = buildTeachBack(workingMap(state));
+  if (heard !== undefined && heard.digest !== current.digest) return { outcome: "stale", state, teachBack: current };
   try {
-    const next = reduceMap(state, { type: "confirm", atMs, quote: "(confirmed with the button)" });
+    const next = reduceMap(state, confirmationOf(state, atMs, "(confirmed with the button)"));
     clarifier.understood(itemId);
     return { outcome: "confirmed", state: next };
   } catch (e) {

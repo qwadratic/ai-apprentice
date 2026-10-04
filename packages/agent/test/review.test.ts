@@ -12,6 +12,7 @@ import {
   planFollowUps,
   reduceMap,
   reviewStatus,
+  teachBackDigest,
   workingMap,
 } from "../src/index.ts";
 import type { AnswerExtraction, GapTopic } from "../src/index.ts";
@@ -70,8 +71,13 @@ test("the teach-back quotes the map and ends with a question", async () => {
   const tb = buildTeachBack(draft);
   assert.equal(tb.version, 1);
   assert.match(tb.text, /version 1/);
-  assert.match(tb.text, /customer_07, when you send the delivery email: include the delivery address and delivery window in the message because his phone blocks pictures/);
-  assert.match(tb.text, /Exception:/);
+  // It states the scope, the fields, the exception and the reason explicitly, so the expert confirms exactly that.
+  assert.match(tb.text, /Scope: only for customer_07\./);
+  assert.match(tb.text, /The email must include the delivery address and delivery window\./);
+  assert.match(tb.text, /Exception: Yes, an extra picture is fine/);
+  assert.match(tb.text, /Reason: his phone blocks pictures in our emails\./);
+  assert.match(tb.text, /Reason: a wrong match sends someone else's delivery details to the wrong person\./);
+  assert.equal(tb.digest, teachBackDigest(draft));
   assert.match(tb.text, /you do not know why, so I will not treat it as a rule/);
   assert.match(tb.text, /stop and ask the account manager/);
   assert.match(tb.text, /Did I get that right\?$/);
@@ -152,7 +158,8 @@ test("heuristic extraction: reason, facts, stop condition, scope, exception, une
   assert.deepEqual(named.scope.customers, ["customer_07", "customer_03"]);
   assert.equal(named.scope.explicit, true);
 
-  assert.equal(heuristicExtract({ ...input, topic: "scope", text: "Every customer gets it." }).scope.all, true);
+  assert.equal(heuristicExtract({ ...input, topic: "scope", text: "Every customer gets it." }).scope.all, false, "a scope answer never widens to everyone");
+  assert.equal(heuristicExtract({ ...input, topic: "correction", text: "It is for every customer." }).scope.all, true);
   assert.equal(heuristicExtract({ ...input, topic: "scope", text: "No other customers." }).scope.all, false);
 
   const exc = heuristicExtract({ ...input, topic: "exception", text: expertAnswer("exception") });
