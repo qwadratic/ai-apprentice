@@ -2,6 +2,7 @@
 // the signed URL stay inside the controller and the API module.
 import type { CheckpointStatus, ScreenState } from '@apprentice/contracts';
 import type { DecisionKind, DraftMap, GapItem } from '../brain/types.ts';
+import type { TeachCaseId } from '../screen/sample-scenarios.ts';
 
 export const MODES = ['learn', 'review', 'teach'] as const;
 export type Mode = (typeof MODES)[number];
@@ -11,7 +12,7 @@ export const MODE_LABELS: Record<Mode, string> = { learn: 'Learn', review: 'Revi
 export const PERSONAS = ['strict', 'plain', 'thorough', 'quiet'] as const;
 export type Persona = (typeof PERSONAS)[number];
 
-/** Only stored and shown for now (TASK-3.8); the brain and the voice use it later. */
+/** The policy's persona: question budget, pause thresholds, word limit and prediction style. Read when a session starts. */
 export const PERSONA_INFO: Record<Persona, { label: string; hint: string }> = {
   strict: { label: 'Strict', hint: 'Few, short questions' },
   plain: { label: 'Plain', hint: 'Friendly and brief (default)' },
@@ -54,7 +55,8 @@ export interface ObservationRow {
   evidenceIds: string[];
 }
 
-export type FeedStatus = 'asked' | 'answered' | 'deferred' | 'unspoken';
+/** `said`: spoken to the person and needs no answer (a warning, feedback on a prediction, the debrief's closing words). */
+export type FeedStatus = 'asked' | 'answered' | 'deferred' | 'unspoken' | 'said';
 
 export interface FeedItem {
   id: string;
@@ -68,6 +70,8 @@ export interface FeedItem {
   evidenceIds: string[];
   atMs: number;
   answer: { text: string; atMs: number } | null;
+  /** The session the item was asked in: a later session never takes its answer. */
+  sessionId?: string;
 }
 
 export interface DecisionEntry {
@@ -98,7 +102,17 @@ export type TeachBackStatus = 'none' | 'pending' | 'confirmed' | 'corrected';
 
 export interface ReviewState {
   gaps: GapItem[];
-  teachBack: { text: string | null; status: TeachBackStatus; correction: string | null };
+  teachBack: {
+    text: string | null;
+    status: TeachBackStatus;
+    correction: string | null;
+    /** The fingerprint of the text on screen: confirm and correct carry it, so they count for exactly this version. */
+    digest: string | null;
+  };
+  /** The review could not understand the expert twice: Skip joins Confirm and Correct. */
+  buttons: boolean;
+  /** What the last reply did not do (unclear, stale, refused, skipped), in plain words. */
+  notice: string | null;
 }
 
 export interface CheckpointCard {
@@ -114,6 +128,8 @@ export interface CheckpointCard {
 export interface MasteryState {
   mastered: string[];
   practise: string[];
+  /** Cases the tutor could not judge: neither mastered nor to practise. */
+  notJudged?: string[];
 }
 
 export interface CaptureInfo {
@@ -152,7 +168,8 @@ export interface ShellState {
   feed: FeedItem[];
   draftMap: DraftMap;
   review: ReviewState;
-  teach: { checkpoint: CheckpointCard | null; mastery: MasteryState | null };
+  /** `sampleCase`: which sample case the next Teach session plays (the sample source only). */
+  teach: { checkpoint: CheckpointCard | null; mastery: MasteryState | null; sampleCase: TeachCaseId };
   replay: { evidenceId: string | null };
   /** A spoken question that is waiting for the answer: lets Clipa show a hint from the decision. */
   clipaHint: 'warning' | 'pointing' | null;
@@ -161,4 +178,4 @@ export interface ShellState {
   nextLogId: number;
 }
 
-export const LIMITS = { observations: 60, decisions: 200, events: 400 } as const;
+export const LIMITS = { observations: 60, decisions: 200, events: 400, feed: 100 } as const;

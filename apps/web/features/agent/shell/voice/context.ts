@@ -3,20 +3,36 @@ import type { ScreenObservation } from '@apprentice/contracts';
 
 const MAX_QUESTION_CHARS = 400;
 
+const AUDIO_TAG = /\[[^\]]+\]/g;
+
+/** Text without bracketed audio tags ("[warmly]", "[pause]"): what was really said, for comparing and for the record. */
+export function stripAudioTags(text: string): string {
+  return text.replace(AUDIO_TAG, ' ').replace(/\s+/g, ' ').trim();
+}
+
 /**
- * The live agent says what follows [ASK] verbatim and otherwise calls skip_turn. The live model is flash_v2,
- * which would read intonation tags aloud, so no audio tags are added here (they come with a model that
- * understands them).
+ * The live agents (interviewer and tutor, v4 turbo) say what follows [ASK] verbatim and otherwise call skip_turn. v4 turbo would
+ * perform a bracketed audio tag, so none reaches an [ASK] line by accident: the question text is stripped of them.
  */
 export function askMessage(text: string): string {
-  const clean = text.replace(/\s+/g, ' ').trim().replace(/^\[ASK\]\s*/i, '').slice(0, MAX_QUESTION_CHARS);
+  const clean = stripAudioTags(text.replace(/^\s*\[ASK\]\s*/i, '')).slice(0, MAX_QUESTION_CHARS);
   return `[ASK] ${clean}`;
 }
 
 const show = (value: string | null, fallback: string): string => (value === null || value === '' ? fallback : value);
 
-/** One neutral sentence per observation, for sendContextualUpdate. Heartbeats are not sent (they would flood the agent). */
-export function observationToContext(o: ScreenObservation): string | null {
+export const SYNTHETIC_TAG = '(synthetic sample)';
+
+/**
+ * One neutral sentence per observation, for sendContextualUpdate. Heartbeats are not sent (they would flood the agent). A line from
+ * the sample source says so: the voice agent must never take invented data for the person's screen.
+ */
+export function observationToContext(o: ScreenObservation, synthetic = false): string | null {
+  const line = plainContext(o);
+  return line !== null && synthetic ? line.replace(/^\[screen\] /, `[screen] ${SYNTHETIC_TAG} `) : line;
+}
+
+function plainContext(o: ScreenObservation): string | null {
   switch (o.kind) {
     case 'order_view': {
       const f = o.facts;

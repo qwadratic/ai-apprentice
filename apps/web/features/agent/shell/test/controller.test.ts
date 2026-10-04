@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { BrainDecision } from '../brain/types.ts';
-import { ASK_AUDIO_TIMEOUT_MS, PERSONA_STORAGE_KEY, parseMode, parsePersona } from '../controller.ts';
+import { ASK_AUDIO_TIMEOUT_MS, PERSONA_STORAGE_KEY, parseMode, parsePersona, voiceRoleFor } from '../controller.ts';
+import { askMessage, stripAudioTags } from '../voice/context.ts';
 import { SESSION_LIMIT_MS } from '../session-clock.ts';
 import type { RecordedRequest } from './helpers.ts';
 import { ScriptedBrain, TOKEN, createRig, json, legacyApi, modernApi, must, settle } from './helpers.ts';
@@ -108,9 +109,9 @@ test('sample observations: buffered while the voice connects, then sent as conte
   assert.equal(rig.voice.contexts.length, 0, 'nothing is sent before the voice is connected');
   must(rig.voice.events).onConnect('conv_test_1');
   assert.ok(rig.voice.contexts.length >= 2);
-  assert.match(must(rig.voice.contexts[0]), /^\[screen\] Order SYN-101/);
+  assert.match(must(rig.voice.contexts[0]), /^\[screen\] \(synthetic sample\) Order SYN-101/);
   rig.timers.advance(3000);
-  assert.ok(rig.voice.contexts.some((c) => c.startsWith('[screen] Email draft')));
+  assert.ok(rig.voice.contexts.some((c) => c.startsWith('[screen] (synthetic sample) Email draft')));
   assert.ok(rig.voice.contexts.every((c) => !c.includes('Synthetic delivery')), 'no typed text is sent');
   const s = rig.controller.store.getState();
   assert.equal(s.screen.source?.synthetic, true);
@@ -131,12 +132,12 @@ test('context buffered while the voice connects survives the SDK firing connecte
   await starting;
   assert.equal(rig.controller.store.getState().voice.phase, 'listening');
   assert.equal(rig.voice.contexts.length, 2, 'the first buffered observation is not dropped');
-  assert.match(must(rig.voice.contexts[0]), /^\[screen\] Order SYN-101/);
-  assert.match(must(rig.voice.contexts[1]), /^\[screen\] Email draft/);
+  assert.match(must(rig.voice.contexts[0]), /^\[screen\] \(synthetic sample\) Order SYN-101/);
+  assert.match(must(rig.voice.contexts[1]), /^\[screen\] \(synthetic sample\) Email draft/);
   assert.ok(!rig.controller.store.getState().events.some((e) => /Screen context is not sent/.test(e.text)), 'no false "not sent" note');
   // Later observations go straight through.
   rig.timers.advance(2000);
-  assert.ok(rig.voice.contexts.some((c) => c.startsWith('[screen] Ticket')));
+  assert.ok(rig.voice.contexts.some((c) => c.startsWith('[screen] (synthetic sample) Ticket')));
 });
 
 test('a context that really cannot be sent is noted again after the voice was usable', async () => {
@@ -305,7 +306,7 @@ test('the brain tick receives the signals of the shell', async () => {
   await rig.controller.start('learn');
   rig.timers.advance(500);
   assert.deepEqual(seen[0], {
-    sessionId: 'sess-1', mode: 'learn', persona: 'quiet', offRecord: false, voiceConnected: true, agentSpeaking: false, asked: 0,
+    sessionId: 'sess-1', mode: 'learn', persona: 'quiet', offRecord: false, voiceConnected: true, agentSpeaking: false, humanSpeaking: false, asked: 0,
   });
 });
 
@@ -407,7 +408,7 @@ test('a voice that drops on its own ends the session and says so', async () => {
   assert.match(s.banner?.text ?? '', /Voice disconnected \(agent hung up\)/);
 });
 
-test('switching modes keeps the live session, its feed and its voice', async () => {
+test('switching between modes of the same voice agent (Learn, Review) keeps the live session, its feed and its voice', async () => {
   const brain = new ScriptedBrain();
   const rig = createRig({ brain });
   await rig.controller.start('learn');
@@ -415,7 +416,6 @@ test('switching modes keeps the live session, its feed and its voice', async () 
   rig.timers.advance(500);
   const before = rig.controller.store.getState();
   rig.controller.setMode('review');
-  rig.controller.setMode('teach');
   rig.controller.setMode('learn');
   const after = rig.controller.store.getState();
   assert.equal(after.session, before.session);
@@ -553,4 +553,40 @@ test('no token or signed URL ever reaches the visible log or the uploaded lines'
   assert.ok(!visible.includes('wss://'));
   assert.ok(!uploaded(rig.calls).join('\n').includes('wss://'));
   assert.ok(!JSON.stringify(rig.controller.store.getState()).includes(TOKEN), 'the token is not in the shell state');
+});
+
+test('voice roles: Learn and Review talk to the interviewer, Teach requests role=tutor', async () => {
+  assert.equal(voiceRoleFor('learn'), 'interviewer');
+  assert.equal(voiceRoleFor('review'), 'interviewer');
+  assert.equal(voiceRoleFor('teach'), 'tutor');
+  const rig = createRig();
+  await rig.controller.start('teach');
+  const signed = must(rig.calls.find((c) => c.url.includes('/signed-url')));
+  assert.match(signed.url, /[?&]role=tutor$/);
+  await rig.controller.end();
+});
+
+test('switching from a live Review to Teach ends the interviewer session and starts a tutor session', async () => {
+  const rig = createRig();
+  await rig.controller.start('review');
+  assert.match(must(rig.calls.find((c) => c.url.includes('/signed-url'))).url, /role=interviewer$/);
+  const first = must(rig.controller.store.getState().session).id;
+  rig.controller.setMode('teach');
+  await settle();
+  await settle();
+  const s = rig.controller.store.getState();
+  assert.equal(s.phase, 'live');
+  assert.equal(must(s.session).mode, 'teach');
+  const roles = rig.calls.filter((c) => c.url.includes('/signed-url')).map((c) => /role=(\w+)/.exec(c.url)?.[1]);
+  assert.deepEqual(roles, ['interviewer', 'tutor']);
+  assert.ok(s.events.some((e) => e.text.includes('Review ended')), `the Review session (${first}) was ended`);
+  // Switching back to Learn only ends the tutor session: a new Learn map is the person's choice.
+  rig.controller.setMode('learn');
+  await settle();
+  assert.notEqual(rig.controller.store.getState().phase, 'live');
+});
+
+test('audio tags never reach an [ASK] line or a transcript', () => {
+  assert.equal(askMessage('[warmly] Why did you type the address? [pause]'), '[ASK] Why did you type the address?');
+  assert.equal(stripAudioTags('[laughs] Because customer_07 asked [sighs] for text.'), 'Because customer_07 asked for text.');
 });

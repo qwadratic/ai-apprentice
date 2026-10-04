@@ -16,6 +16,8 @@ export interface VoiceEvents {
   onMode(mode: VoiceMode): void;
   onMessage(message: VoiceMessage): void;
   onError(message: string): void;
+  /** Voice activity of the person's microphone, 0 to 1, while the conversation is open. Optional: not every connector reports it. */
+  onVadScore?(score: number): void;
 }
 
 export interface VoiceHandle {

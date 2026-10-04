@@ -67,7 +67,7 @@ export function SessionControls() {
         <span>
           <strong>Use sample observations</strong> <span className="as-tag as-tag--warn">synthetic</span>
           <span className="as-switch__hint">
-            Invented screen events instead of your screen: a stand-in until stream A&apos;s vision is wired.
+            Invented screen events instead of your screen: the fallback that runs until you share a window in the Screen panel.
             {mode === 'review' ? ' Review does not use the screen.' : ''}
           </span>
         </span>
