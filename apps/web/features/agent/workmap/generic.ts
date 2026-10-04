@@ -8,12 +8,20 @@ import type { Question, WorkMap } from './model.ts';
 
 export interface GenericComment { targetId: string; text: string; atMs: number }
 
+/** One business process of the map with the ids of its steps and rules, in map order. */
+export interface GenericProcess { id: string; title: string; stepIds: string[]; guardrailIds: string[] }
+
 export interface GenericBoard {
   map: WorkMap;
   /** The open gaps as the board's follow-ups; their ids are the conductor's (`gap-1`, `gap-2`, ...). */
   gaps: Question[];
   teachBack: string | null;
   comments: GenericComment[];
+  /**
+   * The processes the map names (map_synthesis, at most 3), each with its steps and rules; a step or rule that names no known
+   * process belongs to the first one. Empty unless the map names two or more, so a one-process map renders as before.
+   */
+  processes: GenericProcess[];
 }
 
 type Rec = Record<string, unknown>;
@@ -121,5 +129,29 @@ export function fromGenericMap(
     unknowns: [],
     answered: [],
   };
-  return { map, gaps, teachBack: str(raw.teachBack, 4000), comments };
+  return { map, gaps, teachBack: str(raw.teachBack, 4000), comments, processes: processesOf(raw, steps, guardrails) };
+}
+
+/** Groups the steps and rules by the map's processes; malformed or repeated process entries are ignored. */
+function processesOf(raw: Rec, steps: ReadonlyArray<{ id: string }>, guardrails: ReadonlyArray<{ id: string }>): GenericProcess[] {
+  const out: GenericProcess[] = [];
+  for (const p of list(raw.processes).filter(isRec)) {
+    const id = str(p.id, 64);
+    const title = str(p.title, 120);
+    if (id !== null && title !== null && !out.some((o) => o.id === id)) out.push({ id, title, stepIds: [], guardrailIds: [] });
+  }
+  const first = out[0];
+  if (out.length < 2 || first === undefined) return [];
+  if (out.length > 3) out.length = 3;
+  // Same filter as the steps and rules above, so index i is the same item.
+  const home = (v: unknown): GenericProcess => out.find((o) => o.id === str(v, 64)) ?? first;
+  list(raw.steps).filter(isRec).forEach((s, i) => {
+    const step = steps[i];
+    if (step) home(s.processId).stepIds.push(step.id);
+  });
+  list(raw.guardrails).filter(isRec).forEach((g, i) => {
+    const rule = guardrails[i];
+    if (rule) home(g.processId).guardrailIds.push(rule.id);
+  });
+  return out;
 }
