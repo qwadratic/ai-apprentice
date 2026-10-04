@@ -139,8 +139,9 @@ test('a failed question route falls back to a plain question about the latest ch
 });
 
 const MAP = {
-  steps: [{ id: 's1', kind: 'judgment', goal: 'Keep the budget', action: 'Lowered it to 300', decision: { summary: 'Keep 300', reason: 'sign-off above', quote: 'above 300 the lead signs', quoteAtMs: 5 }, evidenceIds: ['o2'] }],
-  guardrails: [{ id: 'g1', condition: 'budget above 300', requiredAction: 'ask the lead', reason: 'sign-off', quote: 'above 300 the lead signs', quoteAtMs: 5, escalateTo: 'the lead', exceptions: [], evidenceIds: ['o2'] }],
+  processes: [{ id: 'p1', title: 'Budget update', summary: 'Keeps the budget in bounds.' }],
+  steps: [{ id: 's1', processId: 'p1', kind: 'judgment', goal: 'Keep the budget', action: 'Lowered it to 300', decision: { summary: 'Keep 300', reason: 'sign-off above', quote: 'above 300 the lead signs', quoteAtMs: 5 }, evidenceIds: ['o2'] }],
+  guardrails: [{ id: 'g1', processId: 'p1', condition: 'budget above 300', requiredAction: 'ask the lead', reason: 'sign-off', quote: 'above 300 the lead signs', quoteAtMs: 5, escalateTo: 'the lead', exceptions: [], evidenceIds: ['o2'] }],
   gaps: [{ question: 'Who is the lead?', targetId: 'g1', evidenceIds: ['o2'], regionIds: ['r-to'] }],
   teachBack: 'You keep the budget at 300 and ask the lead above it. Is this right?',
 };
@@ -226,6 +227,114 @@ test('Teach: a pending action is checked fast, and the warning names the expert\
   await r.send({ type: 'cue_done', cueId: of(r.cues, 'warn')[0]!.cueId, outcome: 'spoken' });
   await r.advance(RULES.teachCheckGapMs + RULES.pauseMs);
   assert.equal(of(r.cues, 'warn').length, 1, 'no repeat on the same screen');
+});
+
+test('Show ends: the map is built in the background, so Reflect opens with it ready; a failed build is built again on Reflect', async () => {
+  const r = rig({ map_synthesis: () => ok(MAP) });
+  await r.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', null), obs('o2', 'Changed.'));
+  await r.send({ type: 'session', mode: 'learn', live: false, reason: 'user' });
+  assert.deepEqual(r.calls.map((c) => c.task), ['map_synthesis'], 'built as soon as Show ends');
+  assert.equal(of(r.cues, 'map').length, 0, 'not shown before Reflect');
+  await r.send({ type: 'session', mode: 'review', live: true, reason: null });
+  assert.equal(r.calls.length, 1, 'Reflect uses the map built in the background');
+  assert.equal(of(r.cues, 'map').length, 1);
+  assert.equal(cueOf(r.cues, 'guide').at(-1)?.step, 'gaps');
+
+  // The background build throws (a crash on a live server if it went unhandled): Reflect builds the map itself.
+  let attempt = 0;
+  const f = rig({ map_synthesis: () => { attempt++; if (attempt === 1) throw new Error('runner down'); return ok(MAP); } });
+  await f.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', 'Changed.'));
+  await f.send({ type: 'session', mode: 'learn', live: false, reason: 'user' });
+  await f.send({ type: 'session', mode: 'review', live: true, reason: null });
+  assert.deepEqual(f.calls.map((c) => c.task), ['map_synthesis', 'map_synthesis']);
+  assert.equal(of(f.cues, 'map').length, 1);
+});
+
+test('Review asks at most two open points, then reads the teach-back', async () => {
+  const gaps = ['Who is the lead?', 'Is 300 a hard limit?', 'Who decides above it?'].map((question) => ({ question, targetId: null, evidenceIds: [], regionIds: [] }));
+  const r = rig({ map_synthesis: () => ok({ ...MAP, gaps }), map_edit: () => ok(NO_EDIT) });
+  await r.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', 'Changed.'));
+  await r.send({ type: 'session', mode: 'learn', live: false, reason: 'user' }, { type: 'session', mode: 'review', live: true, reason: null });
+  for (const answer of ['The team lead.', 'Yes, hard.']) {
+    await r.advance(RULES.pauseMs + RULES.gapAfterAnswerMs);
+    await r.send({ type: 'transcript', role: 'expert', text: answer });
+  }
+  await r.advance(RULES.pauseMs + RULES.gapAfterAnswerMs);
+  assert.deepEqual(cueOf(r.cues, 'ask').map((a) => a.text), ['Who is the lead?', 'Is 300 a hard limit?']);
+  assert.equal(of(r.cues, 'teachback').length, 1);
+});
+
+const TWO = {
+  processes: [{ id: 'p1', title: 'Budget update', summary: 'Keeps the budget in bounds.' }, { id: 'p2', title: 'Supplier check', summary: 'Checks a new supplier.' }],
+  steps: [MAP.steps[0], { id: 's2', processId: 'p2', kind: 'action', goal: 'Check the supplier', action: 'Opened the contract', decision: null, evidenceIds: ['o3'] }],
+  guardrails: [MAP.guardrails[0], { id: 'g2', processId: 'p2', condition: 'a new supplier', requiredAction: 'check the contract first', reason: null, quote: null, quoteAtMs: null, escalateTo: null, exceptions: [], evidenceIds: ['o3'] },
+    { id: 'g3', processId: null, condition: 'an unclear case', requiredAction: 'ask the expert', reason: null, quote: null, quoteAtMs: null, escalateTo: null, exceptions: [], evidenceIds: [] }],
+  gaps: [],
+  teachBack: 'Two tasks. Is this right?',
+};
+
+test('the library lists every learned process; a rule that names no process is kept with the first one', () => {
+  const maps = new MapRegistry();
+  maps.confirm('older', MAP as never, 1);
+  maps.confirm('expert-session', TWO as never, 2);
+  const lib = maps.library('expert-session');
+  assert.deepEqual(lib.map((p) => [p.key, p.title, p.steps, p.rules.map((x) => x.id)]), [
+    ['m1-p1', 'Budget update', ['Lowered it to 300'], ['g1', 'g3']],
+    ['m1-p2', 'Supplier check', ['Opened the contract'], ['g2']],
+    ['m2-p1', 'Budget update', ['Lowered it to 300'], ['m2-g1']],
+  ]);
+  // A map from before processes existed is one process named after its first step.
+  const old = new MapRegistry();
+  old.confirm('s', { ...MAP, processes: undefined, steps: [{ ...MAP.steps[0], processId: undefined }] } as never, 1);
+  assert.deepEqual(old.library().map((p) => [p.title, p.rules.length]), [['Keep the budget', 1]]);
+});
+
+test('Pass it on: Clipa recognises the process on screen, says so at a pause, and checks its rules first', async () => {
+  const maps = new MapRegistry();
+  maps.confirm('expert-session', TWO as never, 1);
+  const r = rig({
+    process_match: () => ok({ processId: 'm1-p2', confidence: 0.9 }),
+    guardrail_check: () => ok({ status: 'clear', guardrailId: null, message: null, regionIds: [] }),
+  }, maps, 'hire-1');
+  await r.send(hello('web', 'new_hire', 'expert-session'), { type: 'session', mode: 'teach', live: true, reason: null });
+  await r.send(obs('n1', 'A contract is open.'));
+  await r.advance(RULES.settleMs + 10);
+  assert.equal(r.calls.at(-1)?.task, 'process_match');
+  const offered = r.calls.at(-1)?.body.processes as Array<{ id: string; title: string }>;
+  assert.deepEqual(offered.map((p) => [p.id, p.title]), [['m1-p1', 'Budget update'], ['m1-p2', 'Supplier check']]);
+  assert.equal(of(r.cues, 'say').length, 0, 'never while the person works');
+  await r.advance(RULES.pauseMs);
+  assert.equal(cueOf(r.cues, 'say').at(-1)?.text, 'This is Supplier check. I will step in if one of the expert\'s rules applies.');
+  await r.advance(RULES.teachCheckGapMs);
+  const checked = r.calls.filter((c) => c.task === 'guardrail_check').at(-1)?.body.guardrails as Array<{ id: string; condition: string }>;
+  assert.deepEqual(checked.map((g) => g.id), ['g2', 'g1', 'g3'], 'the recognised process first');
+  assert.equal(checked[0]?.condition, '[Supplier check] a new supplier');
+  await r.send(obs('n2', 'The same contract, scrolled.'));
+  await r.advance(RULES.pauseMs + 10);
+  assert.equal(r.calls.filter((c) => c.task === 'process_match').length, 1, 'the same app and surface is not recognised again');
+});
+
+test('process_match failing or unsure is silent; Learn with a known process asks only about what is different', async () => {
+  const maps = new MapRegistry();
+  maps.confirm('expert-session', TWO as never, 1);
+  for (const answer of [(): TaskResult => { throw new Error('runner down'); }, (): TaskResult => ({ ok: false, error: 'runner_timeout' }), (): TaskResult => ok({ processId: 'm1-p1', confidence: 0.4 })]) {
+    const r = rig({ process_match: answer }, maps, 'hire-x');
+    await r.send(hello('web', 'new_hire', 'expert-session'), { type: 'session', mode: 'teach', live: true, reason: null }, obs('n1', 'Opened.'));
+    await r.advance(RULES.settleMs + 10);
+    await r.advance(RULES.pauseMs);
+    assert.equal(of(r.cues, 'say').length, 0);
+    assert.equal(r.calls.filter((c) => c.task === 'process_match').length, 1);
+  }
+  const l = rig({ process_match: () => ok({ processId: 'm1-p1', confidence: 0.9 }), generic_question: () => ok(QUESTION) }, maps, 'expert-2');
+  await l.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', null), obs('o2', 'The recipient changed.'));
+  await l.advance(RULES.settleMs + 10);
+  assert.equal(l.calls.at(-1)?.task, 'process_match');
+  await l.advance(RULES.pauseMs);
+  assert.equal(cueOf(l.cues, 'say').at(-1)?.text, 'I know this one: Budget update. I will only ask about what is different.');
+  await l.advance(RULES.settleMs + 10);
+  const question = l.calls.find((c) => c.task === 'generic_question');
+  const transcript = question?.body.transcript as Array<{ role: string; text: string }>;
+  assert.match(transcript[0]?.text ?? '', /^\[known process from an earlier session\] Budget update\./);
 });
 
 test('Teach without a confirmed map says so', async () => {
