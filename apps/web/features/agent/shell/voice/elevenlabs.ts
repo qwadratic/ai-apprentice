@@ -1,0 +1,36 @@
+// The real connector, ported from the agent lab (apps/web/features/agent/lab/src/lab.ts). The SDK is loaded on
+// first use so that the first paint does not wait for it (and it stays out of the entry chunk).
+import type { VoiceConnector, VoiceMode } from './types.ts';
+
+function messageOf(value: unknown): string {
+  if (typeof value === 'string') return value;
+  try { return JSON.stringify(value); } catch { return String(value); }
+}
+
+export const connectElevenLabs: VoiceConnector = async (signedUrl, events) => {
+  const { Conversation } = await import('@elevenlabs/client');
+  const conversation = await Conversation.startSession({
+    signedUrl,
+    onConnect: (props) => { events.onConnect(props?.conversationId ?? ''); },
+    onDisconnect: (details) => {
+      const reason = details && typeof details === 'object' && 'reason' in details ? String(details.reason) : '';
+      events.onDisconnect(reason);
+    },
+    onStatusChange: ({ status }) => { events.onStatus(status); },
+    onModeChange: ({ mode }) => { events.onMode(mode as VoiceMode); },
+    onMessage: (m) => { events.onMessage({ source: m.source === 'ai' ? 'ai' : 'user', text: m.message }); },
+    onError: (message, context) => {
+      events.onError(messageOf(message));
+      if (context) events.onError(messageOf(context));
+    },
+  });
+  return {
+    // onConnect delivers the id; getId() (BaseConversation, SDK 1.26.0) is the fallback.
+    conversationId: () => {
+      try { return conversation.getId() || ''; } catch { return ''; }
+    },
+    sendContextualUpdate: (text) => { conversation.sendContextualUpdate(text); },
+    sendUserMessage: (text) => { conversation.sendUserMessage(text); },
+    end: async () => { await conversation.endSession(); },
+  };
+};
