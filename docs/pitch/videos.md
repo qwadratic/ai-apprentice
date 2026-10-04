@@ -11,7 +11,7 @@ Both are 1920x1080, H.264 with an AAC track, rendered with the Remotion toolkit 
 
 ## How they were made
 
-1. **Product capture.** `video/recorder/journey.ts` drives the live web app (https://qwadratic.github.io/clipa/) in headless Chromium against the live API (https://apprentice.exe.xyz) and films it through Chrome's screencast, in one take: Start Show, the expert's typing in the demo workspace, End Show, Reflect with its Work Map, the open point, the teach-back, a correction and Confirm, then Pass it on with a new case, the fix, the allow case and Off the record. The rail clip comes from `video/recorder/walkthroughs/ui-tour.json`.
+1. **Product capture.** `video/recorder/journey.ts` drives the live web app (https://qwadratic.github.io/clipa/) in headless Chromium against the live API (https://apprentice.exe.xyz) and films it through Chrome's screencast, in one take: Start Show, the expert's typing in the demo workspace, End Show, Reflect with its Work Map, the open point, the teach-back, a correction and Confirm, then Pass it on with a new case, the fix, the allow case and Off the record. The rail clip comes from `video/recorder/walkthroughs/ui-tour.json`, recorded earlier the same morning, before the header moved Off the record into its More menu.
 2. **Storyboards.** `video/capture/build-storyboards.mjs` writes `video/scripts/demo.json` and sets the clip times in `video/scripts/tech.json` from the take's markers (`assets/recordings/journey.json`). Every Clipa line quoted in a caption is copied from the cues the API sent during the take (`journey.cues.json`).
 3. **Render.** `npm run render -- Sample --script scripts/demo.json --out out/clipa-demo.mp4`, the same for `tech.json`.
 4. **Web-ready file.** `bash capture/finalize.sh out/clipa-demo.mp4 ../apps/web/public/videos/clipa-demo.mp4` re-encodes to H.264 with faststart and adds a silent AAC track.
@@ -31,7 +31,7 @@ Simulated, and labelled on screen ("Simulated input: screen events and answers p
 
 The videos keep the honesty lines: Clipa warns and never clicks or blocks another app; Off the record stops the screen and the voice and does not recall what was already sent; masks protect the screen, not speech.
 
-The takes left confirmed customer_07 maps in the API's memory (the process library). A restart of the API clears them (`sudo systemctl restart apprentice-api`, as `demo-script.md` says before a live take).
+The takes confirmed synthetic customer_07 maps on the live API (the process library). Clear them before a live take as `demo-script.md` says (remove `/var/lib/apprentice/maps.json`, then restart the API).
 
 ## Replace a file
 

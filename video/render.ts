@@ -132,6 +132,8 @@ const main = async (): Promise<void> => {
     imageFormat: values['image-format'] === 'jpeg' ? ('jpeg' as const) : ('png' as const),
     jpegQuality: 95,
     concurrency: values.concurrency ? Number(values.concurrency) : null,
+    // Long product clips played fast need more than the default 30 s for a frame on a busy 4-core machine.
+    timeoutInMilliseconds: 180_000,
     overwrite: true,
     onProgress: ({ progress }) => {
       const pct = Math.floor(progress * 10) * 10;
