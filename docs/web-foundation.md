@@ -193,8 +193,10 @@ missing module is live. The minimal shared API files are `server.ts`, `src/app.t
 ## Verified results
 
 - Node 22.22.0 and Node 24.19.0 / npm 10.9.4: integrated `npm run check`
-  passed under TypeScript 7.0.2: 55 agent + 20 contract + 3 API tests, every
-  workspace typecheck, and contracts/API/web production builds.
+  passed under TypeScript 7.0.2: 55 agent + 20 contract + 3 API foundation tests,
+  plus 51 existing capture/vision/screen API tests (50 passed, optional Chromium
+  test skipped without Playwright), every workspace typecheck, and
+  contracts/API/web production builds.
 - Clean root `npm ci --ignore-scripts --no-audit --no-fund` installed one shared
   TypeScript 7.0.2 and included `@apprentice/agent` from the root lockfile.
 - `npm run dev`: both servers started. Final B-aligned UI verified start, pause
