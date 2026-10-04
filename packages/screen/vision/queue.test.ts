@@ -68,6 +68,24 @@ test('identical processed pixels can be acquired separately for order and email 
   assert.deepEqual(h.calls.map(call => call.surface), ['order', 'email']);
   h.calls[0]?.resolve({visible: 'order'}); h.calls[1]?.resolve({visible: 'email'}); await tick();
 });
+test('a displaced pending surface can reacquire the same pixels without weakening duplicate suppression', async () => {
+  const h = setup();
+  assert.equal(h.queue.offer(h.frame(1, 'active'), {surface: 'ticket'}), 'accepted');
+  assert.equal(h.queue.offer(h.frame(2, 'email-old'), {surface: 'email'}), 'accepted');
+  assert.equal(h.queue.offer(h.frame(3, 'email-current'), {surface: 'email'}), 'accepted');
+  assert.equal(h.queue.offer(h.frame(4, 'email-current'), {surface: 'email'}), 'duplicate',
+    'same-surface replacement must retain the new pending digest');
+  assert.equal(h.queue.offer(h.frame(5, 'order-current'), {surface: 'order'}), 'accepted');
+  assert.equal(h.queue.offer(h.frame(6, 'email-current'), {surface: 'email'}), 'accepted',
+    'an email displaced by another surface must be eligible again');
+
+  h.calls[0]?.resolve({visible: 'active'}); await tick();
+  assert.equal(h.calls[1]?.frame.frameId, 'f6');
+  h.calls[1]?.resolve({visible: 'email'}); await tick();
+  assert.deepEqual(h.published.map(value => value.frameId), ['f1', 'f6']);
+  assert.equal(h.queue.offer(h.frame(7, 'email-current'), {surface: 'email'}), 'duplicate',
+    'a genuinely processed duplicate must remain suppressed');
+});
 test('pause cancels active work, clears pending work and rejects late results', async () => {
   const h = setup(); h.queue.offer(h.frame(1)); h.queue.offer(h.frame(2)); h.queue.pause();
   assert.equal(h.calls[0]?.signal.aborted, true); assert.equal(h.queue.snapshot().queued, 0);

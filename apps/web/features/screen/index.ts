@@ -4,4 +4,7 @@ export type {
   ScreenPanelOptions,
 } from './ScreenPanel/index.js';
 export {createScreenBridgeRuntime as createScreenBridge} from '../../../../packages/screen/bridge/index.js';
-export type {ScreenBridgeRuntime, ScreenBridgeRuntimeOptions} from '../../../../packages/screen/bridge/index.js';
+export type {
+  CurrentObservationRequest, ScreenBridgeRuntime, ScreenBridgeRuntimeOptions, ScreenWorkspaceRuntime,
+  WorkspaceActivity, WorkspaceRevisions, WorkspaceScope,
+} from '../../../../packages/screen/bridge/index.js';

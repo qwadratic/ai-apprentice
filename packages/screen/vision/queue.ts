@@ -149,6 +149,13 @@ export class VisionQueue<TFrame extends VisionFrame, TResult extends object,
     const frameDigest = this.#fingerprint(frame); if (!frameDigest) return 'invalid';
     const surfaceKey = surface ?? 'auto';
     if (frameDigest === this.#lastFingerprints.get(surfaceKey)) return 'duplicate';
+    const displaced = this.#pending;
+    if (displaced) {
+      const displacedSurfaceKey = displaced.surface ?? 'auto';
+      if (this.#lastFingerprints.get(displacedSurfaceKey) === displaced.fingerprint) {
+        this.#lastFingerprints.delete(displacedSurfaceKey);
+      }
+    }
     const receivedAt = this.#now(); this.#lastFingerprints.set(surfaceKey, frameDigest); this.#lastAcceptedAt = receivedAt;
     this.#pending = {frame, ordinal: ++this.#ordinal, generation: this.#generation,
       capturedAt: this.#session.sessionEpochMs + frame.timestampMs, receivedAt, fingerprint: frameDigest,
