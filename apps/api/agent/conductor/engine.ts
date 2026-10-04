@@ -858,7 +858,8 @@ export class Conductor {
     this.prefetch = entry;
     this.pose('think');
     const latest = [...this.observations].reverse().find((o) => o.kind !== 'input_activity' && this.contextObservationIds.has(o.id));
-    this.thought(latest?.change ? `Hmm… ${latest.change}` : `Hmm… what happens on ${latest?.surface ?? 'this screen'}?`);
+    const change = latest?.change ?? null;
+    this.thought(change ? `Hmm… ${change.charAt(0).toLowerCase()}${change.slice(1)}` : `Hmm… what happens on ${latest?.surface ?? 'this screen'}?`);
     const out = await this.run<GenericQuestionOutput>('generic_question', {
       observations, transcript: [...this.knownContext(), ...this.transcript(this.recognized ? 15 : 16, 1000, true)], baselineContext: baselinePromptContext(this.baseline.current()), asked: this.contextAskedTexts.slice(-20).map((a) => a.slice(0, 300)), language: this.language,
     });
@@ -1094,8 +1095,9 @@ export class Conductor {
     const guardrails = rules.slice(0, 10).map((g) => ({
       id: g.id, condition: g.condition.slice(0, 300), requiredAction: g.requiredAction.slice(0, 300), reason: g.reason?.slice(0, 400) ?? null, quote: g.quote?.slice(0, 600) ?? null,
     }));
-    const first = guardrails[0];
-    if (first) this.thought(`Checking: ${first.condition}…`);
+    // The rule as the expert put it, without the process name teachRules() puts in front.
+    const first = guardrails[0]?.condition.replace(/^\[[^\]]*\]\s*/, '');
+    if (first) this.thought(`Checking: ${first}…`);
     this.pose('think');
     const out = await this.run<GuardrailCheckOutput>('guardrail_check', { guardrails, observations, transcript: this.transcript(8, 1000, true), language: this.language });
     if (this.offRecord || this.liveMode !== 'teach') return;

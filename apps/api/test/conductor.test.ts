@@ -608,7 +608,7 @@ test('thoughts: the map being built, a recognised process and a guardrail check'
   assert.ok(cueOf(t.cues, 'thought').some((x) => x.text === 'This looks like Supplier check'));
   await t.advance(RULES.teachCheckGapMs);
   await t.advance(RULES.thoughtGapMs);
-  assert.ok(cueOf(t.cues, 'thought').some((x) => x.text.startsWith('Checking: [Supplier check] a new supplier')));
+  assert.ok(cueOf(t.cues, 'thought').some((x) => x.text.startsWith('Checking: a new supplier')));
   const poses = cueOf(t.cues, 'state').map((s) => s.clipa);
   assert.ok(poses.includes('think') && poses.at(-1) === 'listen', 'think while a model task works, then listen');
 });
