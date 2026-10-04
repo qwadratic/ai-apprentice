@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@qwadratic'
 created_date: '2026-10-04 06:07'
-updated_date: '2026-10-04 06:42'
+updated_date: '2026-10-04 08:17'
 labels:
   - stream-b
 dependencies: []
@@ -22,8 +22,8 @@ Ivan, 4 Oct 06:25 UTC: no full playtest on many scenarios. Give Ivan a choice of
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 A doc with 2-3 scenarios, timings and exact lines, with a recommendation
-- [ ] #2 Each scenario has a language-switch moment
+- [x] #1 A doc with 2-3 scenarios, timings and exact lines, with a recommendation
+- [x] #2 Each scenario has a language-switch moment
 <!-- AC:END -->
 
 ## Definition of Done
@@ -32,3 +32,9 @@ Ivan, 4 Oct 06:25 UTC: no full playtest on many scenarios. Give Ivan a choice of
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+4 Oct 08:16 UTC: docs/demo-options.md merged (PR #66): A real Gmail + Sheets (stream A's DEMO-REAL-3 cases 1-2), B customer_07 workspace, C hybrid; exact lines, timings, a language switch each, a recommendation and a pre-flight list.
+<!-- SECTION:NOTES:END -->

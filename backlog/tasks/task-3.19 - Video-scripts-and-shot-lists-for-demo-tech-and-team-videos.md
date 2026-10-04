@@ -4,6 +4,7 @@ title: 'Video scripts and shot lists for demo, tech and team videos'
 status: To Do
 assignee: []
 created_date: '2026-10-03 21:11'
+updated_date: '2026-10-04 08:17'
 labels:
   - stream-b
   - pitch
@@ -37,3 +38,9 @@ Estimate: about 1 h of agent time. Card key: B-video-scripts.
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+4 Oct 08:16 UTC: docs/pitch/video-demo.md (product walkthrough, 2:00 + 60 s cut) and docs/pitch/video-tech.md (technical walkthrough with a Mermaid architecture diagram) merged in PR #66. Still open: the team video outline, the length rules from Discord, a rendered diagram image.
+<!-- SECTION:NOTES:END -->
