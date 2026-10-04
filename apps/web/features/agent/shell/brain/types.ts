@@ -161,7 +161,8 @@ export interface Brain {
   tick(nowMs: number, signals?: BrainSignals): BrainDecision[];
   /** The answer may be read by a model, so it can be asynchronous; the map is refreshed when it settles. */
   onAnswer(a: AnswerInput): AnswerResult | void | Promise<AnswerResult | void>;
-  review(): ReviewOutput;
+  /** `shown`: the teach-back is on the person's screen, so the brain counts it as stated (a confirmation counts only for what was stated). */
+  review(shown?: boolean): ReviewOutput;
   /** Teach: the reply goes back to the workspace. Never answer `clear` without a confirmed rule. */
   checkpoint(c: ActionCheckpoint): CheckpointReply | Promise<CheckpointReply>;
 }

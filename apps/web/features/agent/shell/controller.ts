@@ -870,7 +870,9 @@ export class ShellController {
 
   /** Asks the brain for the draft map, the gaps and the teach-back. */
   loadReview(): void {
-    const review = this.safe('review', () => this.brain.review(), null);
+    // On the Review view the teach-back text is on screen: that counts as stating it, like speaking it (the confirmation gate).
+    const shown = this.state.mode === 'review';
+    const review = this.safe('review', () => this.brain.review(shown), null);
     if (!review) return;
     this.store.dispatch({ type: 'MAP_SET', map: review.map });
     this.store.dispatch({

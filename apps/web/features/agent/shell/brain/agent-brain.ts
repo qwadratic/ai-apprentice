@@ -9,9 +9,9 @@
 import type { ActionCheckpoint, CheckpointReply, ScreenObservation, ScreenStatus } from '@apprentice/contracts';
 import {
   ConversationPolicy, HeuristicAnswerExtractor, HeuristicReplyClassifier, LlmAnswerExtractor, LlmEntityResolver, LlmReplyClassifier,
-  MAX_FOLLOW_UPS, ReviewClarifier, applyTeachBackReply, buildPrediction, buildTeachBack, checkpoint as judgeCheckpoint, createMapState,
-  evaluatePrediction, knownCustomerRefs, latestConfirmed, planFollowUps, pressReviewButton, reduceMap, reviewStatus, summarizeMastery,
-  workingMap,
+  MAX_FOLLOW_UPS, ReviewClarifier, applyTeachBackReply, buildPrediction, checkpoint as judgeCheckpoint, createMapState,
+  evaluatePrediction, knownCustomerRefs, labelFacts, latestConfirmed, planFollowUps, pressReviewButton, reduceMap, reviewStatus, stateTeachBack,
+  summarizeMastery, workingMap,
 } from '@apprentice/agent';
 import type {
   AnswerExtractor, BrainDecision as PolicyDecision, CaseOutcome, MapState, Prediction, Question, ReplyClassifier, ReplyVerdict, TeachBack,
@@ -473,7 +473,10 @@ export class AgentBrain implements Brain {
     }
     // After two unclear replies the buttons take over: nothing is asked again until one is pressed.
     if (this.buttons || map.guardrails.length === 0) return [];
-    const tb = buildTeachBack(map);
+    // The state must record the teach-back at the moment it is spoken: a confirmation counts only for what was last stated.
+    const stated = stateTeachBack(this.state);
+    this.state = stated.state;
+    const tb = stated.teachBack;
     this.heard = tb;
     this.open = { kind: 'teachback', heard: tb };
     return [{
@@ -485,14 +488,26 @@ export class AgentBrain implements Brain {
 
   // ---- Review and the map, for the screen ---------------------------------
 
-  review(): ReviewOutput {
+  /**
+   * `shown`: the teach-back text is on the person's screen (the Review view), so it counts as stated, exactly like a spoken one. A
+   * reload for the Learn view or the draft map (shown = false) never states anything: nobody read it.
+   */
+  review(shown = false): ReviewOutput {
     const map = workingMap(this.state);
     const held = this.learnPolicy?.heldForReview(this.nowMs) ?? [];
     const gaps = planFollowUps(map, { persona: this.persona, held, max: MAX_FOLLOW_UPS, unresolved: this.clarifier.unresolved() }).map((q) => ({
       id: q.id, topic: q.topic, question: q.text, evidenceIds: [...q.evidenceIds],
     }));
-    const tb = gaps.length === 0 && map.guardrails.length > 0 ? buildTeachBack(map) : null;
-    return { gaps, teachBack: tb?.text ?? null, teachBackDigest: tb?.digest ?? null, buttons: this.buttons, map: this.shown(map) };
+    let tb: TeachBack | null = null;
+    if (gaps.length === 0 && map.guardrails.length > 0) {
+      const stated = stateTeachBack(this.state);
+      tb = stated.teachBack;
+      if (shown) {
+        this.state = stated.state;
+        this.heard = tb;
+      }
+    }
+    return { gaps, teachBack: tb?.text ?? null, teachBackDigest: tb?.digest ?? null, buttons: this.buttons, map: this.shown(workingMap(this.state)) };
   }
 
   private shown(map: WorkMap): DraftMap {
@@ -563,9 +578,10 @@ function guardrailText(g: WorkMap['guardrails'][number]): string {
     : g.trigger === 'unknown_entity'
       ? `If the customer is not recognised: ${g.requiredAction}`
       : `${g.condition}: ${g.requiredAction}`;
+  const assumed = g.assumedFacts.length > 0 ? ` (I assume the ${labelFacts(g.assumedFacts)} from the screen.)` : '';
   const why = g.reason !== null ? ` Reason: ${g.reason}.` : g.unexplained || g.reasonUnknown ? ' The expert does not know the reason.' : '';
   const quote = g.quote !== null ? ` The expert: "${g.quote}"` : '';
-  return `${rule}${why}${quote}`;
+  return `${rule}${assumed}${why}${quote}`;
 }
 
 export function toDraftMap(map: WorkMap, confirmed: boolean): DraftMap {
