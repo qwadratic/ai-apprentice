@@ -87,7 +87,7 @@ test('off-record blocks Preview and Send, stops activity, survives reset and res
   const timer = fakeClock(); const events: WorkspaceActivity[] = []; let observations = 0;
   const workspace = createWorkspace({
     sessionId: 'first', activityClock: timer.clock, onInputActivity: event => events.push(event),
-    checkpoint: { async check() { observations++; return { status: 'clear', message: 'Clear.', evidenceIds: [] }; } },
+    checkpoint: { async check(_scope, _signal, onDispatch) { observations++; onDispatch?.(); return { status: 'clear', message: 'Clear.', evidenceIds: [] }; } },
   });
   workspace.inputActivity('email'); await workspace.preview(); assert.equal(workspace.canSend(), true);
   workspace.setOffRecord(true); assert.equal(workspace.canSend(), false);
