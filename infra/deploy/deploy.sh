@@ -264,7 +264,8 @@ deploy_once() {
   fi
 
   if build_changed "$old" "$new" && restart && healthy; then
-    rm -f "$FAILED_FILE"
+    # Forget the failed sha only when it is the one that now passed.
+    if [ "$(cat "$FAILED_FILE" 2>/dev/null)" = "$new" ]; then rm -f "$FAILED_FILE"; fi
     echo "$new" > "$DEPLOYED_FILE"
     log "ok ${new:0:12} (runner restarted: $RESTART_RUNNER, api restarted: $RESTART_API, ops restarted: $RESTART_OPS)"
     write_status ok "deployed${manual:+; run sudo infra/install.sh for: $manual}" "$(now)"
