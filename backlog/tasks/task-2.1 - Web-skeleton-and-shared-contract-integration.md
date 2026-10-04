@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@kigulx'
 created_date: '2026-10-03 21:15'
-updated_date: '2026-10-04 01:38'
+updated_date: '2026-10-04 02:28'
 labels:
   - stream-a
   - infra
@@ -55,4 +55,6 @@ Local runtime integration on main 9d95185 consumes capture 8614db6 + bc7d5b3 + 9
 Runtime review resolved lifecycle generation/cursor mismatches, serialized intrinsic backend pause, gated uploads until resume acknowledgement, stale-operation epochs, app-owned off-record latch, and post-stop Evidence. Bridge actual hub/handler/service integration test passes with explicit mock VisionRunner; API tests 18/18. Root npm run check on Node22 passed including production screen-test and fixture pages; one optional browser test skipped. Live vision and OS picker remain unverified, no publication or deployment performed.
 
 Merged origin/main 01e326d locally preserving B production code. Human explicitly approved adapting the one legacy B screen authorization regression test; assertions401/403/202 preserved through actual screen module/hub. Updated test page for current B session response and browser start-click epoch, plus release VITE_API_BASE. Final root check on Node22: 150 passed, 1 optional browser test skipped; strict typechecks and production build passed. Local HTTP smoke on updated B API: session201, screen201, authenticated originless poll200, stop200, test page200. Awaiting human publication permission and existing B exact-head review/deploy; real vision/OS picker/voice sequence not claimed complete.
+
+PR21 review fixes: expire abandoned screen sessions in every state using idle TTL; deterministic capacity, paused-session and active-preservation tests pass 12/12. Persisted Evidence now uses B session authorization after API restart; restart/foreign-origin/cross-session tests pass 3/3 and API typecheck passes. Removed redundant API package build edit because TASK-4.6 fixes deployed contracts build.
 <!-- SECTION:NOTES:END -->
