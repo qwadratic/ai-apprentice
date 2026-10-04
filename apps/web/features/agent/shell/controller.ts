@@ -363,6 +363,8 @@ export class ShellController {
       if (!this.isCurrent(run)) { await voice.end(); return; }
       const id = voice.conversationId();
       if (id) this.bindConversation(id);
+      // The SDK fires its connected events inside startSession, before the handle exists: flush only now.
+      if (voice.isConnected()) this.flushBufferedContext(voice);
     } catch (e) {
       if (!this.isCurrent(run)) return;
       this.voice = null;
@@ -390,7 +392,7 @@ export class ShellController {
         this.log('recv', 'CONNECT', `conversation ${id}`.trim());
         this.store.dispatch({ type: 'VOICE_PHASE', phase: 'listening', error: null });
         this.sys('Voice is live. The microphone is on.');
-        this.flushBufferedContext(voice);
+        if (voice.isConnected()) this.flushBufferedContext(voice);
       },
       onDisconnect: (reason) => {
         if (!live()) return;
@@ -403,7 +405,7 @@ export class ShellController {
         this.log('recv', 'STATUS', status);
         if (status === 'connected' && this.state.voice.phase === 'connecting') {
           this.store.dispatch({ type: 'VOICE_PHASE', phase: 'listening', error: null });
-          this.flushBufferedContext(voice);
+          if (voice.isConnected()) this.flushBufferedContext(voice);
         }
       },
       onMode: (mode) => { if (live()) this.onVoiceMode(mode); },
@@ -452,7 +454,8 @@ export class ShellController {
       this.log('sent', 'CONTEXT', text);
       return;
     }
-    if (voice && this.state.voice.phase === 'connecting') {
+    if (voice && voice.isOpening()) {
+      // Not writable yet (still connecting, or connected but the SDK has not returned the conversation): keep it.
       this.bufferedContext.push(text);
       if (this.bufferedContext.length > MAX_BUFFERED_CONTEXT) this.bufferedContext.shift();
       return;
@@ -466,6 +469,7 @@ export class ShellController {
   private flushBufferedContext(voice: VoiceSession): void {
     const buffered = this.bufferedContext;
     this.bufferedContext = [];
+    this.contextDropNoted = false;
     for (const text of buffered) this.sendContext(text, voice);
   }
 

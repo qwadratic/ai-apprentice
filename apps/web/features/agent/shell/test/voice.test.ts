@@ -86,17 +86,50 @@ test('VoiceSession.end does not wait forever for a stuck conversation', async ()
   assert.ok(Date.now() - started < 1000);
 });
 
-test('ending while the connection is still being made closes it as soon as it opens', async () => {
+test('ending while the connection is still being made aborts the connector and closes it as soon as it opens', async () => {
   const fake = new FakeVoice();
   let release: () => void = () => {};
-  const gate = new Promise<void>((resolve) => { release = resolve; });
-  const session = new VoiceSession(async (url, events) => { await gate; return fake.connector(url, events); });
+  fake.gate = new Promise<void>((resolve) => { release = resolve; });
+  const session = new VoiceSession(fake.connector);
   const starting = session.start(SIGNED_URL, noEvents());
+  assert.equal(must(fake.signal).aborted, false);
   await session.end();
+  assert.equal(must(fake.signal).aborted, true, 'the connector is told to abort');
+  assert.equal(fake.ended, false, 'nothing to close before the handshake finishes');
   release();
   await starting;
-  assert.equal(fake.ended, true);
+  assert.equal(fake.ended, true, 'the conversation is closed the moment it exists');
   assert.equal(session.isConnected(), false);
+  assert.equal(session.isOpening(), false);
+});
+
+test('the SDK fires its connected events before it returns: the session is not writable until it has the handle', async () => {
+  const fake = new FakeVoice();
+  let connectedEvents = 0;
+  let writableInsideEvent: boolean | null = null;
+  const session = new VoiceSession(fake.connector);
+  await session.start(SIGNED_URL, {
+    ...noEvents(),
+    onStatus: (s) => { if (s === 'connected') connectedEvents += 1; },
+    onConnect: () => { writableInsideEvent = session.isConnected(); },
+  });
+  assert.equal(connectedEvents, 1);
+  assert.equal(writableInsideEvent, false, 'inside the connected event there is no handle yet');
+  assert.equal(session.isConnected(), true, 'after start() it is writable');
+  assert.equal(session.isOpening(), false);
+});
+
+test('isOpening is true while connecting and false once ended', async () => {
+  const fake = new FakeVoice();
+  fake.autoConnect = false;
+  const session = new VoiceSession(fake.connector);
+  assert.equal(session.isOpening(), true);
+  await session.start(SIGNED_URL, noEvents());
+  assert.equal(session.isOpening(), true, 'handle set but not connected yet');
+  must(fake.events).onConnect('c');
+  assert.equal(session.isOpening(), false);
+  await session.end();
+  assert.equal(session.isOpening(), false);
 });
 
 test('a failing connector rejects start without leaking the URL', async () => {

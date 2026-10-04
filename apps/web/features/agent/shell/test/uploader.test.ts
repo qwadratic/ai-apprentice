@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createAgentApi } from '../api.ts';
-import { EventUploader, FLUSH_MS, MAX_BATCH_EVENTS, MAX_TEXT_CHARS } from '../log/uploader.ts';
+import { EventUploader, FLUSH_MS, MAX_BATCH_BYTES, MAX_BATCH_EVENTS, MAX_TEXT_CHARS, PAGEHIDE_BATCH_BYTES, eventBytes } from '../log/uploader.ts';
 import type { RecordedRequest, Responder } from './helpers.ts';
 import { FakeTimers, SIGNED_URL, TOKEN, json, legacyApi, modernApi, must, recordingFetch, settle } from './helpers.ts';
 
@@ -57,6 +57,40 @@ test('batches are limited to 200 lines', async () => {
   for (let i = 0; i < MAX_BATCH_EVENTS + 20; i += 1) r.uploader.enqueue('sys', 'SYS', `l${i}`);
   await r.uploader.flush();
   assert.deepEqual(r.eventCalls().map((c) => (c.body as { events: unknown[] }).events.length), [200, 20]);
+});
+
+const bodyBytes = (body: unknown): number => new TextEncoder().encode(JSON.stringify(body)).length;
+
+test('batches are limited by UTF-8 bytes, not characters', async () => {
+  const r = await rig(modernApi());
+  // 2000 characters of a 3-byte character is 6000 bytes a line: 120 lines are 250 KB by characters but 720 KB by bytes.
+  const text = '€'.repeat(2000);
+  for (let i = 0; i < 120; i += 1) r.uploader.enqueue('recv', 'USER', text);
+  await r.uploader.flush();
+  const sizes = r.eventCalls().map((c) => bodyBytes(c.body));
+  assert.ok(r.eventCalls().length >= 4, `split into several requests, got ${r.eventCalls().length}`);
+  for (const size of sizes) assert.ok(size <= MAX_BATCH_BYTES + 200, `a request body of ${size} bytes is over the cap`);
+  assert.ok(sizes.every((n) => n < 256 * 1024), 'every body is under the 256 KB server limit');
+  const sent = r.eventCalls().reduce((n, c) => n + (c.body as { events: unknown[] }).events.length, 0);
+  assert.equal(sent, 120, 'every line is still sent');
+});
+
+test('eventBytes counts JSON escapes and multi-byte characters', () => {
+  const plain = eventBytes({ t: 1, dir: 'sys', type: 'SYS', text: 'abc' });
+  assert.equal(eventBytes({ t: 1, dir: 'sys', type: 'SYS', text: '€€€' }), plain + 6);
+  assert.equal(eventBytes({ t: 1, dir: 'sys', type: 'SYS', text: '"""' }), plain + 3);
+});
+
+test('page hide stays under the 64 KB keepalive limit', async () => {
+  const r = await rig(modernApi());
+  r.uploader.setConversationId('conv_1');
+  for (let i = 0; i < 40; i += 1) r.uploader.enqueue('recv', 'USER', '€'.repeat(3000));
+  r.uploader.sendOnPageHide();
+  const hide = r.eventCalls();
+  assert.equal(hide.length, 1);
+  const size = bodyBytes(must(hide[0]).body);
+  assert.ok(size < 64 * 1024, `body of ${size} bytes`);
+  assert.ok(PAGEHIDE_BATCH_BYTES < 64 * 1024);
 });
 
 test('a transient failure keeps the lines and retries; it is reported once', async () => {

@@ -16,7 +16,10 @@ export interface LogEvent {
 
 export const FLUSH_MS = 2000;
 export const MAX_BATCH_EVENTS = 200;
-export const MAX_BATCH_CHARS = 200000; // the server refuses bodies over 256 KB
+export const MAX_BATCH_BYTES = 200000; // UTF-8 bytes of the lines as JSON; the server refuses bodies over 256 KB
+/** A keepalive request may carry at most 64 KB; stay below it on page hide. */
+export const PAGEHIDE_BATCH_BYTES = 60000;
+export const PAGEHIDE_BATCH_EVENTS = 50;
 export const MAX_TEXT_CHARS = 4000;
 export const EVENTS_TIMEOUT_MS = 8000;
 export const FINISH_TIMEOUT_MS = 30000; // the server polls ElevenLabs for up to about 15 s before it answers
@@ -41,6 +44,13 @@ export type FinishResult =
   | { kind: 'stored'; transcriptStored: boolean }
   | { kind: 'no-conversation' }
   | { kind: 'failed'; message: string; unsent: number };
+
+const encoder = new TextEncoder();
+
+/** UTF-8 bytes of one line as it goes into the request body (JSON escapes and multi-byte characters count). */
+export function eventBytes(ev: LogEvent): number {
+  return encoder.encode(JSON.stringify(ev)).length + 1; // +1 for the comma between lines
+}
 
 export class EventUploader {
   private readonly session: AgentSession;
@@ -91,14 +101,15 @@ export class EventUploader {
     });
   }
 
-  private nextBatch(): LogEvent[] {
+  /** The next lines to send, within `maxEvents` and `maxBytes` of UTF-8 JSON (the first line is always taken). */
+  private nextBatch(maxEvents: number = MAX_BATCH_EVENTS, maxBytes: number = MAX_BATCH_BYTES): LogEvent[] {
     const batch: LogEvent[] = [];
-    let chars = 0;
+    let bytes = 0;
     for (const ev of this.queue) {
-      const size = ev.text.length + 80;
-      if (batch.length >= MAX_BATCH_EVENTS || (batch.length > 0 && chars + size > MAX_BATCH_CHARS)) break;
+      const size = eventBytes(ev);
+      if (batch.length >= maxEvents || (batch.length > 0 && bytes + size > maxBytes)) break;
       batch.push(ev);
-      chars += size;
+      bytes += size;
     }
     return batch;
   }
@@ -194,7 +205,7 @@ export class EventUploader {
         }).catch(() => {});
       } catch { /* the page is going away */ }
     };
-    const batch = this.nextBatch().slice(0, 50);
+    const batch = this.nextBatch(PAGEHIDE_BATCH_EVENTS, PAGEHIDE_BATCH_BYTES);
     if (batch.length > 0) post(this.session.events(), { conversationId: this.conversationId || undefined, events: batch });
     if (this.conversationId) post(this.session.finish(), { conversationId: this.conversationId });
   }

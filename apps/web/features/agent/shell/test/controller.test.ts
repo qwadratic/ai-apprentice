@@ -117,6 +117,56 @@ test('sample observations: buffered while the voice connects, then sent as conte
   assert.deepEqual(s.observations.map((o) => o.id).slice(0, 3), ['order-1', 'input-1', 'email-1']);
 });
 
+test('context buffered while the voice connects survives the SDK firing connected before startSession returns', async () => {
+  // Real SDK order: onStatusChange(connected) and onConnect fire inside startSession, before the handle exists.
+  const rig = createRig();
+  let release: () => void = () => {};
+  rig.voice.gate = new Promise<void>((resolve) => { release = resolve; });
+  await rig.controller.setSampleObservations(true);
+  const starting = rig.controller.start('learn');
+  await settle();
+  rig.timers.advance(3500); // order at 1 s and email at 3 s are buffered; the heartbeat is never sent
+  assert.equal(rig.voice.contexts.length, 0);
+  release();
+  await starting;
+  assert.equal(rig.controller.store.getState().voice.phase, 'listening');
+  assert.equal(rig.voice.contexts.length, 2, 'the first buffered observation is not dropped');
+  assert.match(must(rig.voice.contexts[0]), /^\[screen\] Order SYN-101/);
+  assert.match(must(rig.voice.contexts[1]), /^\[screen\] Email draft/);
+  assert.ok(!rig.controller.store.getState().events.some((e) => /Screen context is not sent/.test(e.text)), 'no false "not sent" note');
+  // Later observations go straight through.
+  rig.timers.advance(2000);
+  assert.ok(rig.voice.contexts.some((c) => c.startsWith('[screen] Ticket')));
+});
+
+test('a context that really cannot be sent is noted again after the voice was usable', async () => {
+  const rig = createRig({ responders: [modernApi({ signedUrlStatus: 503 })] });
+  await rig.controller.setSampleObservations(true);
+  await rig.controller.start('learn');
+  rig.timers.advance(3500);
+  const notes = rig.controller.store.getState().events.filter((e) => /Screen context is not sent/.test(e.text));
+  assert.equal(notes.length, 1, 'one note while the voice is offline');
+});
+
+test('off the record while the voice is still connecting aborts the connection and closes it as soon as it opens', async () => {
+  const rig = createRig();
+  let release: () => void = () => {};
+  rig.voice.gate = new Promise<void>((resolve) => { release = resolve; });
+  const starting = rig.controller.start('learn');
+  await settle();
+  assert.equal(rig.controller.store.getState().voice.phase, 'connecting');
+  await rig.controller.goOffRecord();
+  assert.equal(must(rig.voice.signal).aborted, true);
+  release();
+  await starting;
+  await settle();
+  assert.equal(rig.voice.ended, true, 'the microphone is closed the moment the handshake ends');
+  const s = rig.controller.store.getState();
+  assert.equal(s.phase, 'ended');
+  assert.equal(s.voice.phase, 'ended');
+  assert.equal(s.banner, null, 'no "voice not available" banner for a cancelled connection');
+});
+
 test('the sample toggle: off by default, can be flipped while live, never for Review', async () => {
   const rig = createRig();
   assert.equal(rig.controller.store.getState().screen.sampleOn, false);

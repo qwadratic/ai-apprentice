@@ -7,10 +7,17 @@ function messageOf(value: unknown): string {
   try { return JSON.stringify(value); } catch { return String(value); }
 }
 
-export const connectElevenLabs: VoiceConnector = async (signedUrl, events) => {
+export const connectElevenLabs: VoiceConnector = async (signedUrl, events, signal) => {
   const { Conversation } = await import('@elevenlabs/client');
+  // Ended while the SDK chunk was loading: never open the microphone.
+  if (signal.aborted) throw new Error('Voice connection cancelled.');
   const conversation = await Conversation.startSession({
     signedUrl,
+    // Fires once the microphone and the socket are set up, before onConnect: if the session was ended while the
+    // handshake was running, close it here so the microphone does not stay open until startSession returns.
+    onConversationCreated: (created) => {
+      if (signal.aborted) void created.endSession().catch(() => {});
+    },
     onConnect: (props) => { events.onConnect(props?.conversationId ?? ''); },
     onDisconnect: (details) => {
       const reason = details && typeof details === 'object' && 'reason' in details ? String(details.reason) : '';

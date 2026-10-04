@@ -123,25 +123,37 @@ export function legacyApi(): Responder {
 export class FakeVoice {
   url = '';
   events: VoiceEvents | null = null;
+  signal: AbortSignal | null = null;
   readonly contexts: string[] = [];
   readonly userMessages: string[] = [];
   order: string[] = [];
   ended = false;
   failWith: string | null = null;
+  /**
+   * Like the real SDK 1.26.0: the connected events (onStatusChange('connected') and onConnect) fire from inside the
+   * connector, before it returns the handle.
+   */
   autoConnect = true;
+  /** When set, the connector waits for it before connecting (the handshake: microphone prompt, socket). */
+  gate: Promise<void> | null = null;
   conversationId = 'conv_test_1';
 
-  readonly connector: VoiceConnector = async (signedUrl, events) => {
-    if (this.failWith) throw new Error(this.failWith);
+  readonly connector: VoiceConnector = async (signedUrl, events, signal) => {
     this.url = signedUrl;
     this.events = events;
+    this.signal = signal;
+    if (this.gate) await this.gate;
+    if (this.failWith) throw new Error(this.failWith);
     const handle: VoiceHandle = {
       conversationId: () => this.conversationId,
       sendContextualUpdate: (text) => { this.contexts.push(text); },
       sendUserMessage: (text) => { this.userMessages.push(text); },
       end: async () => { this.ended = true; this.order.push('voice.end'); },
     };
-    if (this.autoConnect) events.onConnect(this.conversationId);
+    if (this.autoConnect) {
+      events.onStatus('connected');
+      events.onConnect(this.conversationId);
+    }
     return handle;
   };
 

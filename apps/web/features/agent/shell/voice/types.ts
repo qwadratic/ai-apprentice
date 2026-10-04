@@ -27,5 +27,8 @@ export interface VoiceHandle {
   end(): Promise<void>;
 }
 
-/** Opens one conversation on a signed URL (a secret: never logged). */
-export type VoiceConnector = (signedUrl: string, events: VoiceEvents) => Promise<VoiceHandle>;
+/**
+ * Opens one conversation on a signed URL (a secret: never logged). `signal` aborts when the session is ended while
+ * the connection is still being made: the connector must then close what it opened (the microphone) as soon as it can.
+ */
+export type VoiceConnector = (signedUrl: string, events: VoiceEvents, signal: AbortSignal) => Promise<VoiceHandle>;
