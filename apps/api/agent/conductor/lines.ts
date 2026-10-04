@@ -70,3 +70,48 @@ export function detectLanguage(turns: readonly string[]): string | null {
   if (/[àâçèêëîïôœùûÿ]/.test(lower) || /\s(parce|pour|avec|c'est|je|nous)\s/.test(lower)) return 'fr';
   return null;
 }
+
+/** Show and Pass it on: what Clipa says when nobody has talked or typed for a while, in turn (RULES.nudges). */
+export const NUDGES: readonly string[] = [
+  "Tell me what you're doing as you go.",
+  'What are you looking at right now?',
+  'Talk me through this step.',
+  'What comes next, and why?',
+];
+
+/** The short confirmation when the person picks a stage by voice; the web opens that stage the way a click on it does. */
+export const STAGE_CONFIRM: Readonly<Record<Mode, string>> = {
+  learn: 'Okay, here is Show. Press Start when you are ready.',
+  review: 'Okay, here is Reflect. Press Start when you are ready.',
+  teach: 'Okay, here is Pass it on. Press Start when you are ready.',
+};
+
+// Explicit phrases only (EN, RU, DE). A phrase counts as whole words, in any case, and only near the start of the turn,
+// so that a sentence which merely contains it ("my boss used to teach me this") does not switch the stage.
+const STAGE_PHRASES: ReadonlyArray<readonly [Mode, readonly string[]]> = [
+  ['learn', ['let me show you', "i'll show you", 'i will show you', 'покажу', 'zeig dir', 'zeige dir']],
+  ['review', ["let's review", 'let us review', 'lets review', 'давай проверим', 'lass uns prüfen']],
+  ['teach', ['teach me', 'научи', 'bring es mir bei']],
+];
+/** The phrase has to begin within the first few words of the turn. */
+const STAGE_LEAD_WORDS = 3;
+const escapeRe = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// \b does not count Cyrillic letters or umlauts as word characters, so the boundaries are spelled out with \p{L}.
+const STAGE_RES: ReadonlyArray<readonly [Mode, RegExp]> = STAGE_PHRASES.map(([mode, phrases]) => [
+  mode,
+  new RegExp(`(?<![\\p{L}\\p{N}'])(?:${phrases.map((p) => escapeRe(p).replace(/ /g, '\\s+')).join('|')})(?![\\p{L}\\p{N}])`, 'iu'),
+]);
+
+/** The stage a final turn of the person explicitly asks for, or null. */
+export function stageAsked(text: string): Mode | null {
+  const turn = text.replace(/[‘’]/g, "'");
+  let best: { mode: Mode; at: number } | null = null;
+  for (const [mode, re] of STAGE_RES) {
+    const m = re.exec(turn);
+    if (!m) continue;
+    const lead = turn.slice(0, m.index).match(/[\p{L}\p{N}']+/gu)?.length ?? 0;
+    if (lead > STAGE_LEAD_WORDS) continue;
+    if (best === null || m.index < best.at) best = { mode, at: m.index };
+  }
+  return best?.mode ?? null;
+}
