@@ -40,7 +40,8 @@ export type Cue =
   | { type: 'ask'; questionId: string; text: string; topic: string; regions: Region[]; evidenceIds: string[] }
   | { type: 'point'; target: Target }
   | { type: 'context'; text: string }
-  | { type: 'map'; version: number; map: unknown; confirmed: boolean }
+  // `origin` (additive): this session's own map, a copy of an earlier session's, or the synthetic demo map.
+  | { type: 'map'; version: number; map: unknown; confirmed: boolean; origin?: MapOrigin }
   | { type: 'teachback'; version: number; text: string }
   | { type: 'warn'; guardrailId: string; text: string; regions: Region[]; evidenceIds: string[] }
   | { type: 'say'; text: string }
@@ -118,6 +119,13 @@ export function parseTarget(v: unknown): Target | null {
 
 const ids = (v: unknown): string[] => (Array.isArray(v) ? v.filter(isStr).map((s) => s.slice(0, 64)).slice(0, 8) : []);
 
+/** Where the map on the board comes from (the conductor's Reflect fallbacks). */
+export type MapOrigin = 'session' | 'earlier' | 'demo';
+/** An unknown or missing origin is this session's own map, as before the field existed. */
+export function parseMapOrigin(v: unknown): MapOrigin {
+  return v === 'earlier' || v === 'demo' ? v : 'session';
+}
+
 export function parseCue(v: unknown): Cue | null {
   if (!isRecord(v) || !isStr(v.type)) return null;
   switch (v.type) {
@@ -142,7 +150,7 @@ export function parseCue(v: unknown): Cue | null {
       return t === null ? null : { type: 'context', text: t };
     }
     case 'map':
-      return isNum(v.version) ? { type: 'map', version: v.version, map: v.map, confirmed: v.confirmed === true } : null;
+      return isNum(v.version) ? { type: 'map', version: v.version, map: v.map, confirmed: v.confirmed === true, origin: parseMapOrigin(v.origin) } : null;
     case 'teachback': {
       const t = text(v.text, 4000);
       return t === null || !isNum(v.version) ? null : { type: 'teachback', version: v.version, text: t };

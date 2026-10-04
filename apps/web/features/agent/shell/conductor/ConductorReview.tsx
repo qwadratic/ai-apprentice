@@ -37,7 +37,7 @@ export function ConductorReview() {
   };
 
   const idle = board === null
-    ? 'No map yet: run Show first, then press Start Reflect.'
+    ? 'Press Start Reflect: I show the map of your latest session (or a demo map) and we talk it through.'
     : running
       ? 'Talk to me: answer what is open, then confirm or correct what I read back.'
       : 'Press Start Reflect: I ask what is still open, then read the process back.';
@@ -106,6 +106,7 @@ export function ConductorReview() {
           observations={observations}
           gaps={board.gaps}
           title="Work Map"
+          origin={snapshot?.origin ?? 'session'}
           inlineMoment={false}
           processes={board.processes}
           onSeek={(evidenceId) => controller.openEvidence(evidenceId)}

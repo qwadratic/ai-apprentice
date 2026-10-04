@@ -169,7 +169,7 @@ export class ConductorFace {
       return;
     }
     if (env.seq <= this.historyUntil) {
-      if (cue.type === 'map') this.store.set({ map: { version: cue.version, map: cue.map, confirmed: cue.confirmed } });
+      if (cue.type === 'map') this.store.set({ map: { version: cue.version, map: cue.map, confirmed: cue.confirmed, origin: cue.origin ?? 'session' } });
       if (cue.type === 'teachback') this.store.set({ teachBack: { version: cue.version, text: cue.text, cueId: env.cueId } });
       return;
     }
@@ -184,7 +184,7 @@ export class ConductorFace {
         this.host.context(cue.text);
         return;
       case 'map':
-        this.store.set({ map: { version: cue.version, map: cue.map, confirmed: cue.confirmed } });
+        this.store.set({ map: { version: cue.version, map: cue.map, confirmed: cue.confirmed, origin: cue.origin ?? 'session' } });
         return;
       case 'quiet':
         this.store.set({ quiet: cue.reason });
