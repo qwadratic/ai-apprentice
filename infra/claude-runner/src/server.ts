@@ -1,5 +1,6 @@
 // Claude runner: a small internal HTTP service on 127.0.0.1:8787 that wraps the
-// Claude Agent SDK for text and vision calls with optional JSON Schema output.
+// Claude Agent SDK for text and vision calls with optional JSON Schema output
+// (or, with RUNNER_ENGINE=codex, the Codex CLI: src/codex.ts).
 // Logs carry metadata only (request id, route, status, duration, sizes, model);
 // never prompts, images, outputs or SDK stderr.
 import http from 'node:http';
@@ -16,6 +17,7 @@ import {
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
 import { unwrapResult, wrapRootUnion } from './schema.js';
+import { dropAddedNulls, parseJsonAnswer, runCodex, toCodexSchema } from './codex.js';
 
 const HOST = process.env.RUNNER_HOST || '127.0.0.1';
 const PORT = Number(process.env.RUNNER_PORT || 8787);
@@ -37,6 +39,13 @@ const CWD = process.env.RUNNER_CWD || '/var/lib/apprentice/runner-cwd';
 const SYSTEM_PROMPT =
   'You are a precise extraction and reasoning helper inside an internal service. ' +
   'Answer only from the provided input. Be concise. You have no tools.';
+// RUNNER_ENGINE=codex runs every request through the Codex CLI (`codex exec`) instead of the Agent SDK,
+// for when the Claude credentials have no quota. Default: claude (unchanged).
+const ENGINE: 'claude' | 'codex' = process.env.RUNNER_ENGINE === 'codex' ? 'codex' : 'claude';
+const CODEX_MODEL = process.env.RUNNER_CODEX_MODEL?.trim() || undefined;
+const CODEX_REASONING = process.env.RUNNER_CODEX_REASONING ?? 'low';
+const CODEX_EPHEMERAL = process.env.RUNNER_CODEX_EPHEMERAL === '1';
+const CODEX_BIN = process.env.RUNNER_CODEX_BIN?.trim() || 'codex';
 
 function log(fields: Record<string, unknown>): void {
   process.stdout.write(JSON.stringify({ t: new Date().toISOString(), ...fields }) + '\n');
@@ -46,11 +55,12 @@ function log(fields: Record<string, unknown>): void {
 const nonEmpty = (v: string | undefined) => typeof v === 'string' && v.trim() !== '';
 const hasOauth = nonEmpty(process.env.CLAUDE_CODE_OAUTH_TOKEN);
 const hasKey = nonEmpty(process.env.ANTHROPIC_API_KEY);
-if (hasOauth === hasKey) {
+if (ENGINE === 'claude' && hasOauth === hasKey) {
   log({ level: 'fatal', msg: hasOauth ? 'both CLAUDE_CODE_OAUTH_TOKEN and ANTHROPIC_API_KEY are set; set exactly one' : 'neither CLAUDE_CODE_OAUTH_TOKEN nor ANTHROPIC_API_KEY is set; set exactly one' });
   process.exit(1);
 }
-const MODE: 'oauth' | 'apikey' = hasOauth ? 'oauth' : 'apikey';
+const MODE: 'oauth' | 'apikey' | 'codex' = ENGINE === 'codex' ? 'codex' : hasOauth ? 'oauth' : 'apikey';
+const HEALTH_MODEL = ENGINE === 'codex' ? (CODEX_MODEL ?? 'codex-default') : MODEL;
 const RUNNER_TOKEN = process.env.RUNNER_TOKEN || '';
 if (RUNNER_TOKEN.length < 32) {
   log({ level: 'fatal', msg: 'RUNNER_TOKEN missing or shorter than 32 chars' });
@@ -138,6 +148,7 @@ type RunResult =
   | { status: 502 | 504; body: { ok: false; error: string; subtype?: string; ms: number }; firstMs?: number };
 
 async function run(req: CompleteReq | VisionReq, images: VisionReq['images'] | undefined, clientGone: AbortSignal): Promise<RunResult> {
+  if (ENGINE === 'codex') return runWithCodex(req, images, clientGone);
   const started = Date.now();
   const abort = new AbortController();
   let timedOut = false;
@@ -212,6 +223,38 @@ async function run(req: CompleteReq | VisionReq, images: VisionReq['images'] | u
   }
 }
 
+// The request's `model` names a Claude model; the Codex engine uses RUNNER_CODEX_MODEL (or the CLI's default).
+async function runWithCodex(req: CompleteReq | VisionReq, images: VisionReq['images'] | undefined, clientGone: AbortSignal): Promise<RunResult> {
+  const started = Date.now();
+  const output = req.schema ? wrapRootUnion(req.schema) : undefined;
+  const system = `${SYSTEM_PROMPT} Do not run commands or read files.${req.system ? `\n\n${req.system}` : ''}`;
+  const env = childEnv();
+  for (const k of ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']) delete env[k];
+  try {
+    const r = await runCodex(
+      { prompt: `<system>\n${system}\n</system>\n\n${req.prompt}`, schema: output ? toCodexSchema(output.schema) : undefined, images },
+      { baseDir: CWD, env, timeoutMs: TIMEOUT_MS, signal: clientGone, model: CODEX_MODEL, reasoning: CODEX_REASONING, ephemeral: CODEX_EPHEMERAL, bin: CODEX_BIN },
+    );
+    const ms = Date.now() - started;
+    if (r.kind === 'timeout') return { status: 504, body: { ok: false, error: 'timeout', ms } };
+    if (r.kind === 'aborted') return { status: 502, body: { ok: false, error: 'sdk_error', subtype: 'aborted', ms } };
+    if (r.kind === 'spawn_error') return { status: 502, body: { ok: false, error: 'sdk_exception', subtype: 'codex_spawn', ms } };
+    if (r.kind === 'exit') return { status: 502, body: { ok: false, error: 'sdk_error', subtype: 'codex_exit', ms } };
+    if (output) {
+      const parsed = parseJsonAnswer(r.text);
+      const json = parsed === undefined ? undefined : unwrapResult(dropAddedNulls(parsed, output.schema), output.wrapped);
+      if (json === undefined) return { status: 502, body: { ok: false, error: 'no_structured_output', subtype: 'codex', ms } };
+      return { status: 200, body: { ok: true, json, ms } };
+    }
+    const text = r.text.trim();
+    if (!text) return { status: 502, body: { ok: false, error: 'no_result', ms } };
+    return { status: 200, body: { ok: true, text, ms } };
+  } catch {
+    // Temp-dir or spawn failures; their messages may carry paths, so only the code is returned.
+    return { status: 502, body: { ok: false, error: 'sdk_exception', ms: Date.now() - started } };
+  }
+}
+
 // ---- HTTP -----------------------------------------------------------------
 class BodyTooLarge extends Error {}
 
@@ -272,7 +315,7 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.method === 'GET' && route === '/health') {
       status = 200;
-      resBytes = send(res, 200, { ok: true, mode: MODE, model: MODEL, git_sha: GIT_SHA, active, queued: waiters.length });
+      resBytes = send(res, 200, { ok: true, mode: MODE, model: HEALTH_MODEL, git_sha: GIT_SHA, active, queued: waiters.length });
       return;
     }
     const isComplete = route === '/v1/complete';
@@ -327,7 +370,7 @@ const server = http.createServer(async (req, res) => {
       resBytes = send(res, 400, { ok: false, error: 'model_not_allowed', allowed: [...MODELS] });
       return;
     }
-    meta.model = body.model || MODEL;
+    meta.model = ENGINE === 'codex' ? HEALTH_MODEL : body.model || MODEL;
     meta.schema = !!body.schema;
     if (isVision) meta.images = (body as VisionReq).images.length;
 
@@ -388,8 +431,8 @@ async function prewarm(): Promise<void> {
 }
 
 server.listen(PORT, HOST, () => {
-  log({ level: 'info', msg: 'runner listening', host: HOST, port: PORT, mode: MODE, model: MODEL, concurrency: CONCURRENCY, git_sha: GIT_SHA });
-  void prewarm();
+  log({ level: 'info', msg: 'runner listening', host: HOST, port: PORT, mode: MODE, model: HEALTH_MODEL, concurrency: CONCURRENCY, git_sha: GIT_SHA });
+  if (ENGINE === 'claude') void prewarm();
 });
 for (const sig of ['SIGTERM', 'SIGINT'] as const) {
   process.on(sig, () => {

@@ -108,10 +108,52 @@ test('Learn: a newer screen makes a prepared question out of date', async () => 
   const r = rig({ generic_question: (body) => ok({ ...QUESTION, question: `About ${String((body.observations as Array<{ id: string }>).at(-1)?.id)}` }) });
   await r.send({ type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', 'First change.'), { type: 'activity', state: 'typing' });
   await r.advance(RULES.settleMs + 10);
-  await r.send(obs('o2', 'Second change.'));
+  await r.send(obs('o2', 'Second change.', { surface: 'inbox' }));
   await r.send({ type: 'activity', state: 'pause' });
   await r.advance(RULES.pauseMs + 10);
   assert.equal(cueOf(r.cues, 'ask').at(-1)?.text, 'About o2');
+});
+
+test('Learn: a reworded frame of the same generic screen neither restarts the pause nor drops the prepared question', async () => {
+  const r = rig({ generic_question: () => ok(QUESTION) });
+  await r.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', null), obs('o2', 'The recipient changed.'));
+  await r.advance(RULES.settleMs + 10);
+  assert.equal(r.calls.length, 1, 'prepared as soon as the screen settled');
+  // The vision model rewords the same compose window on every frame, and the frames come faster than the pause.
+  for (let i = 3; i < 8; i++) {
+    await r.send(obs(`o${i}`, `Reworded ${i}.`));
+    await r.advance(1200);
+  }
+  assert.equal(cueOf(r.cues, 'ask')[0]?.text, QUESTION.question, 'asked although reworded frames kept coming');
+  // Another app is a new screen: it restarts the pause.
+  await r.advance(RULES.learnMinGapMs); // the reworded frames after the first question bring a second one
+  await r.advance(RULES.learnMinGapMs + RULES.askTtlMs); // its moment passes, and so does the gap
+  const asked = of(r.cues, 'ask').length;
+  await r.send(obs('o9', 'A sheet opened.', { app: 'Sheets', surface: 'budget sheet' }));
+  await r.advance(RULES.pauseMs - 300);
+  assert.equal(of(r.cues, 'ask').length, asked, 'not before the pause after a real screen change');
+  await r.advance(400);
+  assert.equal(of(r.cues, 'ask').length, asked + 1, 'asked once the pause after the new screen began');
+});
+
+test('the voice agent knows what Clipa sees: a new screen at once, the same screen at most every few seconds', async () => {
+  const r = rig({ generic_question: () => ok(QUESTION) });
+  const screen = () => cueOf(r.cues, 'context').filter((c) => c.text.startsWith('[screen]'));
+  await r.send(obs('o0', null));
+  assert.equal(screen().length, 0, 'nothing before a stage runs');
+  await r.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', null));
+  assert.equal(screen().length, 1);
+  assert.match(screen()[0]!.text, /^\[screen\] Mail: compose window\. Summary o1/);
+  await r.send(obs('o2', null));
+  assert.equal(screen().length, 1, 'the same screen reworded right away is not sent again');
+  await r.advance(RULES.screenContextMs);
+  await r.send(obs('o3', null));
+  assert.equal(screen().length, 2, 'the same screen after the interval');
+  await r.send(obs('o4', null, { app: 'Sheets', surface: 'budget sheet' }));
+  assert.equal(screen().length, 3, 'a new screen at once');
+  assert.match(screen()[2]!.text, /^\[screen\] Sheets: budget sheet\./);
+  await r.send({ type: 'off_record', on: true }, obs('o5', null, { app: 'Maps', surface: 'map' }));
+  assert.equal(screen().length, 3, 'nothing off the record');
 });
 
 test('typing cancels a question that has not been said yet; off the record hides Clipa and drops input', async () => {
@@ -217,7 +259,7 @@ test('Teach: a pending action is checked fast, and the warning names the expert\
   const r = rig({ guardrail_check: () => ok({ status: 'warn', guardrailId: 'g1', message: 'Your lead would stop here. Why?', regionIds: ['r-to'] }) }, maps, 'hire-1');
   await r.send(hello('web', 'new_hire', 'expert-session'));
   await r.send({ type: 'session', mode: 'teach', live: true, reason: null });
-  assert.ok(cueOf(r.cues, 'context').some((c) => c.text.includes('budget above 300')));
+  assert.equal(cueOf(r.cues, 'context').length, 0, 'no learned workflow is sent to voice before screen recognition');
   await r.send(obs('n1', 'Budget set to 450.', { pendingAction: 'Submit' }));
   await r.advance(RULES.urgentSettleMs + 10);
   const warn = cueOf(r.cues, 'warn')[0];
@@ -461,4 +503,44 @@ test('routes: the Mac hands over with a single-use code; the web joins the same 
   const body = await r.json() as { lastCueSeq: number };
   assert.ok(body.lastCueSeq > 5, 'the web joined the Mac\'s conductor, not a new one');
   ac.abort();
+});
+
+
+test('routes: status authenticates the session and exposes the current baseline without transcript text', async (t) => {
+  const h = await start(t);
+  const session = await issue(h.base);
+  const other = await issue(h.base);
+  const url = `${h.base}/api/agent/conductor/${session.sessionId}/status`;
+  const headers = { Origin: ORIGIN, ...bearer(session.token) };
+  assert.equal((await fetch(url, { headers: { Origin: ORIGIN } })).status, 401);
+  assert.equal((await fetch(url, { headers: { Origin: ORIGIN, ...bearer(other.token) } })).status, 401);
+  assert.equal((await fetch(url, { headers: { Origin: 'https://evil.example', ...bearer(session.token) } })).status, 403);
+  const initial = await fetch(url, { headers });
+  assert.equal(initial.status, 200);
+  assert.equal(initial.headers.get('cache-control'), 'no-store');
+  const initialBody = await initial.json() as { ok: boolean; status: { baseline: { status: string } } };
+  assert.equal(initialBody.ok, true);
+  assert.equal(initialBody.status.baseline.status, 'empty');
+  for (const id of ['g1', 'g2']) h.agent.observeScreen(session.sessionId, {
+    id, kind: 'screen_activity', timestampMs: 1000, evidenceIds: [`ev-${id}`],
+    facts: { app: 'Gmail', surface: 'compose', summary: 'Synthetic customer invoice reply', change: null, pendingAction: null, regions: [] },
+  });
+  const read = async () => {
+    const response = await fetch(url, { headers });
+    assert.equal(response.status, 200);
+    return await response.json() as { status: { baseline: { status: string; appId: string | null; profileId: string | null; evidence: { observationIds: string[] } } } };
+  };
+  const candidate = (await read()).status.baseline;
+  assert.equal(candidate.status, 'candidate');
+  assert.equal(candidate.appId, 'gmail');
+  assert.equal(candidate.profileId, 'baseline.gmail-ticket-reply');
+  assert.deepEqual(candidate.evidence.observationIds, ['g1', 'g2']);
+  h.agent.observeScreen(session.sessionId, {
+    id: 'unknown', kind: 'screen_activity', timestampMs: 1100, evidenceIds: ['ev-unknown'],
+    facts: { app: null, surface: 'unknown', summary: 'Unknown workspace', change: null, pendingAction: null, regions: [] },
+  });
+  const suspended = (await read()).status.baseline;
+  assert.equal(suspended.status, 'suspended');
+  assert.equal(suspended.appId, null);
+  assert.equal(suspended.profileId, null);
 });
