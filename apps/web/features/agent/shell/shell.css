@@ -568,7 +568,15 @@
 .apprentice-shell .as-main[data-mode="review"] .as-mode { background: transparent; border: 0; box-shadow: none; padding: 0; }
 .apprentice-shell .as-main[data-mode="learn"] .as-screen,
 .apprentice-shell .as-main[data-mode="teach"] .as-screen { border-color: rgba(44, 196, 184, 0.34); box-shadow: var(--as-glow); }
+.apprentice-shell .as-main[data-mode="learn"] .as-screen:has(.as-screen__mount[data-live="true"]),
+.apprentice-shell .as-main[data-mode="teach"] .as-screen:has(.as-screen__mount[data-live="true"]) {
+  border-color: rgba(44, 196, 184, 0.7);
+  box-shadow: 0 0 0 1px rgba(44, 196, 184, 0.45), 0 0 36px rgba(44, 196, 184, 0.16), 0 18px 48px rgba(0, 0, 0, 0.45);
+}
+.apprentice-shell .as-screen > .as-note { font-size: 0.82rem; }
 .apprentice-shell .as-view { gap: 14px; }
+/* The status line under the header: quiet, on the right; the live feed and the session card carry the state. */
+.apprentice-shell .as-status { justify-content: flex-end; padding: 6px 16px 0; opacity: 0.85; }
 
 /* Clipa's line now: the largest text in the column. */
 .apprentice-shell .as-now {
