@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@qwadratic'
 created_date: '2026-10-04 06:01'
-updated_date: '2026-10-04 07:00'
+updated_date: '2026-10-04 07:02'
 labels:
   - stream-b
 dependencies: []
@@ -48,4 +48,12 @@ Ivan's demo runs on any app (an email, a table), on the web and on macOS. The vi
 Kirill explicitly assigned TASK-3.52 to a new Codex orchestrator in the status chat on 4 Oct. Stream A resumes its vision/contracts implementation; preserve the existing additive screen_activity proposal and coordinate with B rather than duplicating TASK-3.53. Use an isolated worktree. Slack is forbidden.
 
 User explicitly approved completing the A implementation and the two narrow B compatibility fixes after remote main concurrently reassigned the task. Preserved remote assignee metadata while preparing this PR. Local verification before integrating TASK-3.53: npm run check passed (667 passed, 3 browser checks skipped); separate keyframe/board suite 21 passed. Independent review approved after adding provider-facing coordinate semantics. Live Google/provider accuracy remains unverified.
+
+Integrated current main d65164e, including TASK-3.53 process library. Full npm run check passed on the integrated code: 674 tests passed, 3 browser tests skipped; typecheck and production build passed. Separate Work Map board suite: 21 passed. Independent final review reports no unresolved findings. AC 2 remains pending manual provider verification on real readable unknown apps; model responses in automated checks are synthetic.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Added canonical screen_activity facts with strict region/evidence validation and visible-only vision instructions. Generic observations reach conductor questions and existing keyframes while legacy workspace kinds retain their behavior. Verified parser, factory, service delivery, pause/off-record and compatibility with 674 passing project tests plus 21 board tests. Live provider accuracy and region placement require manual rehearsal; no claim of persistent Work Map storage. Task stays In Progress until merge.
+<!-- SECTION:FINAL_SUMMARY:END -->
