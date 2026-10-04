@@ -1,0 +1,6 @@
+{
+  "lines": [
+    { "id": "v01", "voice": "narrator", "text": "This is Clipa, an apprentice that learns the reasons behind an expert's work." },
+    { "id": "v02", "voice": "clipa", "text": "You typed the address into the email. Why not attach the screenshot?" }
+  ]
+}
