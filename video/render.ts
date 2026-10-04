@@ -134,6 +134,8 @@ const main = async (): Promise<void> => {
     concurrency: values.concurrency ? Number(values.concurrency) : null,
     // Long product clips played fast need more than the default 30 s for a frame on a busy 4-core machine.
     timeoutInMilliseconds: 180_000,
+    // Keep the decoded-frame cache small: two renders side by side otherwise fill the memory of a 16 GB machine.
+    offthreadVideoCacheSizeInBytes: 512 * 1024 * 1024,
     overwrite: true,
     onProgress: ({ progress }) => {
       const pct = Math.floor(progress * 10) * 10;
