@@ -6,7 +6,7 @@ status: accepted
 ---
 ## Context
 
-Under decision-2, the coordinator started reviewing a stream A PR only after A's `[READY] PR #N head <sha>`. PRs sat idle while waiting for it. Ivan changed this in the project status chat; stream A relayed it in Hive on 4 Oct, 02:01 UTC.
+Under decision-2, the coordinator started reviewing a stream A PR only after A's `[READY] PR #N head <sha>`. PRs sat idle while waiting for it. Kirill (stream A's owner) changed this in the project status chat; stream A relayed it in Hive on 4 Oct, 02:01 UTC (attribution corrected by stream A at 02:29 UTC).
 
 ## Decision
 
