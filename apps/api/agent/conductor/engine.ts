@@ -106,6 +106,21 @@ function sameApp(a: string, b: string): boolean {
   return a === b || a === '' || b === '' || a.includes(b) || b.includes(a);
 }
 
+/** The demo workspace shows its order, its email and its ticket side by side: they are one place, not three screens. */
+const WORKSPACE_KINDS: ReadonlySet<string> = new Set(['order_view', 'email_draft', 'ticket']);
+
+/**
+ * Where a frame is: the key a move is told by. A generic frame names its surface in free words that change between frames
+ * of one screen, and its app name can gain or lose a prefix ("Google Chrome - Gmail"): for those only another app is a move.
+ * The workspace's frames alternate between its surfaces while the person works: the whole workspace is one place, so an order
+ * frame after an email frame is neither a move nor a change. Any other kind keeps its app and surface.
+ */
+function placeOf(o: SeenObservation): string {
+  if (o.kind === 'screen_activity') return appKey(o.app);
+  if (WORKSPACE_KINDS.has(o.kind)) return 'workspace';
+  return `${o.app ?? ''}|${o.surface}`;
+}
+
 /**
  * Free-text paraphrases on a generic frame do not restart the user's pause: the same app and pending control, and the same
  * surface, or a reworded one when vision saw nothing change.
@@ -587,14 +602,14 @@ export class Conductor {
     if (this.offRecord) return;
     // The same observation can arrive twice (from the screen module and from a client that forwards it): keep the first.
     if (this.observations.some((x) => x.id === o.id)) return;
-    const last = [...this.observations].reverse().find((item) => item.kind !== 'input_activity');
+    // What this frame is compared with: the previous frame of its own kind (the workspace's frames alternate between kinds).
+    const last = [...this.observations].reverse().find((item) => item.kind === o.kind);
     this.observations.push(o);
     if (this.observations.length > RULES.keepObservations) this.observations.splice(0, this.observations.length - RULES.keepObservations);
     if (o.kind === 'input_activity') return;
     this.stageObservations++;
-    // A generic frame names its surface in free words that change between frames of one screen, and its app name can gain
-    // or lose a prefix ("Google Chrome - Gmail"): for those only another app is a move. The workspace's surfaces are exact.
-    const where = o.kind === 'screen_activity' ? appKey(o.app) : `${o.app ?? ''}|${o.surface}`;
+    const where = placeOf(o);
+    const firstFrame = this.contextWhere === null;
     const moved = this.contextWhere !== null && (o.kind === 'screen_activity' ? !sameApp(this.contextWhere, where) : this.contextWhere !== where);
     if (moved) {
       this.invalidateLiveContext(true);
@@ -637,7 +652,10 @@ export class Conductor {
     if (changed || o.pendingAction !== null) this.pendingTeachCheck = true;
     if (o.pendingAction !== null) this.urgentTeachCheck = true;
     this.shareScreen(o, newScreen, now);
-    if (newScreen && (this.liveMode === 'learn' || this.liveMode === 'teach')) this.thought(`Looking at ${o.app ? `${o.app}: ` : ''}${o.surface}`);
+    // The workspace's own edits are not worth a bubble each: it is shown once, when Clipa first sees it or comes back to it.
+    if (newScreen && (this.liveMode === 'learn' || this.liveMode === 'teach') && (!WORKSPACE_KINDS.has(o.kind) || firstFrame || moved)) {
+      this.thought(`Looking at ${o.app ? `${o.app}: ` : ''}${o.surface}`);
+    }
   }
 
   /**
@@ -1065,8 +1083,7 @@ export class Conductor {
     if (this.baselinedSession && this.baseline.current().status !== 'candidate') return false;
     const latest = [...this.observations].reverse().find((o) => o.kind !== 'input_activity' && this.contextObservationIds.has(o.id));
     if (!latest || now - this.lastChangeAt < RULES.settleMs) return false;
-    const where = `${latest.app ?? ''}|${latest.surface}`;
-    if (where === this.recognizedFor || now - this.lastRecognitionAt < 4000) return false;
+    if (placeOf(latest) === this.recognizedFor || now - this.lastRecognitionAt < 4000) return false;
     return this.deps.maps.library(this.mapFrom).length > 0;
   }
 
@@ -1078,7 +1095,7 @@ export class Conductor {
     const observations = this.genericObservations(6, true);
     const latest = [...this.observations].reverse().find((o) => o.kind !== 'input_activity' && this.contextObservationIds.has(o.id));
     if (!latest || library.length === 0 || observations.length === 0) return;
-    this.recognizedFor = `${latest.app ?? ''}|${latest.surface}`;
+    this.recognizedFor = placeOf(latest);
     this.lastRecognitionAt = this.deps.now();
     this.pose('think');
     const out = await this.run<ProcessMatchOutput>('process_match', {

@@ -1167,3 +1167,63 @@ test('the question hears the person: another app keeps what was said while its s
   await r.advance(RULES.pauseMs + RULES.settleMs + 50);
   assert.deepEqual(askedWith(r, 's1'), ['Now the budget: the licence was prepaid for a year.'], 'the Mail turn stays with Mail');
 });
+
+// ---- the demo workspace: its order, email and ticket are one place ------------------------------------------------------
+const wsFrame = (id: string, kind: 'order_view' | 'email_draft' | 'ticket', atMs: number, facts: Record<string, unknown>): ClientEvent => {
+  const parsed = parseBatch({ events: [{ seq: 0, atMs: 0, event: { type: 'observation', observation: { id, kind, timestampMs: atMs, evidenceIds: [`ev-${id}`], facts } } }] });
+  if (!parsed.ok) throw new Error(parsed.field);
+  return parsed.value[0]!.event;
+};
+const orderFrame = (id: string, atMs = 20_000): ClientEvent =>
+  wsFrame(id, 'order_view', atMs, { customerRef: 'customer_07', orderId: 'ORD-2041', deliveryAddress: '12 Sample Street', deliveryWindow: '10:00-12:00' });
+/** An edit is a short body (under 120 characters): the frame's summary then changes before and after email summaries get richer. */
+const emailFrame = (id: string, body: string, atMs = 20_000): ClientEvent =>
+  wsFrame(id, 'email_draft', atMs, { recipientRef: 'customer_07', subject: 'Your delivery', bodyText: body, attachments: [], previewState: 'editing' });
+const lookingAt = (cues: CueEnvelope[]) => cueOf(cues, 'thought').filter((t) => t.text.startsWith('Looking at'));
+const EXPERT_WORDS = 'Customer 07 asked for the details as text.';
+
+test('workspace: order and email frames alternate; the email edit makes one question and nothing is cancelled or forgotten', async () => {
+  const r = rig({ generic_question: () => ok(QUESTION) });
+  await r.send(...SHOW(), turn(EXPERT_WORDS));
+  await r.advance(8_000);
+  // The first look at the order and the email, then the email edit; the frames keep alternating all the while.
+  await r.send(orderFrame('w1'), emailFrame('w2', 'Hello'), orderFrame('w3'), emailFrame('w4', 'Delivery at 12 Sample Street'), orderFrame('w5'));
+  await r.advance(RULES.settleMs + 10);
+  assert.equal(r.calls.filter((c) => c.task === 'generic_question').length, 1, 'prepared as soon as the screen settled');
+  await r.send(emailFrame('w6', 'Delivery at 12 Sample Street'), orderFrame('w7'), emailFrame('w8', 'Delivery at 12 Sample Street'));
+  await r.advance(RULES.pauseMs + 10);
+  const questions = r.calls.filter((c) => c.task === 'generic_question');
+  assert.equal(questions.length, 1, 'no second preparation: the alternation is not a change');
+  assert.equal(of(r.cues, 'ask').length, 1);
+  assert.equal(of(r.cues, 'cancel').length, 0, 'the prepared question was never made out of date');
+  assert.ok((questions[0]!.body.observations as Array<{ id: string }>).some((o) => o.id === 'w4'), 'it sees the edited email frame');
+  assert.ok((questions[0]!.body.transcript as Array<{ text: string }>).some((t) => t.text === EXPERT_WORDS), 'it still has what the expert said before the edit');
+  assert.equal(lookingAt(r.cues).length, 1, 'one thought about the workspace, not one per frame');
+});
+
+test('workspace: the alternating frames do not hold Show open; it looks done 30 s after the last real change', async () => {
+  const r = rig({});
+  await r.send(...SHOW(), orderFrame('d1'), emailFrame('d2', 'Hello'));
+  // The order and the email keep alternating on the shared screen while the person does nothing.
+  for (let i = 0; i < 17; i++) { await r.advance(2_000); await r.send(orderFrame(`d${3 + 2 * i}`), emailFrame(`d${4 + 2 * i}`, 'Hello')); }
+  assert.ok(said(r.cues).includes(SHOW_LOOKS_DONE), 'the frames are not changes');
+});
+
+test('workspace: Pass it on recognises the process once and the checks see the order and the email', async () => {
+  const maps = new MapRegistry();
+  maps.confirm('expert-session', MAP as never, 1);
+  const r = rig({
+    process_match: () => ok({ processId: 'm1-p1', confidence: 0.9 }),
+    guardrail_check: () => ok({ status: 'clear', guardrailId: null, message: null, regionIds: [] }),
+  }, maps, 'hire-1');
+  await r.send(hello('web', 'new_hire', 'expert-session'), { type: 'session', mode: 'teach', live: true, reason: null }, { type: 'share', state: 'capturing', reason: null });
+  await r.send(orderFrame('n1'), emailFrame('n2', 'Image only'));
+  await r.advance(RULES.settleMs + 10);
+  for (let i = 0; i < 3; i++) { await r.send(orderFrame(`n${3 + 2 * i}`), emailFrame(`n${4 + 2 * i}`, 'Image only')); await r.advance(1_000); }
+  await r.advance(RULES.pauseMs);
+  assert.equal(r.calls.filter((c) => c.task === 'process_match').length, 1, 'the alternation is not another place to recognise');
+  const check = r.calls.find((c) => c.task === 'guardrail_check');
+  assert.ok(check, 'the rules were checked at the pause');
+  assert.deepEqual([...new Set((check.body.observations as Array<{ surface: string }>).map((o) => o.surface))].sort(), ['email draft', 'order view']);
+  assert.equal(lookingAt(r.cues).length, 1);
+});
