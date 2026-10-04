@@ -1,18 +1,17 @@
 ---
 id: TASK-3.11
 title: 'Work Map UI: clickable timeline with screen moments'
-status: In Progress
+status: Done
 assignee:
   - '@qwadratic'
 created_date: '2026-10-03 21:11'
-updated_date: '2026-10-04 04:15'
+updated_date: '2026-10-04 06:07'
 labels:
   - stream-b
   - workmap
   - ux
 milestone: m-0
 dependencies:
-  - TASK-3.6
   - TASK-3.8
 parent_task_id: TASK-3
 priority: high
@@ -56,3 +55,9 @@ Estimate: about 1.5 h of agent time. Card key: B-workmap-ui.
 6. Layout: no CSS needed, because ReviewView already gets the wide 3fr column in Review.
 Next steps: workmap/generic-map.ts (fromGenericMap with a test), then the screen_activity keyframes with region boxes and a synthetic fixture, then mount in ReviewView, then the controller hooks.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+WorkMapBoard merged (PR #42) and mounted in Reflect by the conductor client (PR #52, fromGenericMap adapter, screen_activity keyframes).
+<!-- SECTION:FINAL_SUMMARY:END -->

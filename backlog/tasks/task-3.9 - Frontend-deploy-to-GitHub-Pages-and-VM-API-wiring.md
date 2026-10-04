@@ -1,11 +1,11 @@
 ---
 id: TASK-3.9
 title: Frontend deploy to GitHub Pages and VM API wiring
-status: In Progress
+status: Done
 assignee:
   - '@qwadratic'
 created_date: '2026-10-03 21:10'
-updated_date: '2026-10-04 02:04'
+updated_date: '2026-10-04 06:06'
 labels:
   - stream-b
   - infra
@@ -41,3 +41,9 @@ Estimate: about 1 h of agent time. Card key: B-frontend-deploy.
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Frontend live on GitHub Pages at https://qwadratic.github.io/clipa/ (repo renamed; base path follows the repo name, PR #45/#47); API at https://apprentice.exe.xyz; release pipeline with guards deploys Pages and the VM on every main push.
+<!-- SECTION:FINAL_SUMMARY:END -->

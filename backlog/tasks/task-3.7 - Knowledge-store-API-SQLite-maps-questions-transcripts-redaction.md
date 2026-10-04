@@ -4,16 +4,16 @@ title: 'Knowledge store API: SQLite maps, questions, transcripts, redaction'
 status: To Do
 assignee: []
 created_date: '2026-10-03 21:10'
+updated_date: '2026-10-04 06:07'
 labels:
   - stream-b
   - workmap
   - session
   - infra
 milestone: m-0
-dependencies:
-  - TASK-3.6
+dependencies: []
 parent_task_id: TASK-3
-priority: high
+priority: medium
 ordinal: 13000
 ---
 
@@ -41,3 +41,9 @@ Estimate: about 1.5 h of agent time. Card key: B-knowledge-store.
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+4 Oct 06:30 UTC: still relevant. Confirmed maps live only in server memory (MapRegistry in apps/api/agent/conductor/engine.ts). Ivan wants the person to refine the map later in their web account, so maps and processes need to persist.
+<!-- SECTION:NOTES:END -->

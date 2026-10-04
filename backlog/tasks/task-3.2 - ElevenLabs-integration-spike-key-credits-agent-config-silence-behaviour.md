@@ -1,11 +1,11 @@
 ---
 id: TASK-3.2
 title: 'ElevenLabs integration spike: key, credits, agent config, silence behaviour'
-status: In Progress
+status: Done
 assignee:
   - '@qwadratic'
 created_date: '2026-10-03 21:10'
-updated_date: '2026-10-03 22:29'
+updated_date: '2026-10-04 06:06'
 labels:
   - stream-b
   - voice
@@ -48,3 +48,9 @@ Estimate: about 2 h of agent time. Card key: B-elevenlabs-spike.
 <!-- SECTION:NOTES:BEGIN -->
 PR #2 merged. Live voice check by Ivan on the deployed lab page (conversations conv_0001m41xyk8rec8tpdy03gc9rrhy and conv_2901m41y0v8pe86sw6z6z7xt83wm, 3 Oct ~22:26 UTC): two spoken Russian utterances got skip_turn and silence; Ask now was spoken verbatim about 2 s after the click; speech after the question got no reply. Real-voice silence: passed (small sample). Open: agent-minute balance and Creator code (postponed by Ivan); Expressive Mode voice choice. Tutor agent moved to TASK-3.13.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+ElevenLabs is live: interviewer and tutor agents (eleven_v4_turbo; voices Sarah and Alice; concurrency and daily limits set), signed URLs with SIGNED_URL_REQUIRE_SESSION=1, [ASK] protocol with skip_turn. Latest live prompts (4 Oct 06:15 UTC): demo pace, one-sentence replies, the app asks; greetings 'Hi, I am Clipa.'. Repo config still to sync: TASK-3.39.
+<!-- SECTION:FINAL_SUMMARY:END -->

@@ -1,11 +1,11 @@
 ---
 id: TASK-3.31
 title: 'Wire the brain, LLM route and Clipa director into the product shell'
-status: In Progress
+status: Done
 assignee:
   - '@qwadratic'
 created_date: '2026-10-04 01:59'
-updated_date: '2026-10-04 04:15'
+updated_date: '2026-10-04 06:06'
 labels:
   - stream-b
 dependencies: []
@@ -58,3 +58,9 @@ Replace the shell's NullBrain (apps/web/features/agent/shell) with packages/agen
 Root cause of 3 and 4 is in stream A's code: the runtime.bridge.onStatus handler in apps/web/features/demo-workspace/mountRuntimeWorkspace.ts disconnects the checkpoint port and drops the heartbeats on any status other than capturing; stream A should fix it there.
 Next: open the PR, merge after CI, post the head to the devops session for the VM rerun (TASK-3.42). Screenshots: coordinator scratchpad fix-*.png.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Merged: PR #36 (brain, LLM route and director wired into the shell) and PR #44 (fixes from the first VM run). The conductor (TASK-3.44/3.46) now leads; the in-browser brain is the fallback (?conductor=off).
+<!-- SECTION:FINAL_SUMMARY:END -->

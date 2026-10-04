@@ -1,10 +1,11 @@
 ---
 id: TASK-3.34
 title: 'Video toolkit: Remotion project and app recorder for the demo and tech videos'
-status: In Progress
+status: To Do
 assignee:
   - '@qwadratic'
 created_date: '2026-10-04 02:56'
+updated_date: '2026-10-04 06:07'
 labels:
   - stream-b
   - video
@@ -35,3 +36,9 @@ Ivan, 4 Oct 02:57 UTC: the team must be able to make product videos (submission 
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+4 Oct 06:30 UTC: nobody is on it now. Branch task-3.34-video-toolkit (28d7473) has the Remotion project and the app recorder; open a PR, review, merge, then use it for the demo recording (TASK-3.56).
+<!-- SECTION:NOTES:END -->

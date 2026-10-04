@@ -4,6 +4,7 @@ title: 'Work Map engine: reducer, live rule extraction, validator, versions'
 status: To Do
 assignee: []
 created_date: '2026-10-03 21:10'
+updated_date: '2026-10-04 06:07'
 labels:
   - stream-b
   - workmap
@@ -40,3 +41,9 @@ Estimate: about 2.5 h of agent time. Card key: B-knowledge-engine.
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Archived 4 Oct 06:30 UTC in the backlog clean-up: superseded by map_synthesis and map_edit (TASK-3.36, TASK-3.44) and packages/agent for the fallback brain.
+<!-- SECTION:NOTES:END -->

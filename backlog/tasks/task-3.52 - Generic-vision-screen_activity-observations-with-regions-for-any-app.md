@@ -1,10 +1,11 @@
 ---
 id: TASK-3.52
 title: 'Generic vision: screen_activity observations with regions for any app'
-status: In Progress
+status: To Do
 assignee:
   - '@qwadratic'
 created_date: '2026-10-04 06:01'
+updated_date: '2026-10-04 06:07'
 labels:
   - stream-b
 dependencies: []
@@ -32,3 +33,9 @@ Ivan's demo runs on any app (an email, a table), on the web and on macOS. The vi
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+4 Oct 06:30 UTC: not started. The contract is in the Hive integration thread and TASK-3.41 notes; the conductor already parses screen_activity (apps/api/agent/conductor/protocol.ts).
+<!-- SECTION:NOTES:END -->

@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-10-03 21:11'
+updated_date: '2026-10-04 06:07'
 labels:
   - stream-b
   - demo
@@ -15,9 +16,6 @@ milestone: m-0
 dependencies:
   - TASK-1
   - TASK-2
-  - TASK-3.14
-  - TASK-3.10
-  - TASK-3.5
   - TASK-3.7
   - TASK-3.9
   - TASK-3.13
@@ -51,3 +49,9 @@ Estimate: about 2 h of agent time. Card key: B-integration-rehearsal.
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Archived 4 Oct 06:30 UTC in the backlog clean-up: superseded: the real ScreenBridge, stores and off-record run in production.
+<!-- SECTION:NOTES:END -->

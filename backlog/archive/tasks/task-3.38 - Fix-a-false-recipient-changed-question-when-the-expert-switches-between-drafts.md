@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-10-04 04:15'
+updated_date: '2026-10-04 06:07'
 labels:
   - stream-b
 dependencies: []
@@ -33,3 +34,9 @@ Found in Ivan's live session on 4 Oct, 03:55 UTC. The expert switched between tw
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Archived 4 Oct 06:30 UTC in the backlog clean-up: applies only to the fallback in-browser brain; the conductor path does not use that rule.
+<!-- SECTION:NOTES:END -->

@@ -4,6 +4,7 @@ title: Session lifecycle and unified off-record across screen and voice
 status: To Do
 assignee: []
 created_date: '2026-10-03 21:10'
+updated_date: '2026-10-04 06:07'
 labels:
   - stream-b
   - session
@@ -12,7 +13,6 @@ labels:
 milestone: m-0
 dependencies:
   - TASK-3.1
-  - TASK-3.3
 parent_task_id: TASK-3
 priority: high
 ordinal: 11000
@@ -42,3 +42,9 @@ Estimate: about 1.5 h of agent time. Card key: B-session-offrecord.
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Archived 4 Oct 06:30 UTC in the backlog clean-up: superseded: one session per journey (PR #52) and off-record across screen, voice and conductor are implemented.
+<!-- SECTION:NOTES:END -->

@@ -4,6 +4,7 @@ title: Tutor engine and tests T1-T6 with separate expected results
 status: To Do
 assignee: []
 created_date: '2026-10-03 21:11'
+updated_date: '2026-10-04 06:07'
 labels:
   - stream-b
   - tutor
@@ -40,3 +41,9 @@ Estimate: about 2.5 h of agent time. Card key: B-tutor.
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Archived 4 Oct 06:30 UTC in the backlog clean-up: superseded: the customer_07 T1-T6 tutor engine is the fallback only; Teach uses guardrail_check on learned rules.
+<!-- SECTION:NOTES:END -->

@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-10-03 21:10'
+updated_date: '2026-10-04 06:07'
 labels:
   - stream-b
   - policy
@@ -43,3 +44,9 @@ Estimate: about 2 h of agent time. Card key: B-policy.
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Archived 4 Oct 06:30 UTC in the backlog clean-up: superseded by the server conductor (TASK-3.44): timing, budget, pause detection and the decision log live there.
+<!-- SECTION:NOTES:END -->

@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-10-04 04:15'
+updated_date: '2026-10-04 06:07'
 labels:
   - stream-b
 dependencies: []
@@ -33,3 +34,9 @@ Blocker for the v2 demo (doc-10): vision returns vision_incomplete/unsupported_s
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Archived 4 Oct 06:30 UTC in the backlog clean-up: superseded by TASK-3.52: stream B builds screen_activity itself on Ivan's call.
+<!-- SECTION:NOTES:END -->
