@@ -14,6 +14,9 @@ export interface AgentOptions {
   signedUrlRequiresSession?: boolean;
   /** Bearer token for the admin routes (list, read, delete stored sessions). Default: env API_TOKEN; under 32 chars disables them. */
   apiToken?: string;
+  /** Claude runner (infra/claude-runner). Default: env RUNNER_URL (http://127.0.0.1:8787) and RUNNER_TOKEN. */
+  runnerUrl?: string;
+  runnerToken?: string;
   elevenLabsApiKey?: string;
   elevenLabsAgentIdInterviewer?: string;
   elevenLabsAgentIdTutor?: string;
@@ -43,12 +46,25 @@ export interface Limits {
   minSessionAgeMs: number;
   tmpMaxAgeMs: number;
   maintenanceIntervalMs: number;
+  /**
+   * POST /api/agent/llm/:task costs money and shares the runner with vision, so it is bounded hard:
+   * per session, per client IP (checked before the token, a venue may share one IP) and globally (counted
+   * only for authorized calls), plus at most one call in flight per session and llmGlobalInFlight overall.
+   */
+  llmPerSessionPerMinute: number;
+  llmPerSessionPerHour: number;
+  llmPerIpPerMinute: number;
+  llmPerIpPerHour: number;
+  llmGlobalPerHour: number;
+  llmGlobalInFlight: number;
+  llmInputBytes: number;
 }
 export interface Timing {
   finishWaitMs: number;
   finishRetryMs: number;
   backgroundWaitMs: number;
   backgroundPollMs: number;
+  llmTimeoutMs: number;
 }
 export interface AgentConfig {
   allowedOrigins: ReadonlySet<string>;
@@ -56,6 +72,8 @@ export interface AgentConfig {
   sessionTtlMs: number;
   signedUrlRequiresSession: boolean;
   apiToken: string;
+  runnerUrl: string;
+  runnerToken: string;
   elevenLabsApiKey: string;
   interviewerAgentId: string;
   agentIds: ReadonlySet<string>;
@@ -101,15 +119,24 @@ export function resolveConfig(options: AgentOptions = {}, env: NodeJS.ProcessEnv
     minSessionAgeMs: 24 * 3_600_000,
     tmpMaxAgeMs: 10 * 60_000,
     maintenanceIntervalMs: 10 * 60_000,
+    llmPerSessionPerMinute: int('AGENT_LLM_PER_SESSION_MIN', 6),
+    llmPerSessionPerHour: int('AGENT_LLM_PER_SESSION_HOUR', 60),
+    llmPerIpPerMinute: int('AGENT_LLM_PER_IP_MIN', 20),
+    llmPerIpPerHour: int('AGENT_LLM_PER_IP_HOUR', 200),
+    llmGlobalPerHour: int('AGENT_LLM_GLOBAL_HOUR', 600),
+    llmGlobalInFlight: int('AGENT_LLM_GLOBAL_IN_FLIGHT', 1),
+    llmInputBytes: 16 * 1024,
     ...options.limits,
   };
-  const timing: Timing = { finishWaitMs: 18_000, finishRetryMs: 3000, backgroundWaitMs: 5 * 60_000, backgroundPollMs: 5000, ...options.timing };
+  const timing: Timing = { finishWaitMs: 18_000, finishRetryMs: 3000, backgroundWaitMs: 5 * 60_000, backgroundPollMs: 5000, llmTimeoutMs: int('AGENT_LLM_TIMEOUT_MS', 25_000), ...options.timing };
   return {
     allowedOrigins: new Set(origins),
     sessionsDir: options.sessionsDir ?? env.SESSIONS_DIR ?? '/var/lib/apprentice/sessions',
     sessionTtlMs: options.sessionTtlMs ?? 12 * 3_600_000,
     signedUrlRequiresSession: options.signedUrlRequiresSession ?? env.SIGNED_URL_REQUIRE_SESSION === '1',
     apiToken: options.apiToken ?? env.API_TOKEN ?? '',
+    runnerUrl: options.runnerUrl ?? (env.RUNNER_URL || 'http://127.0.0.1:8787'),
+    runnerToken: options.runnerToken ?? env.RUNNER_TOKEN ?? '',
     elevenLabsApiKey: options.elevenLabsApiKey ?? env.ELEVENLABS_API_KEY ?? '',
     interviewerAgentId: interviewer,
     agentIds: new Set([interviewer, tutor].filter(Boolean)),
