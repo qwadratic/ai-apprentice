@@ -1,0 +1,522 @@
+// The real brain of the shell: an adapter from the shell's Brain seam (brain/types.ts) to packages/agent.
+// packages/agent decides (ConversationPolicy), keeps the Work Map (reduceMap), runs the debrief (planFollowUps, teach-back)
+// and judges a checkpoint (tutor). This file only translates: observations in, BrainDecisions out, answers to the map, and
+// a CheckpointReply for the workspace. Nothing about the customer rule is written here; it all comes from the expert's answers.
+//
+// Models: when the session has an LLM route, the extractor, the reply classifier and the entity resolver call it through one
+// LlmClient (queued, one call at a time). Any failure falls back to the heuristics inside packages/agent, and the client's
+// events (task, outcome, reason; never the text) reach the log through `log`.
+import type { ActionCheckpoint, CheckpointReply, ScreenObservation, ScreenStatus } from '@apprentice/contracts';
+import {
+  ConversationPolicy, HeuristicAnswerExtractor, HeuristicReplyClassifier, LlmAnswerExtractor, LlmEntityResolver, LlmReplyClassifier,
+  MAX_FOLLOW_UPS, applyTeachBackReply, buildPrediction, buildTeachBack, checkpoint as judgeCheckpoint, createMapState, evaluatePrediction,
+  knownCustomerRefs, latestConfirmed, planFollowUps, reduceMap, reviewStatus, summarizeMastery, workingMap,
+} from '@apprentice/agent';
+import type {
+  AnswerExtractor, BrainDecision as PolicyDecision, CaseOutcome, MapState, Prediction, Question, ReplyClassifier, ReplyVerdict, WorkMap,
+} from '@apprentice/agent';
+import type { Mode } from '../state/types.ts';
+import type {
+  AnswerInput, AnswerResult, Brain, BrainDecision, BrainSession, BrainSignals, ClipaTargetRef, DraftMap, DraftStep, GuardrailRef,
+  MasteryLines, ReviewOutput, TranscriptTurn,
+} from './types.ts';
+
+const REVIEW_GAP_MS = 1500;
+const MAX_TEACH_BACK_TRIES = 3;
+const MAX_OBSERVATIONS = 300;
+
+/** What the topic of a question is called in the shell's decision log. */
+const TOPIC_KIND: Readonly<Record<string, string>> = {
+  reason: 'reason',
+  essentials: 'essentials',
+  guardrail: 'stop_and_ask',
+  scope: 'scope',
+  exception: 'exception',
+  why_stop: 'stop_and_ask',
+  duration: 'duration',
+  ticket_note: 'note',
+  predict_next: 'predict',
+  checkpoint: 'checkpoint',
+  teach_back: 'teach_back',
+};
+
+/** Where Clipa goes for a Learn question, by what changed on screen. The surfaces are the workspace's (order, email, ticket). */
+const CANDIDATE_TARGET: Readonly<Record<string, ClipaTargetRef>> = {
+  attachment_removed: { surface: 'email', hint: 'attachments' },
+  attachment_added: { surface: 'email', hint: 'attachments' },
+  body_text_why: { surface: 'email', hint: 'body' },
+  body_text_added: { surface: 'email', hint: 'body' },
+  recipient_changed: { surface: 'email', hint: 'recipient' },
+  preview_opened: { surface: 'email', hint: 'preview' },
+  ticket_done: { surface: 'ticket' },
+  decision_point: { surface: 'order' },
+};
+
+export const SEND_TARGET: ClipaTargetRef = { surface: 'email', hint: 'send' };
+
+type OpenQuestion =
+  | { kind: 'learn'; questionId: string; question: Question }
+  | { kind: 'followup'; question: Question }
+  | { kind: 'teachback'; text: string }
+  | { kind: 'predict'; questionId: string; prediction: Prediction };
+
+interface TeachProgress {
+  caseId: string;
+  title: string;
+  prediction: Prediction | null;
+  verdict: CaseOutcome['verdict'] | null;
+  firstStatus: CaseOutcome['firstStatus'] | null;
+}
+
+export interface AgentBrainOptions {
+  /** One line for the debug log. Never a token or a transcript. */
+  log(line: string): void;
+  /** The customers the workspace knows: what a spoken "customer seven" can be resolved to. */
+  customers: readonly string[];
+}
+
+const keyOf = (q: Question): string => `${q.topic}:${q.targetId ?? q.entityRef ?? ''}`;
+
+function errMsg(e: unknown): string {
+  return e instanceof Error && e.message ? e.message : String(e);
+}
+
+export class AgentBrain implements Brain {
+  readonly name = 'AgentBrain (packages/agent)';
+  readonly wired = true;
+
+  private readonly options: AgentBrainOptions;
+  private mode: Mode = 'learn';
+  private persona: BrainSession['persona'] = 'plain';
+  private sessionId = '';
+  private nowMs = 0;
+  private state: MapState;
+  private policy: ConversationPolicy | null = null;
+  private learnPolicy: ConversationPolicy | null = null;
+  private observations: ScreenObservation[] = [];
+  private extractor: AnswerExtractor = new HeuristicAnswerExtractor();
+  private classifier: ReplyClassifier = new HeuristicReplyClassifier();
+  private outbox: BrainDecision[] = [];
+  private open: OpenQuestion | null = null;
+  private busy = false;
+  private lastAnsweredAtMs: number | null = null;
+  // Review
+  private asked = new Set<string>();
+  private teachBackTries = 0;
+  private reviewClosed = false;
+  private reviewHalted = false;
+  // Teach
+  private teach: TeachProgress | null = null;
+  private outcomes: CaseOutcome[] = [];
+
+  constructor(options: AgentBrainOptions) {
+    this.options = options;
+    this.state = createMapState(options.customers);
+  }
+
+  // ---- session ------------------------------------------------------------
+
+  begin(session: BrainSession): void {
+    this.mode = session.mode;
+    this.persona = session.persona;
+    this.sessionId = session.sessionId;
+    this.nowMs = 0;
+    this.observations = [];
+    this.outbox = [];
+    this.open = null;
+    this.busy = false;
+    this.lastAnsweredAtMs = null;
+    this.asked = new Set();
+    this.teachBackTries = 0;
+    this.reviewClosed = false;
+    this.reviewHalted = false;
+    this.teach = null;
+
+    const llm = session.llm;
+    if (llm) {
+      const resolver = new LlmEntityResolver({ client: llm });
+      this.extractor = new LlmAnswerExtractor({ client: llm, resolver });
+      this.classifier = new LlmReplyClassifier({ client: llm });
+      this.options.log('Model-backed extraction, reply reading and customer resolution on; any failure falls back to heuristics.');
+    } else {
+      this.extractor = new HeuristicAnswerExtractor();
+      this.classifier = new HeuristicReplyClassifier();
+      this.options.log('No LLM route for this session: heuristic extraction and reply reading.');
+    }
+
+    const now = (): number => this.nowMs;
+    if (session.mode === 'learn') {
+      this.state = createMapState(this.options.customers);
+      this.outcomes = [];
+      this.policy = new ConversationPolicy({ mode: 'learn', persona: session.persona, now });
+      this.learnPolicy = this.policy;
+    } else if (session.mode === 'teach') {
+      this.policy = new ConversationPolicy({ mode: 'teach', persona: session.persona, now });
+      this.policy.setMap(latestConfirmed(this.state));
+      this.teach = { caseId: session.caseId ?? 'case', title: session.caseTitle ?? 'Sample case', prediction: null, verdict: null, firstStatus: null };
+      const confirmed = latestConfirmed(this.state);
+      this.options.log(confirmed ? `Teach reads Work Map version ${confirmed.version} (confirmed).` : 'Teach has no confirmed Work Map: every checkpoint will be unknown.');
+    } else {
+      this.policy = null;
+    }
+  }
+
+  // ---- inputs -------------------------------------------------------------
+
+  onObservation(o: ScreenObservation): void {
+    this.observations.push(o);
+    if (this.observations.length > MAX_OBSERVATIONS) this.observations.shift();
+    try {
+      this.policy?.observe(o);
+      if (this.mode === 'learn') this.state = reduceMap(this.state, { type: 'observation', observation: o });
+    } catch (e) {
+      this.options.log(`observation ${o.kind} could not be used: ${errMsg(e)}`);
+    }
+  }
+
+  onStatus(s: ScreenStatus): void {
+    this.options.log(`screen status ${s.state}${s.reason ? ` (${s.reason})` : ''}`);
+  }
+
+  onTranscript(t: TranscriptTurn): void {
+    if (t.role !== 'user') return;
+    // A final transcript means the phrase just ended: the human channel is quiet from here for its threshold.
+    this.policy?.humanSpeech(true, t.atMs);
+    this.policy?.humanSpeech(false, t.atMs);
+  }
+
+  // ---- the loop -----------------------------------------------------------
+
+  tick(nowMs: number, signals?: BrainSignals): BrainDecision[] {
+    this.nowMs = nowMs;
+    if (signals) {
+      this.policy?.agentSpeech(signals.agentSpeaking);
+      this.policy?.humanSpeech(signals.humanSpeaking, nowMs);
+      this.policy?.setOffRecord(signals.offRecord, nowMs);
+    }
+    const out: BrainDecision[] = this.outbox.splice(0);
+    if (signals?.offRecord) return out;
+    if (this.mode === 'review') return [...out, ...this.reviewTick(nowMs, signals)];
+    const policy = this.policy;
+    if (policy === null) return out;
+    for (const d of policy.tick(nowMs)) out.push(this.fromPolicy(d, policy));
+    return out;
+  }
+
+  private fromPolicy(d: PolicyDecision, policy: ConversationPolicy): BrainDecision {
+    const topic = d.topic ?? 'none';
+    const base: BrainDecision = { decision: d.decision, topic, kind: TOPIC_KIND[topic] ?? topic, whyNow: d.whyNow, evidenceIds: [...d.evidenceIds] };
+    if (d.decision === 'ASK_NOW' && d.question !== null && d.questionId !== null && d.utterance !== null) {
+      this.open = { kind: 'learn', questionId: d.questionId, question: d.question };
+      const candidate = policy.candidates.find((c) => c.id === d.candidateId);
+      const target = candidate ? CANDIDATE_TARGET[candidate.kind] : undefined;
+      return {
+        ...base, questionId: d.questionId, expectsAnswer: true,
+        utterance: { text: d.utterance.text, delivery: d.utterance.delivery, maxWords: d.utterance.maxWords },
+        clipa: { state: 'approach', ...(target ? { target } : {}) },
+      };
+    }
+    if (d.decision === 'PREDICT' && d.utterance !== null && d.questionId !== null && d.prediction !== null) {
+      this.open = { kind: 'predict', questionId: d.questionId, prediction: d.prediction };
+      if (this.teach) this.teach.prediction = d.prediction;
+      return {
+        ...base, questionId: d.questionId, expectsAnswer: true,
+        utterance: { text: d.utterance.text, delivery: d.utterance.delivery, maxWords: d.utterance.maxWords },
+        clipa: { state: 'approach', target: CANDIDATE_TARGET['decision_point'] ?? { surface: 'order' } },
+      };
+    }
+    return base;
+  }
+
+  /** A spoken decision never reached the person: the question goes back to the policy's queue. */
+  onNotSpoken(decision: BrainDecision): void {
+    const id = decision.questionId;
+    if (id === undefined) return;
+    const open = this.open;
+    if (open && 'questionId' in open && open.questionId === id) {
+      this.open = null;
+      this.policy?.cancelQuestion(id, this.nowMs);
+    } else if (open?.kind === 'followup' || open?.kind === 'teachback') {
+      this.open = null;
+    }
+  }
+
+  // ---- answers ------------------------------------------------------------
+
+  private orderFields(): Record<string, string> {
+    const order = this.observations.filter((o) => o.kind === 'order_view').at(-1);
+    if (order?.kind !== 'order_view') return {};
+    const fields: Record<string, string> = {};
+    for (const [k, v] of Object.entries({ orderId: order.facts.orderId, deliveryAddress: order.facts.deliveryAddress, deliveryWindow: order.facts.deliveryWindow })) {
+      if (v !== null && v !== '') fields[k] = v;
+    }
+    return fields;
+  }
+
+  async onAnswer(a: AnswerInput): Promise<AnswerResult | void> {
+    if (a.kind === 'confirm') return this.confirmNow(a);
+    if (a.kind === 'correct') return this.reply(a, 'correct');
+    const open = this.open;
+    if (open === null || this.busy) {
+      this.options.log('An answer arrived with no open question: it stays in the transcript only.');
+      return undefined;
+    }
+    this.busy = true;
+    try {
+      switch (open.kind) {
+        case 'learn':
+          return await this.learnAnswer(open, a);
+        case 'followup':
+          return await this.followUpAnswer(open, a);
+        case 'teachback':
+          return await this.reply(a, null);
+        case 'predict':
+          return this.predictAnswer(open, a);
+      }
+    } catch (e) {
+      this.options.log(`answer could not be used: ${errMsg(e)}`);
+      this.open = null;
+      return undefined;
+    } finally {
+      this.busy = false;
+      this.lastAnsweredAtMs = this.nowMs;
+    }
+  }
+
+  private async extract(question: Question, a: AnswerInput): Promise<void> {
+    const extraction = await this.extractor.extract({
+      topic: question.topic,
+      text: a.text,
+      questionId: question.id,
+      questionText: question.text,
+      atMs: a.atMs,
+      evidenceIds: question.evidenceIds,
+      targetId: question.targetId,
+      entityRef: question.entityRef,
+      knownRefs: knownCustomerRefs(this.state),
+      orderFields: this.orderFields(),
+    });
+    this.state = reduceMap(this.state, { type: 'answer', extraction });
+    this.options.log(`answer to ${question.topic} added to the Work Map (draft version ${workingMap(this.state).version}).`);
+  }
+
+  private async learnAnswer(open: Extract<OpenQuestion, { kind: 'learn' }>, a: AnswerInput): Promise<AnswerResult> {
+    await this.extract(open.question, a);
+    this.policy?.setMap(workingMap(this.state));
+    this.policy?.finishQuestion(open.questionId, a.atMs);
+    this.open = null;
+    return { changed: true };
+  }
+
+  private async followUpAnswer(open: Extract<OpenQuestion, { kind: 'followup' }>, a: AnswerInput): Promise<AnswerResult> {
+    await this.extract(open.question, a);
+    this.open = null;
+    return { changed: true };
+  }
+
+  private predictAnswer(open: Extract<OpenQuestion, { kind: 'predict' }>, a: AnswerInput): AnswerResult {
+    const evaluation = evaluatePrediction(open.prediction, a.text);
+    this.policy?.finishQuestion(open.questionId, a.atMs);
+    this.open = null;
+    if (this.teach) this.teach.verdict = evaluation.verdict;
+    const quote = evaluation.quotes[0];
+    const text = quote ? `${evaluation.feedback} The expert said: "${quote.replace(/[.!?]+$/, '')}."` : evaluation.feedback;
+    this.outbox.push({
+      decision: 'PREDICT', topic: 'predict_feedback', kind: 'feedback', whyNow: `The new hire's prediction was a ${evaluation.verdict}.`,
+      evidenceIds: [...open.prediction.evidenceIds], utterance: { text }, expectsAnswer: false,
+      clipa: { state: 'speaking' },
+    });
+    return { changed: true };
+  }
+
+  /** The reply to the teach-back, by voice (verdict from the classifier) or typed (verdict forced). */
+  private async reply(a: AnswerInput, force: 'correct' | null): Promise<AnswerResult> {
+    const forced: ReplyClassifier | null = force === 'correct'
+      ? { name: 'typed correction', classify: (): Promise<ReplyVerdict> => Promise.resolve({ verdict: 'correct', correction: null }) }
+      : null;
+    this.busy = true;
+    try {
+      const outcome = await applyTeachBackReply(this.state, { text: a.text, atMs: a.atMs }, this.extractor, forced ?? this.classifier);
+      this.state = outcome.state;
+      this.open = null;
+      this.policy?.setMap(workingMap(this.state));
+      if (outcome.outcome === 'refused') {
+        this.reviewHalted = true;
+        const missing = outcome.issues.map((i) => `${i.kind} ${i.id} lacks ${i.missing.join(' and ')}`).join('; ');
+        this.options.log(`Teach-back not confirmed: ${missing}.`);
+        this.say('refused', `I cannot save this version yet: ${missing}. Please answer the open questions first.`);
+      } else if (outcome.outcome === 'unclear') {
+        this.teachBackTries += 1;
+        this.options.log(`Teach-back reply unclear (try ${this.teachBackTries} of ${MAX_TEACH_BACK_TRIES}).`);
+      } else if (outcome.outcome === 'confirmed') {
+        this.options.log(`Work Map version ${latestConfirmed(this.state)?.version ?? '?'} confirmed.`);
+      } else {
+        this.options.log(`Work Map corrected: next version ${workingMap(this.state).version}.`);
+      }
+      return { teachBack: outcome.outcome, changed: true };
+    } finally {
+      this.busy = false;
+      this.lastAnsweredAtMs = this.nowMs;
+    }
+  }
+
+  private confirmNow(a: AnswerInput): AnswerResult {
+    try {
+      const outcome = reduceMap(this.state, { type: 'confirm', atMs: a.atMs, quote: null });
+      this.state = outcome;
+      this.open = null;
+      this.policy?.setMap(workingMap(this.state));
+      this.options.log(`Work Map version ${latestConfirmed(this.state)?.version ?? '?'} confirmed.`);
+      return { teachBack: 'confirmed', changed: true };
+    } catch (e) {
+      this.options.log(`Confirm refused: ${errMsg(e)}`);
+      return { teachBack: 'refused' };
+    }
+  }
+
+  // ---- Review: the debrief ------------------------------------------------
+
+  private say(topic: string, text: string): void {
+    this.outbox.push({
+      decision: 'ASK_NOW', topic, kind: TOPIC_KIND[topic] ?? topic, whyNow: 'The debrief says something that needs no answer.', evidenceIds: [],
+      utterance: { text }, expectsAnswer: false, clipa: { state: 'speaking' },
+    });
+  }
+
+  private reviewTick(nowMs: number, signals: BrainSignals | undefined): BrainDecision[] {
+    if (this.busy || this.open !== null || this.reviewHalted) return [];
+    if (!signals || !signals.voiceConnected || signals.agentSpeaking || signals.humanSpeaking) return [];
+    if (this.lastAnsweredAtMs !== null && nowMs - this.lastAnsweredAtMs < REVIEW_GAP_MS) return [];
+
+    const map = workingMap(this.state);
+    const held = this.learnPolicy?.heldForReview(nowMs) ?? [];
+    const next = planFollowUps(map, { persona: this.persona, held, max: MAX_FOLLOW_UPS }).find((q) => !this.asked.has(keyOf(q)));
+    if (next !== undefined) {
+      this.asked.add(keyOf(next));
+      this.open = { kind: 'followup', question: next };
+      return [{
+        decision: 'ASK_NOW', topic: next.topic, kind: TOPIC_KIND[next.topic] ?? next.topic, evidenceIds: [...next.evidenceIds],
+        whyNow: `The Work Map has a gap about ${next.topic.replace(/_/g, ' ')} that the task did not close.`,
+        utterance: { text: next.text }, expectsAnswer: true, clipa: { state: 'speaking' },
+      }];
+    }
+    const status = reviewStatus(this.state, { persona: this.persona, held });
+    if (status.done) {
+      if (this.reviewClosed) return [];
+      this.reviewClosed = true;
+      this.say('review_done', `Thank you. The Work Map is confirmed (version ${status.confirmed?.version ?? map.version}). You can switch to Teach now.`);
+      return this.outbox.splice(0);
+    }
+    if (this.teachBackTries >= MAX_TEACH_BACK_TRIES || map.guardrails.length === 0) return [];
+    const text = buildTeachBack(map).text;
+    this.open = { kind: 'teachback', text };
+    return [{
+      decision: 'ASK_NOW', topic: 'teach_back', kind: 'teach_back', evidenceIds: buildTeachBack(map).evidenceIds,
+      whyNow: `No gap is left; playing back version ${map.version} for the expert to confirm or correct.`,
+      utterance: { text }, expectsAnswer: true, clipa: { state: 'speaking' },
+    }];
+  }
+
+  // ---- Review and the map, for the screen ---------------------------------
+
+  review(): ReviewOutput {
+    const map = workingMap(this.state);
+    const held = this.learnPolicy?.heldForReview(this.nowMs) ?? [];
+    const gaps = planFollowUps(map, { persona: this.persona, held, max: MAX_FOLLOW_UPS }).map((q) => ({
+      id: q.id, topic: q.topic, question: q.text, evidenceIds: [...q.evidenceIds],
+    }));
+    const teachBack = gaps.length === 0 && map.guardrails.length > 0 ? buildTeachBack(map).text : null;
+    return { gaps, teachBack, map: this.shown(map) };
+  }
+
+  private shown(map: WorkMap): DraftMap {
+    const confirmed = latestConfirmed(this.state);
+    return toDraftMap(map, confirmed !== null && confirmed.version === map.version && !this.state.draft.dirty);
+  }
+
+  // ---- Teach --------------------------------------------------------------
+
+  checkpoint(c: ActionCheckpoint): CheckpointReply {
+    const map = latestConfirmed(this.state);
+    const verdict = judgeCheckpoint({ checkpoint: c, observations: this.observations, map, sessionId: this.sessionId });
+    const reply: CheckpointReply = {
+      schemaVersion: 1, checkpointId: verdict.checkpointId, status: verdict.status, message: verdict.message,
+      evidenceIds: [...verdict.evidenceIds], basedOn: { order: verdict.basedOn.order, email: verdict.basedOn.email },
+    };
+    this.options.log(`checkpoint ${c.id}: ${verdict.status}${map ? ` against Work Map version ${map.version}` : ' (no confirmed map)'}.`);
+    const policy = this.policy;
+    if (policy) {
+      const d = policy.decideCheckpoint({ status: verdict.status, evidenceIds: verdict.evidenceIds }, this.nowMs);
+      if (d.decision === 'WARN') {
+        this.outbox.push({
+          decision: 'WARN', topic: 'checkpoint', kind: verdict.status === 'warn' ? 'guardrail' : 'unknown', whyNow: d.whyNow,
+          evidenceIds: [...verdict.evidenceIds], utterance: { text: verdict.message }, expectsAnswer: false,
+          clipa: { state: 'warning', target: SEND_TARGET },
+        });
+      }
+    }
+    const t = this.teach;
+    if (t !== null && t.firstStatus === null) {
+      t.firstStatus = verdict.status;
+      const prediction = t.prediction;
+      // No prediction asked means the map had nothing to decide here (or the person has not answered yet): a miss only when one was asked.
+      const verdictOf = t.verdict ?? (prediction === null ? 'match' : 'miss');
+      this.outcomes = [
+        ...this.outcomes.filter((o) => o.caseId !== t.caseId),
+        { caseId: t.caseId, title: t.title, verdict: verdictOf, firstStatus: verdict.status, sent: false },
+      ];
+    }
+    return reply;
+  }
+
+  /** What has been mastered over the Teach cases so far. */
+  mastery(): MasteryLines | null {
+    if (this.outcomes.length === 0) return null;
+    const m = summarizeMastery(this.outcomes);
+    const lineOf = (id: string): string => m.lines[this.outcomes.findIndex((o) => o.caseId === id)] ?? id;
+    return { mastered: m.mastered.map(lineOf), practise: m.practise.map(lineOf) };
+  }
+
+  /** The Work Map version Teach would use, for the UI and the log. */
+  confirmedVersion(): number | null {
+    return latestConfirmed(this.state)?.version ?? null;
+  }
+
+  /** Prediction of the map for an order, as the tutor would ask it (exposed for tests and the debug view). */
+  predictionFor(order: Parameters<typeof buildPrediction>[0]): Prediction {
+    return buildPrediction(order, latestConfirmed(this.state));
+  }
+}
+
+// ---- WorkMap -> the shell's DraftMap ---------------------------------------------------------------------------------
+
+function guardrailText(g: WorkMap['guardrails'][number]): string {
+  const who = g.scope.kind === 'all' ? 'every customer' : g.scope.customers.join(', ') || 'this customer';
+  const rule = g.trigger === 'customer'
+    ? `${who}: ${g.requiredAction}`
+    : g.trigger === 'unknown_entity'
+      ? `If the customer is not recognised: ${g.requiredAction}`
+      : `${g.condition}: ${g.requiredAction}`;
+  const why = g.reason !== null ? ` Reason: ${g.reason}.` : g.unexplained || g.reasonUnknown ? ' The expert does not know the reason.' : '';
+  const quote = g.quote !== null ? ` The expert: "${g.quote}"` : '';
+  return `${rule}${why}${quote}`;
+}
+
+export function toDraftMap(map: WorkMap, confirmed: boolean): DraftMap {
+  const guardrails: GuardrailRef[] = map.guardrails.map((g) => ({ id: g.id, text: guardrailText(g), evidenceIds: [...g.evidenceIds] }));
+  const byId = new Map(guardrails.map((g) => [g.id, g]));
+  const steps: DraftStep[] = map.steps.map((s) => {
+    const evidence = [...new Set([...s.evidenceIds, ...(s.decision?.evidenceIds ?? [])])];
+    return {
+      id: s.id,
+      title: s.goal || s.action,
+      kind: s.kind === 'judgment' ? 'judgment' : 'step',
+      decision: s.decision?.summary ?? null,
+      reason: s.decision?.reason ?? s.decision?.quote ?? null,
+      guardrails: s.guardrailIds.flatMap((id) => { const g = byId.get(id); return g ? [g] : []; }),
+      evidenceIds: evidence,
+      atMs: s.atMs,
+    };
+  });
+  return { steps, version: map.version, confirmed, guardrails };
+}

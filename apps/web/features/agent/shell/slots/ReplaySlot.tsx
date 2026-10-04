@@ -28,7 +28,7 @@ export function ReplaySlot() {
 
   if (evidenceId === null) return null;
   return (
-    <section className="as-card as-replay" aria-labelledby="as-replay-title" data-testid="replay-slot">
+    <section className="as-card as-replay" aria-labelledby="as-replay-title" data-testid="replay-slot" data-clipa-surface="replay">
       <div className="as-card__head">
         <h2 className="as-card__title" id="as-replay-title">Replay of a screen moment</h2>
         <button type="button" className="as-btn as-btn--small" onClick={() => controller.closeEvidence()}>Close</button>

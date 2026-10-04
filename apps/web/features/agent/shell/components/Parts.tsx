@@ -31,7 +31,10 @@ export function clockOf(ms: number | null): string {
 /** The draft map as step cards. Each step links to its screen moments. */
 export function StepCards({ map }: { map: DraftMap }) {
   if (map.steps.length === 0) return null;
+  const listed = new Set(map.steps.flatMap((s) => s.guardrails.map((g) => g.id)));
+  const loose = (map.guardrails ?? []).filter((g) => !listed.has(g.id));
   return (
+    <>
     <ol className="as-steps" aria-label="Draft map">
       {map.steps.map((step, i) => (
         <li key={step.id} className={`as-step as-step--${step.kind}`}>
@@ -52,5 +55,15 @@ export function StepCards({ map }: { map: DraftMap }) {
         </li>
       ))}
     </ol>
+    {loose.length > 0 && (
+      <ul className="as-steps as-steps--guards" aria-label="Guardrails not tied to a step">
+        {loose.map((g) => (
+          <li key={g.id} className="as-step as-step--guard">
+            <p className="as-step__line as-step__line--guard"><span className="as-step__key">Guardrail</span> {g.text} <EvidenceLinks ids={g.evidenceIds} /></p>
+          </li>
+        ))}
+      </ul>
+    )}
+    </>
   );
 }

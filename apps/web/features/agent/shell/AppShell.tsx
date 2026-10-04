@@ -52,6 +52,7 @@ export function AppShell() {
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('pagehide', onPageHide);
       controller.dispose();
+      runtime.dispose();
     };
   }, [runtime]);
 
@@ -64,7 +65,7 @@ export function AppShell() {
         <main className="as-main">
           <div className="as-left">
             <ScreenSlot collapsed={screenCollapsed} onToggle={() => setScreenCollapsed((v) => !v)} />
-            <WorkspaceSlot />
+            <WorkspaceSlot adapter={runtime.workspace} />
           </div>
           <div className="as-right">
             <section className="as-card as-clipa-card" aria-label="Clipa">

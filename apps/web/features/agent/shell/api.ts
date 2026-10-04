@@ -2,6 +2,7 @@
 //   POST {base}/api/agent/sessions                     -> 201 {sessionId, token, issuedAtMs, serverNowMs}
 //   GET  {base}/api/agent/elevenlabs/signed-url        Authorization: Bearer <token>  -> {signed_url}
 //   POST {base}/api/agent/sessions/:id/events|finish   Authorization: Bearer <token>
+//   POST {base}/api/agent/llm/:task                    Authorization: Bearer <token>  (the brain's model-backed parts)
 // The browser, not the server, chooses sessionEpochMs (Date.now() at the start click).
 // The token and the signed URL stay in this module's closures and in the request that uses them: they are never
 // put into shell state, the DOM or the visible log.
@@ -34,6 +35,8 @@ export interface AgentSession {
   signedUrl(role: VoiceRole): ApiRequest;
   events(): ApiRequest;
   finish(): ApiRequest;
+  /** POST {base}/api/agent/llm/:task with the session token, or null on the placeholder API (it has no LLM route). */
+  llm(task: string): ApiRequest | null;
 }
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
@@ -91,6 +94,7 @@ export function createAgentApi(options: AgentApiOptions): AgentApi {
       signedUrl: (role) => ({ url: `${base}/agent/elevenlabs/signed-url?role=${role}`, headers: {} }),
       events: () => ({ url: `${prefix}/events`, headers: {} }),
       finish: () => ({ url: `${prefix}/finish`, headers: {} }),
+      llm: () => null,
     };
   }
 
@@ -102,6 +106,7 @@ export function createAgentApi(options: AgentApiOptions): AgentApi {
       signedUrl: (role) => ({ url: `${base}/api/agent/elevenlabs/signed-url?role=${role}`, headers: { ...headers } }),
       events: () => ({ url: `${prefix}/events`, headers: { ...headers } }),
       finish: () => ({ url: `${prefix}/finish`, headers: { ...headers } }),
+      llm: (task) => ({ url: `${base}/api/agent/llm/${encodeURIComponent(task)}`, headers: { ...headers } }),
     };
   }
 

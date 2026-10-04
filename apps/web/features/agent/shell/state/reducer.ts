@@ -1,5 +1,6 @@
 import type { ScreenState } from '@apprentice/contracts';
 import type { DraftMap, GapItem } from '../brain/types.ts';
+import type { TeachCaseId } from '../screen/sample-scenarios.ts';
 import { LIMITS } from './types.ts';
 import type {
   Banner, CaptureInfo, CheckpointCard, DecisionEntry, FeedItem, FeedStatus, LogLine, MasteryState, Mode, ObservationRow,
@@ -22,7 +23,7 @@ export function initialState(persona: Persona = DEFAULT_PERSONA): ShellState {
     feed: [],
     draftMap: { steps: [] },
     review: { gaps: [], teachBack: { text: null, status: 'none', correction: null } },
-    teach: { checkpoint: null, mastery: null },
+    teach: { checkpoint: null, mastery: null, sampleCase: 't1' },
     replay: { evidenceId: null },
     clipaHint: null,
     decisions: [],
@@ -35,6 +36,7 @@ export type Action =
   | { type: 'MODE_SET'; mode: Mode }
   | { type: 'PERSONA_SET'; persona: Persona }
   | { type: 'SAMPLE_SET'; on: boolean }
+  | { type: 'SAMPLE_CASE_SET'; caseId: TeachCaseId }
   | { type: 'OFF_RECORD_SET'; on: boolean }
   | { type: 'BRAIN_SET'; name: string; wired: boolean }
   | { type: 'SESSION_STARTING'; mode: Mode }
@@ -84,7 +86,7 @@ function learnReset(state: ShellState): Partial<ShellState> {
     decisions: [],
     draftMap: { steps: [] },
     review: { gaps: [], teachBack: { text: null, status: 'none', correction: null } },
-    teach: { checkpoint: null, mastery: null },
+    teach: { ...state.teach, checkpoint: null, mastery: null },
     replay: { evidenceId: null },
     clipaHint: null,
     banner: withoutError(state.banner),
@@ -100,6 +102,8 @@ export function reduce(state: ShellState, action: Action): ShellState {
       return { ...state, persona: action.persona };
     case 'SAMPLE_SET':
       return { ...state, screen: { ...state.screen, sampleOn: action.on } };
+    case 'SAMPLE_CASE_SET':
+      return state.teach.sampleCase === action.caseId ? state : { ...state, teach: { ...state.teach, sampleCase: action.caseId } };
     case 'OFF_RECORD_SET':
       return {
         ...state,

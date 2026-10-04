@@ -1,4 +1,4 @@
-// The real connector, ported from the agent lab (apps/web/features/agent/lab/src/lab.ts). The SDK is loaded on
+// The real connector (ElevenLabs Agents web SDK). The SDK is loaded on
 // first use so that the first paint does not wait for it (and it stays out of the entry chunk).
 import type { VoiceConnector, VoiceMode } from './types.ts';
 
@@ -26,6 +26,7 @@ export const connectElevenLabs: VoiceConnector = async (signedUrl, events, signa
     onStatusChange: ({ status }) => { events.onStatus(status); },
     onModeChange: ({ mode }) => { events.onMode(mode as VoiceMode); },
     onMessage: (m) => { events.onMessage({ source: m.source === 'ai' ? 'ai' : 'user', text: m.message }); },
+    onVadScore: ({ vadScore }) => { events.onVadScore?.(vadScore); },
     onError: (message, context) => {
       events.onError(messageOf(message));
       if (context) events.onError(messageOf(context));

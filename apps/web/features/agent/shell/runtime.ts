@@ -1,18 +1,28 @@
-// Wires the real world (browser fetch, timers, ElevenLabs, localStorage) into the controller.
+// Wires the real world (browser fetch, timers, ElevenLabs, localStorage, the Clipa motion director) into the controller.
+import { createClipaDirector } from '../clipa/src/index.ts';
+import type { WorkspaceAdapter } from './slots/workspace-adapter.ts';
 import { createAgentApi } from './api.ts';
 import type { FetchLike } from './api.ts';
-import { NullBrain } from './brain/null-brain.ts';
+import { AgentBrain } from './brain/agent-brain.ts';
+import { createDirectorPresenter } from './clipa/director-presenter.ts';
+import { InputGuard, watchPageInput } from './clipa/input-guard.ts';
 import { createClipaStore } from './clipa/presenter.ts';
 import type { ClipaStore } from './clipa/presenter.ts';
+import { resolveClipaTarget } from './clipa/targets.ts';
 import { API_BASE } from './config.ts';
 import { ShellController } from './controller.ts';
 import type { ControllerTimers, KeyValueStorage } from './controller.ts';
 import { SampleObservationSource } from './screen/sample-source.ts';
+import { SAMPLE_CUSTOMERS } from './screen/sample-scenarios.ts';
 import { connectElevenLabs } from './voice/elevenlabs.ts';
 
 export interface ShellRuntime {
   controller: ShellController;
   clipa: ClipaStore;
+  /** Stream A's demo workspace behind the seam of slots/workspace-adapter.ts; null until it is wired (the slot shows stand-ins). */
+  workspace: WorkspaceAdapter | null;
+  /** Removes the Clipa layer and the page listeners. The controller is disposed separately. */
+  dispose(): void;
 }
 
 const browserTimers: ControllerTimers = {
@@ -35,7 +45,20 @@ function newId(): string {
 }
 
 export function createRuntime(): ShellRuntime {
-  const clipa = createClipaStore();
+  const store = createClipaStore();
+  // The director logs refused or illegal commands: they go to the debug log once the controller exists.
+  let note: (type: string, text: string) => void = () => {};
+  const guard = new InputGuard(() => performance.now());
+  const stopWatching = watchPageInput(guard, document);
+  const director = createClipaDirector({
+    root: document.body,
+    dock: 'bottom-right',
+    resolveTarget: (target) => resolveClipaTarget(document, target),
+    isInputActive: () => guard.isActive(),
+    onLog: (entry) => note('CLIPA', `${entry.kind}: ${entry.message}`),
+  });
+  const presenter = createDirectorPresenter({ store, director, guard });
+
   // An arrow function: an unbound window.fetch would throw "Illegal invocation".
   const fetchFn: FetchLike = (input, init) => fetch(input, init);
   const now = (): number => Date.now();
@@ -44,15 +67,26 @@ export function createRuntime(): ShellRuntime {
     api,
     fetch: fetchFn,
     connectVoice: connectElevenLabs,
-    // The real policy, map and tutor (packages/agent, TASK-3.29) replace NullBrain here.
-    createBrain: (log) => new NullBrain(log),
-    createSampleSource: () => new SampleObservationSource(now, browserTimers),
-    presenter: clipa,
+    // The real policy, Work Map and tutor of packages/agent (TASK-3.29); model calls go through the session's LLM route.
+    createBrain: (log) => new AgentBrain({ log, customers: SAMPLE_CUSTOMERS }),
+    createSampleSource: (scenario) => new SampleObservationSource(now, browserTimers, scenario),
+    presenter,
     now,
     perfNow: () => performance.now(),
     timers: browserTimers,
     isHidden: () => document.hidden,
     storage: browserStorage,
   });
-  return { controller, clipa };
+  note = (type, text) => controller.note(type, text);
+  // The sample source is the only observation source until stream A's bridge is wired in: it is on, and labelled synthetic.
+  void controller.setSampleObservations(true);
+  return {
+    controller,
+    clipa: store,
+    workspace: null,
+    dispose() {
+      stopWatching();
+      presenter.dispose();
+    },
+  };
 }

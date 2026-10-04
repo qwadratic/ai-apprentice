@@ -4,7 +4,8 @@
 import type { ActionCheckpoint, CheckpointReply, EvidenceRef, ScreenObservation, ScreenStatus } from '@apprentice/contracts';
 import { parseCheckpointReply } from '@apprentice/contracts';
 import type { AgentApi, AgentSession, FetchLike, VoiceRole } from './api.ts';
-import type { AnswerInput, Brain, BrainDecision, BrainSignals, ClipaTargetRef, TranscriptTurn } from './brain/types.ts';
+import { createLlmClient } from './brain/llm-transport.ts';
+import type { AnswerInput, AnswerResult, Brain, BrainDecision, BrainSignals, ClipaTargetRef, DraftMap, TranscriptTurn } from './brain/types.ts';
 import { isSpoken } from './brain/types.ts';
 import type { ClipaPresenter, ClipaState, TargetRect } from './clipa/presenter.ts';
 import { SessionLimits } from './limits.ts';
@@ -12,18 +13,26 @@ import type { LimitTimers } from './limits.ts';
 import { EventUploader } from './log/uploader.ts';
 import type { LogDir, Timers } from './log/uploader.ts';
 import type { ObservationSource } from './screen/observation-source.ts';
+import { teachCase } from './screen/sample-scenarios.ts';
+import type { SampleScenarioId, TeachCaseId } from './screen/sample-scenarios.ts';
 import { SESSION_LIMIT_MS, deadlineOf } from './session-clock.ts';
 import { deriveClipaState } from './state/derive.ts';
 import { createStore } from './state/store.ts';
 import type { Store } from './state/store.ts';
 import { MODES, PERSONAS } from './state/types.ts';
+import type { Action } from './state/reducer.ts';
 import type { CaptureInfo, DecisionEntry, FeedItem, Mode, Persona, ShellState } from './state/types.ts';
 import { observationToContext, summarizeObservation } from './voice/context.ts';
 import { scrub } from './voice/scrub.ts';
+import { SpeechGate } from './voice/speech-gate.ts';
 import type { VoiceConnector, VoiceEvents, VoiceMode } from './voice/types.ts';
 import { VoiceSession } from './voice/voice-session.ts';
 
 export const BRAIN_TICK_MS = 500;
+/** The workspace waits for the checkpoint reply for 4 s (doc-7); after that the shell answers `unknown` itself. */
+export const CHECKPOINT_TIMEOUT_MS = 4000;
+/** A WARN that has to wait for the agent to finish speaking is dropped after this long. */
+export const WARN_HOLD_MS = 15000;
 /** A spoken question that produces no agent audio within this time stops looking "thinking". */
 export const ASK_AUDIO_TIMEOUT_MS = 12000;
 export const PERSONA_STORAGE_KEY = 'apprentice.shell.persona';
@@ -49,7 +58,8 @@ export interface ControllerDeps {
   fetch: FetchLike;
   connectVoice: VoiceConnector;
   createBrain(log: (line: string) => void): Brain;
-  createSampleSource(): ObservationSource;
+  /** The sample source for a scenario: `learn` for Learn, a Teach case for Teach, `neutral` otherwise. */
+  createSampleSource(scenario: SampleScenarioId): ObservationSource;
   presenter: ClipaPresenter;
   /** Date.now() */
   now(): number;
@@ -81,6 +91,9 @@ export function voiceRoleFor(_mode: Mode): VoiceRole {
 interface PendingAsk {
   decisionId: string;
   fromPerfMs: number;
+  decision: BrainDecision;
+  /** The decision is a question (the next thing the person says answers it), not a statement. */
+  answerable: boolean;
 }
 
 export class ShellController {
@@ -92,7 +105,10 @@ export class ShellController {
   private uploader: EventUploader | null = null;
   private voice: VoiceSession | null = null;
   private source: ObservationSource | null = null;
-  private evidenceSource: ObservationSource | null = null;
+  /** Every source of this page, newest last: evidence of an earlier session (the expert's moment) stays resolvable in Teach. */
+  private evidenceSources: ObservationSource[] = [];
+  private readonly speech = new SpeechGate();
+  private held: { decision: BrainDecision; atPerfMs: number } | null = null;
   private sourceOff: Array<() => void> = [];
   private readonly limits: SessionLimits;
   private tickTimer: unknown = null;
@@ -144,6 +160,15 @@ export class ShellController {
     this.store.dispatch({ type: 'LOG', t: this.deps.now(), dir, logType: type, text: clean });
     this.uploader?.enqueue(dir, type, clean);
   }
+  /**
+   * A structured record for the server's session log (the existing /events route, next to the transcript that /finish stores):
+   * the expert's answers, the Work Map versions and the checkpoint results. It is not shown in the visible log, it respects off the
+   * record (nothing is queued after the switch) and the token never reaches it.
+   */
+  private persist(type: string, payload: Record<string, unknown>): void {
+    this.uploader?.enqueue('sys', type, JSON.stringify(payload));
+  }
+  private lastPersistedMap = '';
   private sys(text: string): void { this.log('sys', 'SYS', text); }
   private err(text: string): void { this.log('err', 'ERR', text); }
 
@@ -174,11 +199,33 @@ export class ShellController {
   setPersona(persona: Persona): void {
     this.store.dispatch({ type: 'PERSONA_SET', persona });
     this.writeStorage(PERSONA_STORAGE_KEY, persona);
-    this.sys(`Persona: ${persona} (stored; the brain and the voice do not use it yet).`);
+    this.sys(`Persona: ${persona}. The policy reads it when the next session starts.`);
   }
 
   setTargetResolver(resolver: TargetResolver | null): void {
     this.resolveTarget = resolver;
+  }
+
+  /** The person is typing in the workspace (or stopped): Clipa holds still. Called by the workspace adapter's host. */
+  reportInput(typing: boolean): void {
+    this.deps.presenter.noteInput?.(typing);
+  }
+
+  /** A line for the debug log from outside the controller (the Clipa director's refusals). */
+  note(type: string, text: string): void {
+    this.log('sys', type, text);
+  }
+
+  /** Which sample case the next Teach session plays. */
+  setSampleCase(caseId: TeachCaseId): void {
+    this.store.dispatch({ type: 'SAMPLE_CASE_SET', caseId });
+  }
+
+  /** Teach: ends the running session and starts a new one on this sample case (a reset starts a new session). */
+  async runSampleCase(caseId: TeachCaseId): Promise<void> {
+    this.setSampleCase(caseId);
+    if (this.state.phase === 'live') await this.end('Session ended: a new sample case starts a new session.');
+    await this.start('teach');
   }
 
   dismissBanner(): void {
@@ -246,6 +293,10 @@ export class ShellController {
     });
     this.sys(`Session ${session.sessionId} started in ${mode} mode. Events, transcript and audio recording are stored on our server.`);
     if (session.legacy) this.sys('The server still runs the placeholder API: legacy routes, no session token.');
+    this.speech.reset();
+    this.held = null;
+    this.lastPersistedMap = '';
+    this.beginBrain(session, mode);
     this.limits.start(this.deps.isHidden());
     this.sys('The session auto-ends after 10 minutes, or after 2 minutes with this tab hidden.');
     this.tickTimer = this.deps.timers.setInterval(() => this.tickBrain(), BRAIN_TICK_MS);
@@ -253,6 +304,20 @@ export class ShellController {
     if (mode !== 'review' && this.state.screen.sampleOn) await this.startSample(run);
     if (!this.isCurrent(run)) return;
     await this.startVoice(run, session, mode);
+  }
+
+  private beginBrain(session: AgentSession, mode: Mode): void {
+    const caseId = mode === 'teach' ? this.state.teach.sampleCase : null;
+    const llm = createLlmClient({ session, fetch: this.deps.fetch, log: (line) => this.log('sys', 'LLM', line) });
+    this.safe('begin', () => this.brain.begin?.({
+      sessionId: session.sessionId,
+      mode,
+      persona: this.state.persona,
+      llm,
+      caseId,
+      caseTitle: caseId === null ? null : `${caseId.toUpperCase()} ${teachCase(caseId).title}`,
+    }), undefined);
+    if (llm === null) this.sys('No LLM route (placeholder API): the brain reads answers with its heuristics.');
   }
 
   /** Ends the session: voice first, then the screen, then the log. */
@@ -418,6 +483,7 @@ export class ShellController {
         else this.captureAnswer(turn);
       },
       onError: (message) => { if (live()) this.err(message); },
+      onVadScore: (score) => { if (live()) this.speech.onScore(score, this.deps.perfNow()); },
     };
   }
 
@@ -433,9 +499,14 @@ export class ShellController {
     this.askTimer = this.deps.timers.setTimeout(() => {
       this.askTimer = null;
       if (!this.isCurrent(run) || !this.pendingAsk) return;
+      const lost = this.pendingAsk;
       this.pendingAsk = null;
       this.store.dispatch({ type: 'VOICE_THINKING', thinking: false });
       this.err(`The agent did not start speaking within ${ASK_AUDIO_TIMEOUT_MS / 1000} s after the question.`);
+      this.deps.presenter.say('');
+      // The question never reached the person: it goes back to the brain's queue and the feed no longer waits for an answer.
+      this.store.dispatch({ type: 'FEED_STATUS', id: lost.decisionId, status: 'unspoken', note: 'not spoken: the agent did not start speaking' });
+      this.safe('onNotSpoken', () => this.brain.onNotSpoken?.(lost.decision), undefined);
     }, ASK_AUDIO_TIMEOUT_MS);
   }
 
@@ -480,19 +551,65 @@ export class ShellController {
     this.store.dispatch({ type: 'FEED_ANSWER', id: open.id, text: turn.text, atMs: turn.atMs });
     this.store.dispatch({ type: 'VOICE_THINKING', thinking: false });
     this.deps.presenter.say('');
+    this.deps.presenter.ack?.();
     this.clearPendingAsk();
     const input: AnswerInput = { questionId: open.id, topic: open.topic, text: turn.text, atMs: turn.atMs, kind: 'answer' };
-    this.safe('onAnswer', () => this.brain.onAnswer(input), undefined);
+    this.persist('ANSWER', { kind: 'answer', mode: this.state.session?.mode ?? null, topic: open.topic, questionId: open.id, atMs: turn.atMs, text: turn.text, evidenceIds: open.evidenceIds });
+    const run = this.runId;
+    this.afterAnswer(this.safe('onAnswer', () => this.brain.onAnswer(input), undefined), null, turn.text, run);
     this.mapDirty = true;
+  }
+
+  /**
+   * What the brain says about an answer: it may be asynchronous (a model reads it), and it may change the Work Map, the review
+   * and the teach-back. `fallback` is what a brain that reports nothing (a test double) means for a button press.
+   */
+  private afterAnswer(
+    outcome: AnswerResult | void | Promise<AnswerResult | void> | undefined,
+    fallback: Action | null,
+    text: string,
+    run: number | null,
+  ): void {
+    const apply = (result: AnswerResult | void): void => {
+      if (run !== null && !this.isCurrent(run)) return;
+      if (!result) {
+        if (fallback) this.store.dispatch(fallback);
+        this.refreshAfterAnswer();
+        return;
+      }
+      if (result.teachBack === 'confirmed') this.store.dispatch({ type: 'TEACHBACK_CONFIRM' });
+      else if (result.teachBack === 'corrected') this.store.dispatch({ type: 'TEACHBACK_CORRECT', text: text.trim() });
+      else if (result.teachBack === 'refused') {
+        this.store.dispatch({ type: 'BANNER_SET', banner: { kind: 'warn', text: 'The teach-back cannot be confirmed yet: an item of the Work Map lacks the expert\'s words or a screen moment. Answer the open questions first.' } });
+      }
+      if (result.changed || result.teachBack !== undefined) this.refreshAfterAnswer();
+    };
+    if (outcome instanceof Promise) {
+      outcome.then(apply, (e: unknown) => this.err(`${this.brain.name} answer failed: ${errMsg(e)}`));
+    } else {
+      apply(outcome);
+    }
+  }
+
+  private refreshAfterAnswer(): void {
+    this.loadReview();
+    this.refreshMastery();
+  }
+
+  private refreshMastery(): void {
+    const mastery = this.safe('mastery', () => this.brain.mastery?.() ?? null, null);
+    if (mastery) this.store.dispatch({ type: 'MASTERY_SET', mastery });
   }
 
   // ---- Observations -------------------------------------------------------
 
   private async startSample(run: number): Promise<void> {
     if (this.source || !this.session) return;
-    const source = this.deps.createSampleSource();
+    const info = this.state.session;
+    const scenario: SampleScenarioId = info?.mode === 'teach' ? this.state.teach.sampleCase : info?.mode === 'learn' ? 'learn' : 'neutral';
+    const source = this.deps.createSampleSource(scenario);
     this.source = source;
-    this.evidenceSource = source;
+    this.evidenceSources = [...this.evidenceSources.filter((s) => s !== source), source].slice(-6);
     this.sourceOff = [
       source.onObservation((o) => { if (this.source === source) this.onObservation(o); }),
       source.onStatus((s) => { if (this.source === source) this.onScreenStatus(s); }),
@@ -539,6 +656,7 @@ export class ShellController {
       },
     });
     this.log('sys', 'OBS', `${o.kind} #${o.sequence} ${o.id} t=${o.timestampMs} ms${o.evidenceIds.length ? ` evidence ${o.evidenceIds.join(',')}` : ''}`);
+    if (o.kind === 'input_activity') this.deps.presenter.noteInput?.(o.facts.typing);
     this.safe('onObservation', () => this.brain.onObservation(o), undefined);
     this.mapDirty = true;
     const context = observationToContext(o);
@@ -565,6 +683,7 @@ export class ShellController {
       offRecord: s.offRecord,
       voiceConnected: this.voice?.isConnected() ?? false,
       agentSpeaking: s.voice.phase === 'speaking',
+      humanSpeaking: this.speech.isSpeaking(this.deps.perfNow()),
       asked: this.askedCount,
     };
   }
@@ -572,6 +691,11 @@ export class ShellController {
   private tickBrain(): void {
     if (this.state.phase !== 'live') return;
     const nowMs = this.deps.now() - this.epochMs;
+    const held = this.held;
+    if (held && this.state.voice.phase !== 'speaking') {
+      this.held = null;
+      if (this.deps.perfNow() - held.atPerfMs <= WARN_HOLD_MS) this.applyDecision(held.decision, nowMs);
+    }
     const decisions = this.safe('tick', () => this.brain.tick(nowMs, this.signals()), [] as BrainDecision[]);
     for (const d of decisions) this.applyDecision(d, nowMs);
     if (this.mapDirty) {
@@ -615,24 +739,37 @@ export class ShellController {
     let status: FeedItem['status'] = 'unspoken';
     if (s.offRecord) note = 'off the record';
     else if (!voice || !voice.isConnected()) note = 'the voice is not connected';
-    else if (s.voice.phase === 'speaking') { note = 'the agent was already speaking'; status = 'deferred'; }
+    else if (s.voice.phase === 'speaking') {
+      if (d.decision === 'WARN') {
+        // A warning is never dropped: it waits until the agent has finished the sentence it is saying.
+        this.held = { decision: d, atPerfMs: this.deps.perfNow() };
+        this.record({ ...entry, note: 'waits for the agent to finish speaking' });
+        return;
+      }
+      note = 'the agent was already speaking';
+      status = 'deferred';
+    }
     if (note !== null) {
       this.record({ ...entry, note: `not spoken: ${note}` });
       this.store.dispatch({ type: 'FEED_ADD', item: this.feedItem(entry, status, `not spoken: ${note}`) });
+      this.safe('onNotSpoken', () => this.brain.onNotSpoken?.(d), undefined);
       return;
     }
     const sent = voice?.ask(text) ?? null;
     if (sent === null) {
       this.record({ ...entry, note: 'not spoken: the voice is not connected' });
       this.store.dispatch({ type: 'FEED_ADD', item: this.feedItem(entry, 'unspoken', 'not spoken: the voice is not connected') });
+      this.safe('onNotSpoken', () => this.brain.onNotSpoken?.(d), undefined);
       return;
     }
     this.askedCount += 1;
     this.log('sent', 'USER_MSG', sent);
     this.record({ ...entry, spoken: true });
-    this.store.dispatch({ type: 'FEED_ADD', item: this.feedItem(entry, 'asked', null) });
+    // A question waits for the answer; a warning, a piece of feedback or a closing line is only said.
+    const expectsAnswer = d.expectsAnswer ?? d.decision !== 'WARN';
+    this.store.dispatch({ type: 'FEED_ADD', item: this.feedItem(entry, expectsAnswer ? 'asked' : 'said', null) });
     this.store.dispatch({ type: 'VOICE_THINKING', thinking: true });
-    this.pendingAsk = { decisionId: id, fromPerfMs: this.lastObservationPerfMs ?? this.deps.perfNow() };
+    this.pendingAsk = { decisionId: id, fromPerfMs: this.lastObservationPerfMs ?? this.deps.perfNow(), decision: d, answerable: expectsAnswer };
     this.armAskTimer();
     this.deps.presenter.say(text);
     const cue = d.clipa?.state;
@@ -640,6 +777,7 @@ export class ShellController {
     this.store.dispatch({ type: 'CLIPA_HINT', hint });
     const target = d.clipa?.target;
     this.deps.presenter.setTarget(target && this.resolveTarget ? this.resolveTarget(target) : null);
+    this.deps.presenter.play?.(d);
   }
 
   // ---- Review and the map -------------------------------------------------
@@ -655,22 +793,39 @@ export class ShellController {
     if (!review) return;
     this.store.dispatch({ type: 'MAP_SET', map: review.map });
     this.store.dispatch({ type: 'REVIEW_SET', gaps: review.gaps, teachBack: review.teachBack });
+    this.persistMap(review.map);
+  }
+
+  /** A new Work Map version, or a confirmation, is written to the session log once. */
+  private persistMap(map: DraftMap): void {
+    if (map.version === undefined || (map.steps.length === 0 && (map.guardrails ?? []).length === 0)) return;
+    const key = `${map.version}:${map.confirmed === true ? 'confirmed' : 'draft'}:${map.steps.length}:${(map.guardrails ?? []).length}`;
+    if (key === this.lastPersistedMap) return;
+    this.lastPersistedMap = key;
+    const guardrails = (map.guardrails ?? []).map((g) => ({ id: g.id, text: g.text, evidenceIds: g.evidenceIds }));
+    const steps = map.steps.map((st) => ({ id: st.id, title: st.title, kind: st.kind, decision: st.decision, reason: st.reason, evidenceIds: st.evidenceIds }));
+    const full = { version: map.version, confirmed: map.confirmed === true, guardrails, steps };
+    const text = JSON.stringify(full);
+    // The server keeps up to 4000 characters of a line: a map that is larger is stored without the step details.
+    this.persist('MAP_VERSION', text.length <= 3800 ? full : { version: map.version, confirmed: map.confirmed === true, guardrails, stepCount: steps.length });
   }
 
   confirmTeachBack(): void {
     const tb = this.state.review.teachBack;
     if (tb.text === null) return;
-    this.store.dispatch({ type: 'TEACHBACK_CONFIRM' });
-    this.sys('Teach-back confirmed.');
-    this.safe('onAnswer', () => this.brain.onAnswer({ questionId: null, topic: 'teach_back', text: tb.text ?? '', atMs: this.deps.now() - this.epochMs, kind: 'confirm' }), undefined);
+    this.sys('Teach-back confirmed by button.');
+    this.persist('ANSWER', { kind: 'confirm', mode: this.state.session?.mode ?? null, topic: 'teach_back', atMs: this.deps.now() - this.epochMs });
+    const input: AnswerInput = { questionId: null, topic: 'teach_back', text: tb.text, atMs: this.deps.now() - this.epochMs, kind: 'confirm' };
+    this.afterAnswer(this.safe('onAnswer', () => this.brain.onAnswer(input), undefined), { type: 'TEACHBACK_CONFIRM' }, tb.text, null);
   }
 
   correctTeachBack(text: string): void {
     const clean = text.trim();
     if (this.state.review.teachBack.text === null || clean === '') return;
-    this.store.dispatch({ type: 'TEACHBACK_CORRECT', text: clean });
-    this.sys('Teach-back corrected.');
-    this.safe('onAnswer', () => this.brain.onAnswer({ questionId: null, topic: 'teach_back', text: clean, atMs: this.deps.now() - this.epochMs, kind: 'correct' }), undefined);
+    this.sys('Teach-back corrected by button.');
+    this.persist('ANSWER', { kind: 'correct', mode: this.state.session?.mode ?? null, topic: 'teach_back', atMs: this.deps.now() - this.epochMs, text: clean });
+    const input: AnswerInput = { questionId: null, topic: 'teach_back', text: clean, atMs: this.deps.now() - this.epochMs, kind: 'correct' };
+    this.afterAnswer(this.safe('onAnswer', () => this.brain.onAnswer(input), undefined), { type: 'TEACHBACK_CORRECT', text: clean }, clean, null);
   }
 
   // ---- Teach: checkpoint and evidence -------------------------------------
@@ -686,25 +841,45 @@ export class ShellController {
     }
   }
 
+  /** The brain's reply, or `unknown` when it fails or does not answer within CHECKPOINT_TIMEOUT_MS: the workspace never waits forever. */
+  private judge(cp: ActionCheckpoint): Promise<CheckpointReply> {
+    const unknown = (message: string): CheckpointReply => ({
+      schemaVersion: 1, checkpointId: cp.id, status: 'unknown', message, evidenceIds: [],
+      basedOn: { order: cp.revisions.order, email: cp.revisions.email },
+    });
+    return new Promise<CheckpointReply>((resolve) => {
+      let settled = false;
+      const finish = (reply: CheckpointReply): void => {
+        if (settled) return;
+        settled = true;
+        this.deps.timers.clearTimeout(timer);
+        resolve(reply);
+      };
+      const timer = this.deps.timers.setTimeout(() => {
+        this.err(`${this.brain.name} did not answer the checkpoint within ${CHECKPOINT_TIMEOUT_MS / 1000} s: replying unknown.`);
+        finish(unknown('Not judged: the tutor did not answer in time. Ask the expert before you send.'));
+      }, CHECKPOINT_TIMEOUT_MS);
+      Promise.resolve()
+        .then(() => this.brain.checkpoint(cp))
+        .then((reply) => finish(parseCheckpointReply(reply)))
+        .catch((e: unknown) => {
+          this.err(`${this.brain.name} checkpoint failed: ${errMsg(e)}`);
+          finish(unknown('Not judged: the tutor failed. Ask the expert before you send.'));
+        });
+    });
+  }
+
   private async onCheckpoint(cp: ActionCheckpoint): Promise<void> {
     const run = this.runId;
     this.sys(`Checkpoint ${cp.id} raised by the workspace.`);
-    let reply: CheckpointReply;
-    try {
-      reply = parseCheckpointReply(await this.brain.checkpoint(cp));
-    } catch (e) {
-      this.err(`${this.brain.name} checkpoint failed: ${errMsg(e)}`);
-      reply = {
-        schemaVersion: 1, checkpointId: cp.id, status: 'unknown',
-        message: 'Not judged: the tutor failed. Ask the expert before you send.', evidenceIds: [],
-        basedOn: { order: cp.revisions.order, email: cp.revisions.email },
-      };
-    }
+    const reply = await this.judge(cp);
     if (!this.isCurrent(run)) return;
     this.store.dispatch({
       type: 'CHECKPOINT_RESULT',
       card: { checkpointId: reply.checkpointId, status: reply.status, message: reply.message, evidenceIds: reply.evidenceIds, atMs: cp.timestampMs, deliveryError: null },
     });
+    this.refreshMastery();
+    this.persist('CHECKPOINT_RESULT', { checkpointId: reply.checkpointId, status: reply.status, evidenceIds: reply.evidenceIds, atMs: cp.timestampMs });
     this.log('sent', 'CHECKPOINT', `${reply.status}: ${reply.message}`);
     const source = this.source;
     if (!source) return;
@@ -724,7 +899,12 @@ export class ShellController {
   }
 
   resolveEvidence(evidenceId: string): Promise<EvidenceRef> {
-    const source = this.source ?? this.evidenceSource;
-    return source ? source.resolveEvidence(evidenceId) : Promise.reject(new Error('No observation source has run in this page.'));
+    // Newest source first: the current session, then the earlier ones (the expert's Learn moments stay resolvable in Teach).
+    const sources = [...this.evidenceSources].reverse();
+    if (sources.length === 0) return Promise.reject(new Error('No observation source has run in this page.'));
+    return sources.reduce<Promise<EvidenceRef>>(
+      (previous, source) => previous.catch(() => source.resolveEvidence(evidenceId)),
+      Promise.reject(new Error('Evidence is not published in the current session')),
+    );
   }
 }

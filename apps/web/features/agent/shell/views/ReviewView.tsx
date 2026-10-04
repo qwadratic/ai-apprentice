@@ -14,7 +14,8 @@ export function ReviewView() {
   const [draft, setDraft] = useState('');
 
   // Questions that were not asked live wait here: deferred by the policy, or not spoken because the voice was away.
-  const waiting = feed.filter((f) => f.status === 'deferred' || f.status === 'unspoken');
+  // With the real brain they are part of the gaps (the policy holds them for Review); only the NullBrain leaves them in the feed.
+  const waiting = brain.wired ? [] : feed.filter((f) => f.status === 'deferred' || f.status === 'unspoken');
   const hasText = teachBack.text !== null;
 
   const submitCorrection = (): void => {
@@ -28,8 +29,14 @@ export function ReviewView() {
       {!brain.wired && (
         <NotWired>
           the debrief and the teach-back ({brain.name}): the brain writes the gap questions and the teach-back text, and decides when
-          the debrief is done (TASK-3.10). Questions deferred in Learn do show up below.
+          the debrief is done. Questions deferred in Learn do show up below.
         </NotWired>
+      )}
+      {brain.wired && (
+        <p className="as-note" data-testid="review-hint">
+          Start Review for a spoken debrief: Clipa asks what is still unclear, then plays the process back. Confirm or correct it by voice
+          or with the buttons. {map.version !== undefined && <>Work Map version {map.version}{map.confirmed ? ', confirmed' : ', not confirmed yet'}.</>}
+        </p>
       )}
 
       <section aria-labelledby="as-gaps-title">
@@ -85,9 +92,9 @@ export function ReviewView() {
       </section>
 
       <section aria-labelledby="as-rmap-title">
-        <h3 className="as-h3" id="as-rmap-title">Work Map so far <span className="as-count">{map.steps.length} steps</span></h3>
+        <h3 className="as-h3" id="as-rmap-title">Work Map so far <span className="as-count">{map.steps.length} steps{map.version !== undefined ? ` · version ${map.version}` : ''}</span></h3>
         {map.steps.length === 0
-          ? <p className="as-empty">The clickable timeline is the Work Map UI (TASK-3.11). It stays empty until the brain produces steps.</p>
+          ? <p className="as-empty">The Work Map fills from the Learn session. Run Learn first, then come back.</p>
           : <StepCards map={map} />}
       </section>
     </div>
