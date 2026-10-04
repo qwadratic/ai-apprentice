@@ -10,3 +10,7 @@ export type {
   ScreenBridgeCheckpointAdapterOptions,
   VisionObservationRegistry,
 } from './screenBridgeAdapter.ts';
+export {createCheckpointAdapter} from './runtimeAdapter.ts';
+export type {CheckpointAdapterOptions, RuntimeCheckpointAdapter, WorkspaceRuntimeHandle} from './runtimeAdapter.ts';
+export {createAlternatingProvenance, createRuntimeWorkspace} from './mountRuntimeWorkspace.ts';
+export type {RuntimeWorkspaceMount, RuntimeWorkspaceOptions} from './mountRuntimeWorkspace.ts';

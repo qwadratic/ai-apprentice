@@ -124,10 +124,80 @@ test('real handlers complete start, frame, poll, pause, resume and post-stop Evi
   instance.dispose();
 });
 
+test('workspace runtime correlates current vision, activity and checkpoint replies and rejects edits', async () => {
+  const harness = createHarness(); let delivered = false; let deliverOldAfterEdit = false;
+  const instance = createScreenBridgeRuntime({apiBase: '', authHeader: () => 'Bearer browser-session-token-12345',
+    sourceRevision: () => 'email-r1', captureRuntime: harness.runtime, pollIntervalMs: 1,
+    fetch: async (input, init) => {
+      const url = String(input);
+      if (url.endsWith('/start')) return Response.json({sessionId: 's', generation: 1, nextCursor: 0,
+        status: {schemaVersion: 1, sessionId: 's', state: 'capturing'}}, {status: 201});
+      if (url.endsWith('/lifecycle')) {
+        const body = JSON.parse(String(init?.body)); const generation = body.generation + 1;
+        const state = body.command === 'pause' ? 'paused' : body.command === 'resume' ? 'capturing' : 'stopped';
+        return Response.json({sessionId: 's', generation, nextCursor: 0, status: {schemaVersion: 1, sessionId: 's', state}});
+      }
+      if (url.includes('/updates')) {
+        const generation = Number(new URL(url, 'https://test').searchParams.get('generation'));
+        const observations = !delivered ? visualPair('s') : deliverOldAfterEdit ? [visualPair('s')[1]!] : [];
+        delivered = true; deliverOldAfterEdit = false;
+        return Response.json({sessionId: 's', generation, observations, statuses: [], nextCursor: observations.length});
+      }
+      throw new Error(url);
+    }});
+  await instance.bridge.start({sessionId: 's', sessionEpochMs: 0});
+  instance.capture.confirmMasks(instance.capture.getSnapshot().geometry!.revision);
+  const statuses: string[] = []; instance.bridge.onStatus(value => statuses.push(value.state)); statuses.length = 0;
+  instance.bridge.onObservation(value => { if (value.kind === 'email_draft') (value.facts as {subject: string}).subject = 'mutated'; });
+  const resuming = instance.bridge.resume();
+  assert.equal(statuses.includes('capturing'), false, 'local capture resume must not announce server readiness');
+  await resuming; assert.equal(statuses.at(-1), 'capturing');
+  instance.workspace.setScope({sessionId: 's', revisions: {order: 'order-r1', email: 'email-r1'}});
+  const waiting = instance.workspace.registry.waitForCurrent({sessionId: 's', revisions: {order: 'order-r1', email: 'email-r1'},
+    signal: new AbortController().signal, timeoutMs: 500});
+  const current = await waiting; assert.deepEqual(current.map(value => value.kind), ['order_view', 'email_draft']);
+  assert.equal((instance.workspace.registry.snapshot('s').find(value => value.kind === 'email_draft')?.facts as {subject: string}).subject, '');
+  const activity = instance.workspace.publishActivity({surface: 'email', typing: true, lastInputAtMs: 20, idleMs: 0});
+  assert.equal(activity.source, 'workspace'); assert.equal(activity.sequence > current[1]!.sequence, true);
+  const checkpoint = {schemaVersion: 1 as const, id: 'cp-1', sessionId: 's', timestampMs: 30,
+    observationIds: current.map(value => value.id), revisions: {order: 'order-r1', email: 'email-r1'}, action: 'send' as const};
+  const unsubscribe = instance.bridge.onCheckpoint(value => { unsubscribe(); void instance.bridge.replyToCheckpoint({schemaVersion: 1, checkpointId: value.id,
+    status: 'clear', message: 'Visible facts match.', evidenceIds: value.observationIds.map(id => `e-${id}`), basedOn: value.revisions}); });
+  assert.equal((await instance.workspace.dispatchCheckpoint(checkpoint)).status, 'clear');
+  const pending = instance.workspace.dispatchCheckpoint({...checkpoint, id: 'cp-2'});
+  instance.workspace.setScope({sessionId: 's', revisions: {order: 'order-r1', email: 'email-r2'}});
+  await assert.rejects(pending, {name: 'AbortError'});
+  deliverOldAfterEdit = true; await tick(); await tick();
+  assert.deepEqual(instance.workspace.registry.snapshot('s').map(value => value.kind), ['order_view']);
+  instance.dispose();
+});
+
+test('off-record latched before a session blocks panel start and resume', async () => {
+  const harness = createHarness(); let pickerCalls = 0;
+  harness.runtime.getDisplayMedia = async () => { pickerCalls++; return harness.stream as unknown as MediaStream; };
+  const instance = createScreenBridgeRuntime({apiBase: '', authHeader: () => null, sourceRevision: () => null, captureRuntime: harness.runtime,
+    fetch: async () => { throw new Error('network must remain closed'); }});
+  await instance.bridge.pause();
+  await assert.rejects(instance.bridge.start({sessionId: 's', sessionEpochMs: 0}), /off the record/);
+  await instance.panelController.start({sessionId: 's', sessionEpochMs: 0});
+  await instance.panelController.resume();
+  assert.equal(pickerCalls, 0);
+  assert.equal(instance.workspace.getSession(), null);
+  instance.dispose();
+});
+
 function observation() {
   return {schemaVersion: 1, id: 'o', sessionId: 's', sequence: 1, timestampMs: 1, source: 'vision', frameId: 'f',
     sourceRevision: 'order-r1', kind: 'order_view', facts: {customerRef: null, orderId: null, deliveryAddress: null, deliveryWindow: null},
     entityRef: null, evidenceIds: ['e']};
+}
+function visualPair(sessionId: string) {
+  return [
+    {schemaVersion: 1, id: 'order-1', sessionId, sequence: 1, timestampMs: 10, source: 'vision', frameId: 'f-order',
+      sourceRevision: 'order-r1', kind: 'order_view', facts: {customerRef: null, orderId: null, deliveryAddress: null, deliveryWindow: null}, entityRef: null, evidenceIds: ['e-order']},
+    {schemaVersion: 1, id: 'email-1', sessionId, sequence: 2, timestampMs: 11, source: 'vision', frameId: 'f-email',
+      sourceRevision: 'email-r1', kind: 'email_draft', facts: {recipientRef: null, subject: '', bodyText: '', attachments: [], previewState: 'preview'}, entityRef: null, evidenceIds: ['e-email']},
+  ];
 }
 function tick() { return new Promise(resolve => setTimeout(resolve, 0)); }
 function createHarness() {

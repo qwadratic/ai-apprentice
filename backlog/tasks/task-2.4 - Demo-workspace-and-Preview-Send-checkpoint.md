@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@kigulx'
 created_date: '2026-10-03 21:16'
-updated_date: '2026-10-04 01:18'
+updated_date: '2026-10-04 01:51'
 labels:
   - stream-a
   - workspace
@@ -43,6 +43,8 @@ Assigned worker: demo workspace. Own apps/web/features/demo-workspace and its co
 
 <!-- SECTION:PLAN:BEGIN -->
 Create the assigned isolated worktree from the published assignment revision. Implement synthetic cases, workspace state, draft revision invalidation and checkpoint behavior with tests, then scoped UI components. Do not edit app shell or root dependencies. Hand off the independent slice; wire the approved ScreenBridge once available.
+
+Integrate canonical workspace with real ScreenBridge runtime on pinned PR21: current vision registry, input activity, checkpoint dispatch/reply, and a working workspace page. Preserve reviewed PR21 and B sources; use distinct file ownership for parallel agents.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes

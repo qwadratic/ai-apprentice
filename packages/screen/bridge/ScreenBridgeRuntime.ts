@@ -3,7 +3,7 @@ import type {
   ScreenStatus, SessionStart, Unsubscribe,
 } from '@apprentice/contracts';
 import {
-  parseCheckpointReply, parseScreenObservation, parseScreenStatus,
+  parseActionCheckpoint, parseCheckpointReply, parseScreenObservation, parseScreenStatus,
   parseSessionStart,
 } from '@apprentice/contracts';
 import {ScreenCapture} from '../capture/ScreenCapture.js';
@@ -28,7 +28,28 @@ export interface ScreenBridgeRuntime {
   readonly capture: ScreenCapture;
   /** Panel lifecycle which cannot clear an app-owned off-record pause. */
   readonly panelController: Pick<ScreenBridge, 'start' | 'pause' | 'resume' | 'stop'>;
+  readonly workspace: ScreenWorkspaceRuntime;
   dispose(): void;
+}
+
+export interface WorkspaceRevisions {readonly order: string; readonly email: string}
+export interface WorkspaceScope {readonly sessionId: string; readonly revisions: WorkspaceRevisions}
+export interface WorkspaceActivity {
+  readonly surface: 'order' | 'email' | 'ticket'; readonly typing: boolean;
+  readonly lastInputAtMs: number; readonly idleMs: number;
+}
+export interface CurrentObservationRequest extends WorkspaceScope {
+  readonly signal: AbortSignal; readonly timeoutMs?: number;
+}
+export interface ScreenWorkspaceRuntime {
+  readonly registry: {
+    waitForCurrent(request: CurrentObservationRequest): Promise<readonly ScreenObservation[]>;
+    snapshot(sessionId: string): readonly ScreenObservation[];
+  };
+  getSession(): SessionStart | null;
+  setScope(scope: WorkspaceScope): void;
+  publishActivity(activity: WorkspaceActivity): ScreenObservation;
+  dispatchCheckpoint(checkpoint: ActionCheckpoint, options?: {readonly signal?: AbortSignal; readonly timeoutMs?: number}): Promise<CheckpointReply>;
 }
 
 interface ActiveSession {
@@ -56,6 +77,7 @@ class Runtime implements ScreenBridgeRuntime {
   readonly bridge: ScreenBridge;
   readonly capture: ScreenCapture;
   readonly panelController: ScreenBridgeRuntime['panelController'];
+  readonly workspace: ScreenWorkspaceRuntime;
   readonly #fetch: Fetch;
   readonly #observations = new Set<(value: ScreenObservation) => void>();
   readonly #statuses = new Set<(value: ScreenStatus) => void>();
@@ -70,6 +92,11 @@ class Runtime implements ScreenBridgeRuntime {
   #captureCommand = false;
   #review: ActiveSession | null = null;
   #reviewController = new AbortController();
+  #timelineSequence = 0;
+  #visuals: ScreenObservation[] = [];
+  #workspaceScope: WorkspaceScope | null = null;
+  #waiters = new Set<ObservationWaiter>();
+  #pendingCheckpoint: PendingCheckpoint | null = null;
 
   constructor(options: ScreenBridgeRuntimeOptions) {
     if (!options || typeof options.apiBase !== 'string' || typeof options.authHeader !== 'function' ||
@@ -87,13 +114,13 @@ class Runtime implements ScreenBridgeRuntime {
       const active = this.#active;
       if (!active || snapshot.session?.sessionId !== active.session.sessionId) return;
       if (snapshot.state === 'paused' && !this.#offRecord) this.#emitStatus('paused', snapshot.reason);
-      else if (snapshot.state === 'capturing' && !this.#offRecord) this.#emitStatus('capturing');
       else if (snapshot.state === 'stopped') this.#emitStatus('stopped', snapshot.reason);
       else if (snapshot.state === 'error') this.#emitStatus('error', snapshot.reason);
     });
     this.capture.onInvalidate(event => {
       const active = this.#active;
       if (!active) return;
+      this.#invalidateWorkspace(new DOMException(`Capture invalidated: ${event.reason}`, 'AbortError'), true);
       active.serverReady = false;
       this.#invalidateRequests(active);
       if (!this.#captureCommand && active.serverGeneration > 0) {
@@ -102,7 +129,8 @@ class Runtime implements ScreenBridgeRuntime {
       }
     });
     this.bridge = {
-      start: value => this.#start(value), pause: () => this.#pause(true), resume: () => this.#resume(true),
+      start: value => this.#offRecord ? Promise.reject(new Error('Screen is off the record.')) : this.#start(value),
+      pause: () => this.#pause(true), resume: () => this.#resume(true),
       stop: () => this.#stop(true), resolveEvidence: id => this.#resolveEvidence(id),
       onObservation: listener => subscribe(this.#observations, listener),
       onStatus: listener => subscribe(this.#statuses, listener),
@@ -112,11 +140,19 @@ class Runtime implements ScreenBridgeRuntime {
     this.panelController = {
       start: value => this.#offRecord ? Promise.resolve() : this.#start(value), pause: () => this.#pause(false), resume: () => this.#resume(false), stop: () => this.#stop(false),
     };
+    this.workspace = {
+      registry: {waitForCurrent: request => this.#waitForCurrent(request), snapshot: sessionId => this.#visualSnapshot(sessionId)},
+      getSession: () => this.#active ? structuredClone(this.#active.session) : null,
+      setScope: scope => this.#setWorkspaceScope(scope),
+      publishActivity: activity => this.#publishActivity(activity),
+      dispatchCheckpoint: (checkpoint, dispatchOptions) => this.#dispatchCheckpoint(checkpoint, dispatchOptions),
+    };
   }
 
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
+    this.#invalidateWorkspace(new DOMException('Screen runtime disposed.', 'AbortError'), true);
     this.#closeActive();
     this.#reviewController.abort(); this.#review = null;
     this.capture.dispose();
@@ -128,6 +164,8 @@ class Runtime implements ScreenBridgeRuntime {
   async #start(value: SessionStart): Promise<void> {
     if (this.#disposed) throw new Error('Screen bridge has been disposed.');
     const session = parseSessionStart(value);
+    this.#invalidateWorkspace(new DOMException('Screen session changed.', 'AbortError'), true);
+    this.#timelineSequence = 0;
     this.#closeActive();
     this.#reviewController.abort(); this.#reviewController = new AbortController(); this.#review = null;
     this.#offRecord = false;
@@ -178,9 +216,10 @@ class Runtime implements ScreenBridgeRuntime {
   }
 
   async #pause(offRecord: boolean): Promise<void> {
+    if (offRecord) this.#offRecord = true;
     const active = this.#active;
     if (!active) return;
-    if (offRecord) this.#offRecord = true;
+    this.#invalidateWorkspace(new DOMException('Screen paused.', 'AbortError'), true);
     active.serverReady = false;
     this.#captureCommand = true;
     try { this.capture.pause('user-paused'); } finally { this.#captureCommand = false; }
@@ -191,7 +230,7 @@ class Runtime implements ScreenBridgeRuntime {
 
   async #resume(appOwned: boolean): Promise<void> {
     const active = this.#active;
-    if (!active) return;
+    if (!active) { if (appOwned) this.#offRecord = false; return; }
     if (this.#offRecord && !appOwned) return;
     if (appOwned) this.#offRecord = false;
     active.serverReady = false;
@@ -263,7 +302,10 @@ class Runtime implements ScreenBridgeRuntime {
       for (const observation of observations) {
         if (!this.#current(active, privacyGeneration) || this.#offRecord) return;
         if (observation.sessionId !== active.session.sessionId) throw new TransportError('observation_session');
-        this.#publish(this.#observations, observation);
+        const projected = parseScreenObservation({...observation, sequence: ++this.#timelineSequence});
+        if (this.#isCurrentVisual(projected)) this.#visuals.push(structuredClone(projected));
+        this.#publish(this.#observations, projected);
+        this.#settleObservationWaiters();
       }
       for (const status of statuses) {
         if (!this.#current(active, privacyGeneration) || this.#offRecord) return;
@@ -315,8 +357,130 @@ class Runtime implements ScreenBridgeRuntime {
   }
 
   async #replyToCheckpoint(value: CheckpointReply): Promise<void> {
-    parseCheckpointReply(value);
-    throw new Error('Checkpoint reply transport is not configured.');
+    const reply = parseCheckpointReply(value);
+    const pending = this.#pendingCheckpoint;
+    if (!pending || reply.checkpointId !== pending.checkpoint.id ||
+        reply.basedOn.order !== pending.checkpoint.revisions.order || reply.basedOn.email !== pending.checkpoint.revisions.email) {
+      throw new Error('Checkpoint reply is stale or unknown.');
+    }
+    this.#pendingCheckpoint = null; pending.cleanup(); pending.resolve(reply);
+  }
+
+  #setWorkspaceScope(value: WorkspaceScope): void {
+    const scope = parseWorkspaceScope(value);
+    const changed = !this.#workspaceScope || this.#workspaceScope.sessionId !== scope.sessionId ||
+      this.#workspaceScope.revisions.order !== scope.revisions.order || this.#workspaceScope.revisions.email !== scope.revisions.email;
+    if (!changed) return;
+    this.#workspaceScope = scope;
+    this.#invalidatePendingCheckpoint(new DOMException('Workspace revisions changed.', 'AbortError'));
+    for (const waiter of [...this.#waiters]) {
+      if (sameWorkspaceScope(waiter.scope, scope)) continue;
+      this.#waiters.delete(waiter); clearTimeout(waiter.timer!); waiter.signal.removeEventListener('abort', waiter.onAbort);
+      waiter.reject(new DOMException('Workspace revisions changed.', 'AbortError'));
+    }
+    this.#visuals = this.#visuals.filter(observation => observation.sessionId === scope.sessionId &&
+      ((observation.kind === 'order_view' && observation.sourceRevision === scope.revisions.order) ||
+       (observation.kind === 'email_draft' && observation.sourceRevision === scope.revisions.email) || observation.kind === 'ticket'));
+    this.#settleObservationWaiters();
+  }
+
+  #publishActivity(activity: WorkspaceActivity): ScreenObservation {
+    const active = this.#active;
+    if (!active || !active.serverReady || this.#offRecord || this.capture.getSnapshot().state !== 'capturing') {
+      throw new Error('Screen workspace output is paused.');
+    }
+    const facts = parseWorkspaceActivity(activity);
+    const timestampMs = facts.lastInputAtMs + facts.idleMs;
+    const observation = parseScreenObservation({schemaVersion: 1,
+      id: `${active.session.sessionId}:workspace:${this.#timelineSequence + 1}`, sessionId: active.session.sessionId,
+      sequence: ++this.#timelineSequence, timestampMs, source: 'workspace', frameId: null, sourceRevision: null,
+      kind: 'input_activity', facts, entityRef: null, evidenceIds: []});
+    this.#publish(this.#observations, observation);
+    return observation;
+  }
+
+  #waitForCurrent(request: CurrentObservationRequest): Promise<readonly ScreenObservation[]> {
+    const scope = parseWorkspaceScope(request);
+    if (!(request.signal instanceof AbortSignal)) throw new TypeError('Observation wait requires an AbortSignal.');
+    request.signal.throwIfAborted();
+    const current = this.#matchingVisuals(scope);
+    if (hasCurrentPair(current, scope.revisions)) return Promise.resolve(current);
+    const timeoutMs = request.timeoutMs ?? 10_000;
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new RangeError('Observation timeout must be positive.');
+    return new Promise((resolve, reject) => {
+      const waiter: ObservationWaiter = {scope, signal: request.signal, resolve, reject, timer: null, onAbort: () => undefined};
+      waiter.onAbort = () => { this.#waiters.delete(waiter); clearTimeout(waiter.timer!); reject(request.signal.reason); };
+      waiter.timer = setTimeout(() => { this.#waiters.delete(waiter); request.signal.removeEventListener('abort', waiter.onAbort);
+        reject(new Error('Timed out waiting for current screen observations.')); }, timeoutMs);
+      request.signal.addEventListener('abort', waiter.onAbort, {once: true}); this.#waiters.add(waiter);
+    });
+  }
+
+  #visualSnapshot(sessionId: string): readonly ScreenObservation[] {
+    if (typeof sessionId !== 'string' || !sessionId) throw new TypeError('Session id required.');
+    return structuredClone(this.#visuals.filter(observation => observation.sessionId === sessionId));
+  }
+
+  #matchingVisuals(scope: WorkspaceScope): ScreenObservation[] {
+    return this.#visuals.filter(observation => observation.sessionId === scope.sessionId &&
+      ((observation.kind === 'order_view' && observation.sourceRevision === scope.revisions.order) ||
+       (observation.kind === 'email_draft' && observation.sourceRevision === scope.revisions.email)));
+  }
+
+  #isCurrentVisual(observation: ScreenObservation): boolean {
+    const scope = this.#workspaceScope;
+    if (!scope) return true;
+    if (observation.sessionId !== scope.sessionId) return false;
+    if (observation.kind === 'order_view') return observation.sourceRevision === scope.revisions.order;
+    if (observation.kind === 'email_draft') return observation.sourceRevision === scope.revisions.email;
+    return observation.kind === 'ticket';
+  }
+
+  #settleObservationWaiters(): void {
+    for (const waiter of [...this.#waiters]) {
+      const current = this.#matchingVisuals(waiter.scope);
+      if (!hasCurrentPair(current, waiter.scope.revisions)) continue;
+      this.#waiters.delete(waiter); clearTimeout(waiter.timer!); waiter.signal.removeEventListener('abort', waiter.onAbort);
+      waiter.resolve(structuredClone(current));
+    }
+  }
+
+  #dispatchCheckpoint(value: ActionCheckpoint, options: {readonly signal?: AbortSignal; readonly timeoutMs?: number} = {}): Promise<CheckpointReply> {
+    const checkpoint = parseActionCheckpoint(value); const active = this.#active;
+    if (!active || !active.serverReady || checkpoint.sessionId !== active.session.sessionId) throw new Error('Checkpoint session is inactive.');
+    const scope = this.#workspaceScope;
+    if (!scope || scope.sessionId !== checkpoint.sessionId || scope.revisions.order !== checkpoint.revisions.order ||
+        scope.revisions.email !== checkpoint.revisions.email) throw new Error('Checkpoint revisions are stale.');
+    const current = this.#matchingVisuals(scope);
+    const order = current.filter(value => value.kind === 'order_view').at(-1);
+    const email = current.filter(value => value.kind === 'email_draft').at(-1);
+    if (!order || !email || checkpoint.observationIds.length !== 2 ||
+        !checkpoint.observationIds.includes(order.id) || !checkpoint.observationIds.includes(email.id)) {
+      throw new Error('Checkpoint observations are stale.');
+    }
+    if (this.#pendingCheckpoint) throw new Error('Another checkpoint is pending.');
+    const timeoutMs = options.timeoutMs ?? 4_000; const signal = options.signal;
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) throw new RangeError('Checkpoint timeout must be positive.');
+    signal?.throwIfAborted();
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { this.#pendingCheckpoint = null; cleanup(); reject(new Error('Checkpoint reply timed out.')); }, timeoutMs);
+      const onAbort = () => { this.#pendingCheckpoint = null; cleanup(); reject(signal?.reason); };
+      const cleanup = () => { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); };
+      this.#pendingCheckpoint = {checkpoint, resolve, reject, cleanup}; signal?.addEventListener('abort', onAbort, {once: true});
+      this.#publish(this.#checkpoints, checkpoint);
+    });
+  }
+
+  #invalidatePendingCheckpoint(error: unknown): void {
+    const pending = this.#pendingCheckpoint; if (!pending) return;
+    this.#pendingCheckpoint = null; pending.cleanup(); pending.reject(error);
+  }
+
+  #invalidateWorkspace(error: unknown, clearVisuals: boolean): void {
+    this.#invalidatePendingCheckpoint(error);
+    for (const waiter of [...this.#waiters]) { this.#waiters.delete(waiter); clearTimeout(waiter.timer!);
+      waiter.signal.removeEventListener('abort', waiter.onAbort); waiter.reject(error); }
+    if (clearVisuals) this.#visuals = [];
   }
 
   async #request(active: ActiveSession, suffix: string, body?: unknown, start = false, signal?: AbortSignal): Promise<Response> {
@@ -342,7 +506,9 @@ class Runtime implements ScreenBridgeRuntime {
     const active = this.#active; if (!active) return;
     this.#publish(this.#statuses, parseScreenStatus({schemaVersion: 1, sessionId: active.session.sessionId, state, ...(reason ? {reason} : {})}));
   }
-  #publish<T>(listeners: Set<(value: T) => void>, value: T): void { for (const listener of listeners) { try { listener(value); } catch { /* subscriber isolation */ } } }
+  #publish<T>(listeners: Set<(value: T) => void>, value: T): void {
+    for (const listener of listeners) { try { listener(structuredClone(value)); } catch { /* subscriber isolation */ } }
+  }
 }
 
 function subscribe<T>(listeners: Set<(value: T) => void>, listener: (value: T) => void): Unsubscribe {
@@ -362,4 +528,38 @@ function transportReason(error: unknown): string { return error instanceof Trans
 class TransportError extends Error {
   readonly code: string;
   constructor(code: string) { super(code); this.name = 'TransportError'; this.code = code; }
+}
+
+interface ObservationWaiter {
+  readonly scope: WorkspaceScope;
+  readonly signal: AbortSignal;
+  readonly resolve: (observations: readonly ScreenObservation[]) => void;
+  readonly reject: (error: unknown) => void;
+  timer: Timer | null;
+  onAbort: () => void;
+}
+interface PendingCheckpoint {
+  readonly checkpoint: ActionCheckpoint;
+  readonly resolve: (reply: CheckpointReply) => void;
+  readonly reject: (error: unknown) => void;
+  readonly cleanup: () => void;
+}
+function parseWorkspaceScope(value: WorkspaceScope): WorkspaceScope {
+  if (!value || typeof value !== 'object' || typeof value.sessionId !== 'string' || !value.sessionId ||
+      !value.revisions || typeof value.revisions.order !== 'string' || !value.revisions.order ||
+      typeof value.revisions.email !== 'string' || !value.revisions.email) throw new TypeError('Invalid workspace scope.');
+  return structuredClone({sessionId: value.sessionId, revisions: value.revisions});
+}
+function parseWorkspaceActivity(value: WorkspaceActivity): WorkspaceActivity {
+  if (!value || typeof value !== 'object' || !['order', 'email', 'ticket'].includes(value.surface) ||
+      typeof value.typing !== 'boolean' || !Number.isSafeInteger(value.lastInputAtMs) || value.lastInputAtMs < 0 ||
+      !Number.isSafeInteger(value.idleMs) || value.idleMs < 0) throw new TypeError('Invalid workspace activity.');
+  return structuredClone(value);
+}
+function hasCurrentPair(observations: readonly ScreenObservation[], revisions: WorkspaceRevisions): boolean {
+  return observations.some(value => value.kind === 'order_view' && value.sourceRevision === revisions.order) &&
+    observations.some(value => value.kind === 'email_draft' && value.sourceRevision === revisions.email);
+}
+function sameWorkspaceScope(a: WorkspaceScope, b: WorkspaceScope): boolean {
+  return a.sessionId === b.sessionId && a.revisions.order === b.revisions.order && a.revisions.email === b.revisions.email;
 }
