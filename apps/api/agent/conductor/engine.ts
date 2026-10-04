@@ -36,6 +36,8 @@ export const RULES = {
   recognizeProcesses: true,
   /** Build the map in the background as soon as Show ends; false: Reflect builds it when it opens, as before. */
   mapAfterShow: true,
+  /** The voice agent hears a new screen at once, and the same screen again at most this often. */
+  screenContextMs: 8_000,
   /** A quiet cue with the same reason is not repeated sooner than this. */
   quietRepeatMs: 20_000,
   keepCues: 300,
@@ -121,6 +123,9 @@ export class Conductor {
   private selectedMode: Mode | null = null;
   private liveMode: Mode | null = null;
   private offRecord = false;
+  /** The last screen line sent to the voice agent, and when. */
+  private lastScreenContext = '';
+  private lastScreenContextAt = -Infinity;
   private sharing = false;
   private readonly sources = new Map<string, Source>();
   /** Server time minus the session time of the latest event. */
@@ -416,6 +421,21 @@ export class Conductor {
     }
     if (changed || o.pendingAction !== null) this.pendingTeachCheck = true;
     if (o.pendingAction !== null) this.urgentTeachCheck = true;
+    this.shareScreen(o, newScreen, now);
+  }
+
+  /**
+   * The voice agent knows what Clipa sees: a new screen goes to it at once as a contextual update, the same screen again
+   * at most every screenContextMs when its description changed. It is never spoken, and nothing goes off the record.
+   */
+  private shareScreen(o: SeenObservation, newScreen: boolean, now: number): void {
+    if (this.liveMode === null) return;
+    const text = `[screen] ${o.app ? `${o.app}: ` : ''}${o.surface}. ${o.summary}${o.pendingAction ? ` About to use: ${o.pendingAction}.` : ''}`.slice(0, 500);
+    if (text === this.lastScreenContext) return;
+    if (!newScreen && now - this.lastScreenContextAt < RULES.screenContextMs) return;
+    this.lastScreenContext = text;
+    this.lastScreenContextAt = now;
+    this.emit({ type: 'context', text });
   }
 
   /** Invalidate only live decisions; a Review map may still be synthesizing in the background. */

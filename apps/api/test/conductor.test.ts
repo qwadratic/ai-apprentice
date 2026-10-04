@@ -136,6 +136,26 @@ test('Learn: a reworded frame of the same generic screen neither restarts the pa
   assert.equal(of(r.cues, 'ask').length, asked + 1, 'asked once the pause after the new screen began');
 });
 
+test('the voice agent knows what Clipa sees: a new screen at once, the same screen at most every few seconds', async () => {
+  const r = rig({ generic_question: () => ok(QUESTION) });
+  const screen = () => cueOf(r.cues, 'context').filter((c) => c.text.startsWith('[screen]'));
+  await r.send(obs('o0', null));
+  assert.equal(screen().length, 0, 'nothing before a stage runs');
+  await r.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', null));
+  assert.equal(screen().length, 1);
+  assert.match(screen()[0]!.text, /^\[screen\] Mail: compose window\. Summary o1/);
+  await r.send(obs('o2', null));
+  assert.equal(screen().length, 1, 'the same screen reworded right away is not sent again');
+  await r.advance(RULES.screenContextMs);
+  await r.send(obs('o3', null));
+  assert.equal(screen().length, 2, 'the same screen after the interval');
+  await r.send(obs('o4', null, { app: 'Sheets', surface: 'budget sheet' }));
+  assert.equal(screen().length, 3, 'a new screen at once');
+  assert.match(screen()[2]!.text, /^\[screen\] Sheets: budget sheet\./);
+  await r.send({ type: 'off_record', on: true }, obs('o5', null, { app: 'Maps', surface: 'map' }));
+  assert.equal(screen().length, 3, 'nothing off the record');
+});
+
 test('typing cancels a question that has not been said yet; off the record hides Clipa and drops input', async () => {
   const r = rig({ generic_question: () => ok(QUESTION) });
   await r.send({ type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', null), obs('o2', 'Changed.'));
