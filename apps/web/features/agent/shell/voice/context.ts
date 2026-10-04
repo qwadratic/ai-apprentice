@@ -14,8 +14,8 @@ export function stripAudioTags(text: string): string {
  * The live agents (interviewer and tutor, v4 turbo) say what follows [ASK] verbatim and otherwise call skip_turn. v4 turbo would
  * perform a bracketed audio tag, so none reaches an [ASK] line by accident: the question text is stripped of them.
  */
-export function askMessage(text: string): string {
-  const clean = stripAudioTags(text.replace(/^\s*\[ASK\]\s*/i, '')).slice(0, MAX_QUESTION_CHARS);
+export function askMessage(text: string, maxChars: number = MAX_QUESTION_CHARS): string {
+  const clean = stripAudioTags(text.replace(/^\s*\[ASK\]\s*/i, '')).slice(0, Math.max(1, maxChars));
   return `[ASK] ${clean}`;
 }
 
@@ -52,7 +52,24 @@ function plainContext(o: ScreenObservation): string | null {
     }
     case 'input_activity':
       return null;
+    default: {
+      // A kind newer than the contracts union (stream A's generic screen_activity): its summary, when it has one.
+      const line = genericSummary(o);
+      return line === null ? null : `[screen] ${line}`;
+    }
   }
+}
+
+/** `facts.summary` (with app and surface) of an observation kind this page has no own words for, or null. */
+function genericSummary(o: unknown): string | null {
+  const facts = (o as { facts?: unknown }).facts;
+  if (typeof facts !== 'object' || facts === null) return null;
+  const f = facts as Record<string, unknown>;
+  const str = (v: unknown): string | null => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null);
+  const where = [str(f.app), str(f.surface)].filter((x): x is string => x !== null).join(' · ');
+  const what = str(f.summary) ?? str(f.change);
+  if (what === null && where === '') return null;
+  return where === '' ? (what ?? '') : what === null ? where : `${where}: ${what}`;
 }
 
 /** A short, human line for the observation list. */
@@ -62,5 +79,6 @@ export function summarizeObservation(o: ScreenObservation): string {
     case 'email_draft': return `Email to ${show(o.facts.recipientRef, 'unknown')} · ${o.facts.previewState} · ${o.facts.attachments.length} attachment(s)`;
     case 'ticket': return `Ticket ${o.facts.ticketId} · ${o.facts.status}`;
     case 'input_activity': return `Input on ${o.facts.surface}: ${o.facts.typing ? 'typing' : `idle ${Math.round(o.facts.idleMs / 100) / 10} s`}`;
+    default: return genericSummary(o) ?? String((o as { kind?: unknown }).kind ?? 'screen');
   }
 }

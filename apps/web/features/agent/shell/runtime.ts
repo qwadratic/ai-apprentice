@@ -12,6 +12,9 @@ import { createClipaStore } from './clipa/presenter.ts';
 import type { ClipaStore } from './clipa/presenter.ts';
 import { resolveClipaTarget } from './clipa/targets.ts';
 import { API_BASE } from './config.ts';
+import { readJoinParams, withoutJoinParams } from './conductor/join.ts';
+import type { Target } from './conductor/protocol.ts';
+import { CONDUCTOR_SURFACE, clipaHint, resolveTarget as resolveConductorTarget } from './conductor/targets.ts';
 import { ShellController } from './controller.ts';
 import type { ControllerTimers, KeyValueStorage } from './controller.ts';
 import { SampleObservationSource } from './screen/sample-source.ts';
@@ -31,9 +34,19 @@ export interface ShellRuntime {
   workspace: WorkspaceAdapter | null;
   /** Stream A's integrated runtime (real bridge, screen panel, workspace) mounted per session; null until A's commit is on main. */
   live: LiveMount | null;
+  /**
+   * Clipa flies to a conductor target (a UI element marked data-clipa-target, or a region of the screen preview); null: she stays.
+   * The conductor's cues call it; a Clipa layer may call it too.
+   */
+  pointAt(target: Target | null): void;
+  /** Clipa's bubble text ('' clears it). Shown only, never spoken: speech goes through the voice agent. */
+  say(text: string): void;
   /** Removes the Clipa layer and the page listeners. The controller is disposed separately. */
   dispose(): void;
 }
+
+/** The web app's version in the conductor hello. */
+export const WEB_FACE_VERSION = 'web-1.1';
 
 const browserTimers: ControllerTimers = {
   setTimeout: (callback, ms) => window.setTimeout(callback, ms),
@@ -86,16 +99,38 @@ export function createRuntime(): ShellRuntime {
   const guard = new InputGuard(() => performance.now());
   const stopWatching = watchPageInput(guard, document);
   // The policy's typing channel: page key presses (the workspace's own heartbeats stop whenever the screen is not `capturing`).
+  // The conductor hears it too: `activity typing`, then `idle` after a quiet moment (its pause signal).
   let lastInputAt: number | null = null;
-  const stopInputClock = watchPageInput({ noteInput: () => { lastInputAt = Date.now(); } }, document);
+  let onTyping: () => void = () => {};
+  const stopInputClock = watchPageInput({ noteInput: () => { lastInputAt = Date.now(); onTyping(); } }, document);
+  // Conductor targets the director flies to: the hint names the target, this map holds its box (regions move with the preview).
+  const pointed = new Map<string, Target>();
   const director = createClipaDirector({
     root: document.body,
     dock: 'bottom-right',
-    resolveTarget: (target) => resolveClipaTarget(document, target),
+    resolveTarget: (target) => {
+      if (target.surface === CONDUCTOR_SURFACE) {
+        const t = target.hint === undefined ? undefined : pointed.get(target.hint);
+        return t === undefined ? null : resolveConductorTarget(document, t);
+      }
+      return resolveClipaTarget(document, target);
+    },
     isInputActive: () => guard.isActive(),
     onLog: (entry) => note('CLIPA', `${entry.kind}: ${entry.message}`),
   });
   const presenter = createDirectorPresenter({ store, director, guard });
+  const pointAt = (target: Target | null): void => {
+    if (target === null) { presenter.setTarget(null); return; }
+    const hint = clipaHint(target);
+    if (pointed.size > 50) pointed.clear();
+    pointed.set(hint, target);
+    const rect = resolveConductorTarget(document, target);
+    presenter.setTarget(rect === null ? null : { x: rect.left, y: rect.top, width: rect.width, height: rect.height });
+    void director.point({ surface: CONDUCTOR_SURFACE, hint });
+  };
+  // `?conductor=off` keeps the in-browser brain in the lead (the fallback); otherwise the page is a face of the conductor.
+  const query = new URLSearchParams(window.location.search);
+  const conductorOn = query.get('conductor') !== 'off';
 
   // An arrow function: an unbound window.fetch would throw "Illegal invocation".
   const fetchFn: FetchLike = (input, init) => fetch(input, init);
@@ -115,8 +150,10 @@ export function createRuntime(): ShellRuntime {
     isHidden: () => document.hidden,
     storage: browserStorage,
     lastInputAt: () => lastInputAt,
+    ...(conductorOn ? { conductor: { base: API_BASE, version: WEB_FACE_VERSION, pointAt } } : {}),
   });
   note = (type, text) => controller.note(type, text);
+  onTyping = () => controller.noteTyping();
   // A's createRuntimeWorkspace mounts the demo workspace itself (providesWorkspace).
   const live = new LiveMount({
     factory: liveFactory, controller, apiBase: API_BASE, providesWorkspace: true,
@@ -131,6 +168,8 @@ export function createRuntime(): ShellRuntime {
     // Stream A's demo workspace; its checkpoint port (A's adapter over the real bridge, PR #21) plugs in here when it lands.
     workspace: createDemoWorkspaceAdapter(),
     live,
+    pointAt,
+    say: (text) => presenter.say(text),
     dispose() {
       live?.dispose();
       stopWatching();
@@ -139,5 +178,12 @@ export function createRuntime(): ShellRuntime {
     },
   };
   harness?.onRuntime?.(runtime);
+  // The macOS hand-over (`?join=CODE&page=review`): the code is single-use, so it leaves the address bar at once.
+  const join = readJoinParams(window.location.search);
+  if (join.join !== null || join.page !== null) {
+    try { window.history.replaceState(window.history.state, '', withoutJoinParams(window.location.href)); } catch { /* the address stays */ }
+  }
+  if (conductorOn) void controller.bootConductor({ join: join.join, page: join.page });
+  else if (join.page !== null) controller.setMode(join.page);
   return runtime;
 }

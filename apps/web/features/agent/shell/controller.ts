@@ -9,6 +9,14 @@ import type { AbortableLlmClient } from './brain/llm-transport.ts';
 import type { AnswerInput, AnswerResult, Brain, BrainDecision, BrainSignals, ClipaTargetRef, DraftMap, TranscriptTurn } from './brain/types.ts';
 import { isSpoken } from './brain/types.ts';
 import type { ClipaPresenter, ClipaState, TargetRect } from './clipa/presenter.ts';
+import { ConductorClient } from './conductor/client.ts';
+import type { ConductorStatus } from './conductor/client.ts';
+import { ConductorFace } from './conductor/face.ts';
+import type { FaceHost } from './conductor/face.ts';
+import { linkSession } from './conductor/join.ts';
+import type { Activity, ClientEvent, ClipaPose, ConductorPersona, ShareState, Target, UiAction } from './conductor/protocol.ts';
+import { createConductorStore } from './conductor/store.ts';
+import type { ConductorStore } from './conductor/store.ts';
 import { SessionLimits } from './limits.ts';
 import type { LimitTimers } from './limits.ts';
 import { EventUploader } from './log/uploader.ts';
@@ -48,6 +56,32 @@ const REVIEW_NOTICES: Readonly<Record<string, string>> = {
 };
 export const PERSONA_STORAGE_KEY = 'apprentice.shell.persona';
 const MAX_BUFFERED_CONTEXT = 20;
+/** No key press for this long after typing: the page reports `activity idle` to the conductor (its pause signal). */
+export const TYPING_IDLE_MS = 2500;
+/** Events made before the conductor stream is live wait for the hello; at most this many. */
+const MAX_EARLY_EVENTS = 20;
+/** Screen observations kept for the Review board's keyframes. */
+const MAX_KEPT_OBSERVATIONS = 200;
+/** The observation kinds of the contracts union, which the in-browser brain reads. */
+const KNOWN_KINDS: ReadonlySet<string> = new Set(['order_view', 'email_draft', 'ticket', 'input_activity']);
+
+/** The Clipa Conductor (doc-12): when present, the page is a face of the server's conductor and the brain is the fallback. */
+export interface ConductorOptions {
+  /** API origin of the conductor routes ('' means this site). */
+  base: string;
+  /** The web app's version, sent in the hello. */
+  version: string;
+  /** Clipa flies to a conductor target, or home for null (the director, through runtime.ts). */
+  pointAt?(target: Target | null): void;
+}
+
+/** The conductor's pose as the shell's Clipa state, for the poses that the voice signals do not already show. */
+const POSE_STATE: Partial<Record<ClipaPose, ClipaState>> = { point: 'pointing', warn: 'warning', celebrate: 'happy', think: 'thinking', hidden: 'off' };
+
+/** Expert in Show and Reflect, new hire in Pass it on. */
+export function personaFor(mode: Mode): ConductorPersona {
+  return mode === 'teach' ? 'new_hire' : 'expert';
+}
 
 export type ControllerTimers = Timers & LimitTimers;
 
@@ -82,6 +116,8 @@ export interface ControllerDeps {
   store?: Store;
   /** Epoch ms of the last key press or text input in the page (the demo workspace included), or null. */
   lastInputAt?: () => number | null;
+  /** The Clipa Conductor; without it the in-browser brain leads (tests, the placeholder API). */
+  conductor?: ConductorOptions;
 }
 
 export function parsePersona(value: string | null): Persona {
@@ -94,6 +130,16 @@ export function parseMode(value: string | null): Mode {
 
 function errMsg(e: unknown): string {
   return e instanceof Error && e.message ? e.message : String(e);
+}
+
+/** The local capture state as the conductor's `share` state; null for states it has no word for (idle, paused, stopped). */
+function shareOf(state: CaptureInfo['state']): ShareState | null {
+  switch (state) {
+    case 'selecting': return 'requested';
+    case 'capturing': return 'capturing';
+    case 'error': return 'unavailable';
+    default: return null;
+  }
 }
 
 /** Voice role per mode: Learn and Review talk to the interviewer agent, Teach to the tutor agent (its own voice, PR #38). */
@@ -148,6 +194,23 @@ export class ShellController {
   private resolveTarget: TargetResolver | null = null;
   private lastClipa: ClipaState | null = null;
   private readonly storeOff: () => void;
+  // ---- Clipa Conductor (doc-12) ----
+  /** What the conductor's cues put on the page (line, pose, regions, map, teach-back). */
+  readonly conductorStore: ConductorStore = createConductorStore();
+  private conductor: ConductorClient | null = null;
+  private face: ConductorFace | null = null;
+  /** The page's one session for the whole journey (Show, Reflect, Pass it on): the conductor is per session id. */
+  private journey: { session: AgentSession; epochMs: number } | null = null;
+  private conductorBooting = false;
+  private helloSent = false;
+  private earlyEvents: ClientEvent[] = [];
+  private personaSent: ConductorPersona | null = null;
+  private shareSent: ShareState | null = null;
+  private activitySent: Activity | null = null;
+  private activityTimer: unknown = null;
+  private personTalking = false;
+  private agentTalking = false;
+  private readonly conductorOff: () => void;
 
   constructor(deps: ControllerDeps) {
     this.deps = deps;
@@ -159,6 +222,7 @@ export class ShellController {
       onExpire: (reason) => { void this.end(reason); },
     });
     this.storeOff = this.store.subscribe(() => this.syncClipa());
+    this.conductorOff = this.conductorStore.subscribe(() => this.syncClipa());
     this.syncClipa();
   }
 
@@ -193,7 +257,10 @@ export class ShellController {
   private err(text: string): void { this.log('err', 'ERR', text); }
 
   private syncClipa(): void {
-    const next = deriveClipaState(this.state);
+    // The conductor's expressive poses (point, warn, celebrate, think, hidden) win; speaking and listening follow the voice itself.
+    const pose = this.conductorLeads() ? this.conductorStore.getState().pose : null;
+    const posed = pose === null ? undefined : POSE_STATE[pose];
+    const next = this.state.offRecord ? 'off' : posed ?? deriveClipaState(this.state);
     if (next !== this.lastClipa) {
       this.lastClipa = next;
       this.deps.presenter.setState(next);
@@ -219,6 +286,7 @@ export class ShellController {
     if (this.state.mode === mode) return;
     this.store.dispatch({ type: 'MODE_SET', mode });
     if (mode === 'review') this.loadReview();
+    this.conductorMode(mode);
   }
 
   /** The person's explicit switch: the running session ends, then a session of `mode` starts (with that mode's voice agent). */
@@ -245,6 +313,196 @@ export class ShellController {
   /** The person is typing in the workspace (or stopped): Clipa holds still. Called by the workspace adapter's host. */
   reportInput(typing: boolean): void {
     this.deps.presenter.noteInput?.(typing);
+    if (typing) this.noteTyping();
+  }
+
+  // ---- Clipa Conductor (doc-12) -------------------------------------------
+
+  /** The conductor leads while its client runs and the server did not refuse it; otherwise the in-browser brain does. */
+  conductorLeads(): boolean {
+    return this.conductor !== null && this.conductorStore.getState().status !== 'failed';
+  }
+
+  /** Session time of the journey (ms since its epoch): the atMs of every conductor event. */
+  private journeyTime(): number {
+    return this.journey === null ? 0 : Math.max(0, this.deps.now() - this.journey.epochMs);
+  }
+
+  /**
+   * Makes this page a face of the conductor: one session for the whole journey, its cue stream and its events. With a join code
+   * (the macOS hand-over) the session is first linked to the macOS session's conductor. `page` opens a stage (review: Reflect).
+   */
+  async bootConductor(options: { join?: string | null; page?: Mode | null } = {}): Promise<void> {
+    const opts = this.deps.conductor;
+    if (!opts || this.conductor !== null || this.conductorBooting) return;
+    this.conductorBooting = true;
+    try {
+      if (options.page) this.setMode(options.page);
+      let session: AgentSession;
+      try {
+        session = await this.deps.api.createSession();
+      } catch (e) {
+        this.err(`Clipa conductor: no session (${errMsg(e)}). The in-browser brain leads.`);
+        return;
+      }
+      if (session.legacy) { this.sys('Clipa conductor: the server runs the placeholder API. The in-browser brain leads.'); return; }
+      this.journey = { session, epochMs: this.deps.now() };
+      const authorization = (): string | null => session.events().headers['Authorization'] ?? null;
+      let linked = false;
+      if (options.join) {
+        const result = await linkSession({ base: opts.base, sessionId: session.sessionId, authorization: authorization(), code: options.join, fetch: this.deps.fetch });
+        linked = result.ok;
+        if (result.ok) this.sys('Clipa conductor: joined the session handed over from the Mac.');
+        else this.store.dispatch({ type: 'BANNER_SET', banner: { kind: 'warn', text: 'The hand-over link has expired or was already used. This page starts its own session.' } });
+      }
+      const face = new ConductorFace(this.faceHost(), this.conductorStore);
+      this.face = face;
+      this.conductorStore.set({ enabled: true, linked, status: 'connecting' });
+      const client = new ConductorClient({
+        base: opts.base,
+        sessionId: session.sessionId,
+        authorization,
+        fetch: this.deps.fetch,
+        timers: this.deps.timers,
+        clock: () => this.journeyTime(),
+        onCue: (env) => face.onCue(env),
+        onHello: (hello, first) => {
+          // A page that joined a hand-over restores the map from what was sent before, but does not replay old lines.
+          if (first && linked) face.historyUntil = hello.lastCueSeq;
+          if (!this.helloSent) this.sendHello();
+        },
+        onStatus: (status, detail) => this.onConductorStatus(status, detail),
+        log: (line) => this.log('sys', 'CONDUCTOR', line),
+      });
+      this.conductor = client;
+      client.open();
+      this.sys(`Clipa conductor: session ${session.sessionId}; Clipa follows the server from now on.`);
+    } finally {
+      this.conductorBooting = false;
+    }
+  }
+
+  private onConductorStatus(status: ConductorStatus, detail: string | null): void {
+    this.conductorStore.set({ status, statusDetail: detail });
+    this.log('sys', 'CONDUCTOR', `${status}${detail ? ` (${detail})` : ''}`);
+    if (status === 'failed') this.sys('Clipa conductor is not available: the in-browser brain leads for this page.');
+    this.syncClipa();
+  }
+
+  private sendHello(): void {
+    const opts = this.deps.conductor;
+    if (!opts || this.conductor === null) return;
+    const persona = personaFor(this.state.session?.mode ?? this.state.mode);
+    const first = !this.helloSent;
+    this.helloSent = true;
+    this.personaSent = persona;
+    this.conductor.send({ type: 'hello', client: 'web', version: opts.version, persona, language: null, mapFrom: null });
+    this.conductor.send({ type: 'mode', mode: this.state.mode });
+    if (!first) return;
+    // What happened before the stream was live: the current session (not its history) and the latest of the other signals.
+    const s = this.state;
+    if (s.offRecord) this.conductor.send({ type: 'off_record', on: true });
+    if (s.phase === 'live' && s.session !== null) this.conductor.send({ type: 'session', mode: s.session.mode, live: true, reason: null });
+    const early = this.earlyEvents;
+    this.earlyEvents = [];
+    for (const e of early) if (e.type !== 'mode' && e.type !== 'session' && e.type !== 'off_record') this.conductor.send(e);
+  }
+
+  /** One event for the conductor; held until the stream is live (the hello goes first). Nothing is sent off the record except off_record itself. */
+  private conductorSend(event: ClientEvent): void {
+    const client = this.conductor;
+    if (client === null) return;
+    if (this.state.offRecord && event.type !== 'off_record' && event.type !== 'mode' && event.type !== 'session') return;
+    if (!this.helloSent) {
+      this.earlyEvents.push(event);
+      if (this.earlyEvents.length > MAX_EARLY_EVENTS) this.earlyEvents.shift();
+      return;
+    }
+    client.send(event);
+  }
+
+  private conductorMode(mode: Mode): void {
+    if (this.conductor === null) return;
+    // The persona follows the stage: a new hello tells the conductor who is in front of the screen now.
+    const persona = personaFor(this.state.session?.mode ?? mode);
+    if (this.helloSent && persona !== this.personaSent) this.sendHello();
+    else this.conductorSend({ type: 'mode', mode });
+  }
+
+  /** A key press in the page: `activity typing` at once, `idle` after TYPING_IDLE_MS without input. */
+  noteTyping(): void {
+    if (this.conductor === null) return;
+    this.setActivity('typing');
+    if (this.activityTimer !== null) this.deps.timers.clearTimeout(this.activityTimer);
+    this.activityTimer = this.deps.timers.setTimeout(() => {
+      this.activityTimer = null;
+      this.setActivity('idle');
+    }, TYPING_IDLE_MS);
+  }
+
+  private setActivity(state: Activity): void {
+    if (this.activitySent === state) return;
+    this.activitySent = state;
+    this.conductorSend({ type: 'activity', state });
+  }
+
+  private setShare(state: ShareState | null, reason: string | null): void {
+    // A stopped or paused capture has no `share` word: the next capture is reported again.
+    if (state === null) { this.shareSent = null; return; }
+    if (this.shareSent === state) return;
+    this.shareSent = state;
+    this.conductorSend({ type: 'share', state, reason });
+  }
+
+  private setTalking(by: 'person' | 'agent', active: boolean): void {
+    if (by === 'person') {
+      if (this.personTalking === active) return;
+      this.personTalking = active;
+    } else {
+      if (this.agentTalking === active) return;
+      this.agentTalking = active;
+    }
+    this.conductorSend({ type: 'talking', by, active });
+  }
+
+  /**
+   * A click on the Review board or the teach-back: confirm, correct (with the person's words), answer_gap or ask_about (with the
+   * item's id), finish. The conductor answers with cues (a spoken question, a new map version).
+   */
+  uiAction(action: UiAction, targetId: string | null = null, text: string | null = null): void {
+    if (this.conductor === null) return;
+    this.conductorSend({ type: 'ui', action, targetId, text });
+    this.log('sent', 'UI', `${action}${targetId ? ` ${targetId}` : ''}`);
+  }
+
+  private faceHost(): FaceHost {
+    return {
+      speak: (text, maxChars) => this.speakLine(text, maxChars),
+      context: (text) => this.sendContext(text, this.voice),
+      personBusy: () => this.activitySent === 'typing' || this.speech.isSpeaking(this.deps.perfNow()),
+      bubble: (text) => this.deps.presenter.say(text),
+      point: (target) => this.pointAt(target),
+      pose: () => this.syncClipa(),
+      log: (type, text) => this.log('sys', type, text),
+      sessionNow: () => (this.conductorStore.getState().linked || this.journey === null ? null : this.journeyTime()),
+      now: () => this.deps.now(),
+      send: (event) => this.conductorSend(event),
+      timers: this.deps.timers,
+    };
+  }
+
+  /** A conductor line said by the voice agent as `[ASK] text`; false when the voice is not connected. */
+  private speakLine(text: string, maxChars?: number): boolean {
+    if (this.state.offRecord) return false;
+    const sent = this.voice?.ask(text, maxChars) ?? null;
+    if (sent === null) return false;
+    this.log('sent', 'USER_MSG', sent);
+    return true;
+  }
+
+  /** Clipa points at a conductor target: the presenter gets the rectangle, the director (runtime.ts) flies there. */
+  private pointAt(target: Target | null): void {
+    this.deps.conductor?.pointAt?.(target);
   }
 
   /** A line for the debug log from outside the controller (the Clipa director's refusals). */
@@ -278,6 +536,7 @@ export class ShellController {
       const was = last;
       last = snapshot.state;
       this.store.dispatch({ type: 'CAPTURE_SNAPSHOT', capture: { state: snapshot.state, reason: snapshot.reason ?? null } });
+      if (was !== snapshot.state) this.setShare(shareOf(snapshot.state), snapshot.reason ?? null);
       if (was !== snapshot.state && (snapshot.state === 'stopped' || snapshot.state === 'error')) this.onCaptureEnded(snapshot.reason ?? null);
     });
     this.captureOff = off;
@@ -323,15 +582,23 @@ export class ShellController {
     this.lastObservationPerfMs = null;
     this.store.dispatch({ type: 'SESSION_STARTING', mode });
     let session: AgentSession;
-    try {
-      session = await this.deps.api.createSession();
-    } catch (e) {
-      if (this.isCurrent(run)) this.store.dispatch({ type: 'SESSION_FAILED', message: errMsg(e) });
-      return;
+    // With the conductor, every stage runs in the journey's one session: the screen, the voice and the conductor share its id, so
+    // Reflect reads what Show saw and Pass it on reads the confirmed map. Its epoch stays the journey's.
+    const journey = this.journey;
+    const timelineEpochMs = journey !== null ? journey.epochMs : epochMs;
+    if (journey !== null) {
+      session = journey.session;
+    } else {
+      try {
+        session = await this.deps.api.createSession();
+      } catch (e) {
+        if (this.isCurrent(run)) this.store.dispatch({ type: 'SESSION_FAILED', message: errMsg(e) });
+        return;
+      }
     }
     if (!this.isCurrent(run)) return; // off the record or a new start while the session was being made
     this.session = session;
-    this.epochMs = epochMs;
+    this.epochMs = timelineEpochMs;
     this.uploader = new EventUploader({
       session, fetch: this.deps.fetch, timers: this.deps.timers, now: () => this.deps.now(),
       onProblem: (text) => this.store.dispatch({ type: 'LOG', t: this.deps.now(), dir: 'err', logType: 'ERR', text }),
@@ -339,11 +606,13 @@ export class ShellController {
     this.store.dispatch({
       type: 'SESSION_READY',
       session: {
-        id: session.sessionId, mode, epochMs, legacyRoutes: session.legacy, deadlineMs: deadlineOf(epochMs, SESSION_LIMIT_MS),
+        id: session.sessionId, mode, epochMs: timelineEpochMs, legacyRoutes: session.legacy, deadlineMs: deadlineOf(epochMs, SESSION_LIMIT_MS),
         clockSkewMs: session.clockSkewMs, conversationId: null,
       },
     });
     this.sys(`Session ${session.sessionId} started in ${mode} mode. Events, transcript and audio recording are stored on our server.`);
+    if (this.conductor !== null && this.personaSent !== null && personaFor(mode) !== this.personaSent) this.sendHello();
+    this.conductorSend({ type: 'session', mode, live: true, reason: null });
     if (session.legacy) this.sys('The server still runs the placeholder API: legacy routes, no session token.');
     this.speech.reset();
     this.held = null;
@@ -385,6 +654,10 @@ export class ShellController {
     if (this.state.offRecord) return;
     // Before anything else: pending and queued model calls are cut off, so no expert words are posted after the switch.
     this.llm?.abort();
+    // The conductor stops its cues and its model calls, and keeps no transcript of the span; this page renders nothing meanwhile.
+    this.conductorSend({ type: 'off_record', on: true });
+    this.conductorStore.set({ paused: true });
+    this.face?.clear();
     if (this.uploader?.isRecording()) {
       // This is the last line that is queued: nothing after the switch reaches the server.
       this.sys('Off the record: capture and upload stopped.');
@@ -404,6 +677,8 @@ export class ShellController {
   backOnRecord(): void {
     if (!this.state.offRecord) return;
     this.store.dispatch({ type: 'OFF_RECORD_SET', on: false });
+    this.conductorStore.set({ paused: false });
+    this.conductorSend({ type: 'off_record', on: false });
     this.sys('Back on record. Start a mode to capture again.');
   }
 
@@ -417,6 +692,7 @@ export class ShellController {
   private async doTeardown(reason: string): Promise<void> {
     this.runId += 1; // late callbacks of this run are ignored from here on
     const active = this.state.phase === 'starting' || this.state.phase === 'live' || this.state.phase === 'ending';
+    const endingMode = this.state.phase === 'live' ? this.state.session?.mode ?? null : null;
     if (this.state.phase === 'live') this.store.dispatch({ type: 'SESSION_ENDING' });
     this.limits.stop();
     this.stopTick();
@@ -431,6 +707,9 @@ export class ShellController {
     this.capture?.stop();
     this.deps.presenter.say('');
     this.deps.presenter.setTarget(null);
+    // After the bubble is cleared: the conductor answers the end of a stage with the next step's line.
+    if (endingMode !== null) this.conductorSend({ type: 'session', mode: endingMode, live: false, reason: this.state.offRecord ? 'off_record' : 'ended' });
+    this.setTalking('agent', false);
     this.clearPendingAsk();
     this.expireOpenQuestions();
     this.bufferedContext = [];
@@ -475,6 +754,11 @@ export class ShellController {
 
   dispose(): void {
     this.storeOff();
+    this.conductorOff();
+    if (this.activityTimer !== null) this.deps.timers.clearTimeout(this.activityTimer);
+    this.activityTimer = null;
+    this.face?.clear();
+    this.conductor?.close();
     this.limits.stop();
     this.stopTick();
     void this.stopSource();
@@ -552,12 +836,19 @@ export class ShellController {
         // v4 turbo may carry audio tags ("[warmly]"): they are not words, so they never reach the brain or the feed.
         const turn: TranscriptTurn = { role: m.source === 'ai' ? 'agent' : 'user', text: stripAudioTags(m.text), atMs: this.deps.now() - this.epochMs };
         this.log('recv', turn.role === 'agent' ? 'AGENT' : 'USER', m.text);
+        // Final turns only (the SDK reports a turn when it is complete); the conductor reads the person's words and Clipa's.
+        if (turn.text !== '') this.conductorSend({ type: 'transcript', role: turn.role === 'agent' ? 'agent' : 'expert', text: turn.text });
         this.safe('onTranscript', () => this.brain.onTranscript(turn), undefined);
         if (turn.role === 'agent') this.store.dispatch({ type: 'VOICE_THINKING', thinking: false });
         else this.captureAnswer(turn);
       },
       onError: (message) => { if (live()) this.err(message); },
-      onVadScore: (score) => { if (live()) this.speech.onScore(score, this.deps.perfNow()); },
+      onVadScore: (score) => {
+        if (!live()) return;
+        const at = this.deps.perfNow();
+        this.speech.onScore(score, at);
+        this.setTalking('person', this.speech.isSpeaking(at));
+      },
     };
   }
 
@@ -590,6 +881,8 @@ export class ShellController {
     if ((mode === 'speaking') === (was === 'speaking') && (was === 'speaking' || was === 'listening')) return;
     this.log('recv', 'VOICE_MODE', mode);
     this.store.dispatch({ type: 'VOICE_PHASE', phase: mode === 'speaking' ? 'speaking' : 'listening' });
+    this.setTalking('agent', mode === 'speaking');
+    this.face?.onAgentSpeaking(mode === 'speaking');
     if (mode === 'speaking' && this.pendingAsk) {
       const ms = Math.max(0, Math.round(this.deps.perfNow() - this.pendingAsk.fromPerfMs));
       this.store.dispatch({ type: 'DECISION_LATENCY', id: this.pendingAsk.decisionId, latencyMs: ms });
@@ -818,11 +1111,25 @@ export class ShellController {
       },
     });
     this.log('sys', 'OBS', `${o.kind} #${o.sequence} ${o.id} t=${o.timestampMs} ms${o.evidenceIds.length ? ` evidence ${o.evidenceIds.join(',')}` : ''}`);
+    this.keepObservation(o);
     if (o.kind === 'input_activity') this.deps.presenter.noteInput?.(o.facts.typing);
-    this.safe('onObservation', () => this.brain.onObservation(o), undefined);
-    this.mapDirty = true;
+    // The brain knows the workspace kinds only; a generic screen_activity is the conductor's (it reads it on the server).
+    if (KNOWN_KINDS.has(o.kind)) {
+      this.safe('onObservation', () => this.brain.onObservation(o), undefined);
+      this.mapDirty = true;
+    }
+    // With the conductor the server already has every observation and sends its own `context` cues.
+    if (this.conductorLeads()) return;
     const context = observationToContext(o, this.source?.synthetic ?? false);
     if (context !== null) this.sendContext(context, this.voice);
+  }
+
+  /** The raw observations of this page (newest last, capped): the Review board draws its keyframes from them. */
+  private observationLog: ScreenObservation[] = [];
+  private keepObservation(o: ScreenObservation): void {
+    if (o.kind === 'input_activity') return;
+    this.observationLog = [...this.observationLog.filter((x) => x.id !== o.id), o].slice(-MAX_KEPT_OBSERVATIONS);
+    this.conductorStore.set({ observations: this.observationLog });
   }
 
   private onScreenStatus(s: ScreenStatus): void {
@@ -836,6 +1143,8 @@ export class ShellController {
     }
     this.store.dispatch({ type: 'SCREEN_STATUS', state: s.state, reason: s.reason ?? null });
     this.log('sys', 'SCREEN', `${s.state}${s.reason ? ` (${s.reason})` : ''}`);
+    if (s.state === 'capturing') this.setShare('capturing', null);
+    else if (s.state === 'error') this.setShare('unavailable', s.reason ?? null);
     if (s.state === 'error') {
       this.store.dispatch({ type: 'BANNER_SET', banner: { kind: 'error', text: `Screen observation stopped${s.reason ? `: ${s.reason}` : ''}.` } });
     }
@@ -871,7 +1180,8 @@ export class ShellController {
       this.held = null;
       if (this.deps.perfNow() - held.atPerfMs <= WARN_HOLD_MS) this.applyDecision(held.decision, nowMs);
     }
-    const decisions = this.safe('tick', () => this.brain.tick(nowMs, this.signals()), [] as BrainDecision[]);
+    // The conductor leads: the brain keeps reading (its map is the fallback) but never speaks over the conductor.
+    const decisions = this.conductorLeads() ? [] : this.safe('tick', () => this.brain.tick(nowMs, this.signals()), [] as BrainDecision[]);
     for (const d of decisions) this.applyDecision(d, nowMs);
     if (this.mapDirty) {
       this.mapDirty = false;

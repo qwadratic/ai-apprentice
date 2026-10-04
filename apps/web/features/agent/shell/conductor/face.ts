@@ -1,0 +1,221 @@
+// The web face of the conductor: renders each cue and reports when it is done. The conductor decides what Clipa says
+// and when; this class only shows, speaks and points, through the host (the shell controller), and answers `cue_done`.
+//   - ask, warn, say, teachback and a guide with `speak` go to the voice agent as `[ASK] <text>`. `cue_done spoken` is sent
+//     when the agent has finished saying it; `shown` when there was no voice to say it (the bubble shows it).
+//   - A cue past its `expiresAtMs`, or a spoken cue that arrives while the person types or talks, is dropped: `skipped`.
+//   - Off the record nothing is rendered except `state hidden`.
+//   - Cues replayed from before this page joined a hand-over (`historyUntil`) only restore the map and the teach-back.
+import type { ClientTimers } from './client.ts';
+import type { ClientEvent, ClipaPose, CueEnvelope, CueOutcome, Region, Target } from './protocol.ts';
+import type { ConductorLine, ConductorStore } from './store.ts';
+
+export interface FaceHost {
+  /** Says `text` through the voice agent ([ASK]); false when the voice cannot take it now. */
+  speak(text: string, maxChars?: number): boolean;
+  /** A contextual update for the voice agent (never spoken). */
+  context(text: string): void;
+  /** The person types or talks right now. */
+  personBusy(): boolean;
+  /** Clipa's bubble; '' clears it. */
+  bubble(text: string): void;
+  /** Where Clipa points; null nowhere. */
+  point(target: Target | null): void;
+  pose(pose: ClipaPose): void;
+  log(type: string, text: string): void;
+  /** The conductor's session time now, when this page knows it exactly (its own session), else null. */
+  sessionNow(): number | null;
+  /** Epoch ms (Date.now()). */
+  now(): number;
+  send(event: ClientEvent): void;
+  timers: ClientTimers;
+}
+
+/** A spoken cue whose speech never starts is given up after this long. */
+export const SPEECH_START_TIMEOUT_MS = 12_000;
+/** A spoken cue whose end is never reported counts as said after this long. */
+export const SPEECH_MAX_MS = 45_000;
+/** A teach-back may be read in full (about a minute of speech); other lines keep the agent's usual limit. */
+export const TEACHBACK_MAX_CHARS = 1200;
+const BUBBLE_MAX_CHARS = 280;
+
+interface Speaking { cueId: string; started: boolean; timer: unknown }
+
+export class ConductorFace {
+  private readonly host: FaceHost;
+  private readonly store: ConductorStore;
+  /** Cues at or below this seq were sent before this page joined: only the map and the teach-back are restored. */
+  historyUntil = -1;
+  private speaking: Speaking | null = null;
+  private readonly done = new Set<string>();
+  private latest: { atMs: number; localMs: number } | null = null;
+  private targetCueId: string | null = null;
+
+  constructor(host: FaceHost, store: ConductorStore) {
+    this.host = host;
+    this.store = store;
+  }
+
+  /** The conductor's clock now: exact for this page's own session, else estimated from the newest cue seen. */
+  private conductorNow(): number | null {
+    const exact = this.host.sessionNow();
+    if (exact !== null) return exact;
+    return this.latest === null ? null : this.latest.atMs + (this.host.now() - this.latest.localMs);
+  }
+
+  private finish(cueId: string, outcome: CueOutcome): void {
+    if (this.done.has(cueId)) return;
+    this.done.add(cueId);
+    if (this.done.size > 200) this.done.delete(this.done.values().next().value as string);
+    if (this.speaking?.cueId === cueId) {
+      if (this.speaking.timer !== null) this.host.timers.clearTimeout(this.speaking.timer);
+      this.speaking = null;
+    }
+    this.host.send({ type: 'cue_done', cueId, outcome });
+  }
+
+  private setLine(line: ConductorLine | null): void {
+    this.store.set({ line });
+    this.host.bubble(line === null ? '' : line.text.length > BUBBLE_MAX_CHARS ? `${line.text.slice(0, BUBBLE_MAX_CHARS - 1)}…` : line.text);
+  }
+
+  private setTarget(target: Target | null, cueId: string | null): void {
+    this.targetCueId = target === null ? null : cueId;
+    this.store.set({ target });
+    this.host.point(target);
+  }
+
+  private setRegions(regions: Region[], cueId: string | null): void {
+    this.store.set({ regions, regionsCueId: regions.length > 0 ? cueId : null });
+  }
+
+  /** Speaks a cue; returns 'speaking', or the outcome when it cannot be spoken. */
+  private speakCue(cueId: string, text: string, maxChars?: number): 'speaking' | 'no_voice' {
+    if (!this.host.speak(text, maxChars)) return 'no_voice';
+    const previous = this.speaking;
+    if (previous !== null) this.finish(previous.cueId, 'interrupted');
+    const timer = this.host.timers.setTimeout(() => {
+      if (this.speaking?.cueId === cueId && !this.speaking.started) this.finish(cueId, 'skipped');
+    }, SPEECH_START_TIMEOUT_MS);
+    this.speaking = { cueId, started: false, timer };
+    return 'speaking';
+  }
+
+  /** The voice agent started (true) or stopped (false) speaking. */
+  onAgentSpeaking(active: boolean): void {
+    const s = this.speaking;
+    if (s === null) return;
+    if (active && !s.started) {
+      s.started = true;
+      if (s.timer !== null) this.host.timers.clearTimeout(s.timer);
+      const cueId = s.cueId;
+      s.timer = this.host.timers.setTimeout(() => { if (this.speaking?.cueId === cueId) this.finish(cueId, 'spoken'); }, SPEECH_MAX_MS);
+    } else if (!active && s.started) {
+      this.finish(s.cueId, 'spoken');
+    }
+  }
+
+  /** Off the record or the end of the page: whatever is on screen goes, and a cue being spoken is reported interrupted. */
+  clear(): void {
+    if (this.speaking !== null) this.finish(this.speaking.cueId, 'interrupted');
+    this.setLine(null);
+    this.setRegions([], null);
+    this.setTarget(null, null);
+  }
+
+  onCue(env: CueEnvelope): void {
+    const { cue } = env;
+    if (this.latest === null || env.atMs >= this.latest.atMs) this.latest = { atMs: env.atMs, localMs: this.host.now() };
+    if (this.store.getState().paused) {
+      // Off the record: only Clipa going out of sight is rendered.
+      if (cue.type === 'state' && cue.clipa === 'hidden') { this.store.set({ pose: 'hidden' }); this.host.pose('hidden'); }
+      return;
+    }
+    if (env.seq <= this.historyUntil) {
+      if (cue.type === 'map') this.store.set({ map: { version: cue.version, map: cue.map, confirmed: cue.confirmed } });
+      if (cue.type === 'teachback') this.store.set({ teachBack: { version: cue.version, text: cue.text, cueId: env.cueId } });
+      return;
+    }
+    const now = this.conductorNow();
+    const expired = env.expiresAtMs !== null && now !== null && now > env.expiresAtMs;
+    switch (cue.type) {
+      case 'state':
+        this.store.set({ pose: cue.clipa });
+        this.host.pose(cue.clipa);
+        return;
+      case 'context':
+        this.host.context(cue.text);
+        return;
+      case 'map':
+        this.store.set({ map: { version: cue.version, map: cue.map, confirmed: cue.confirmed } });
+        return;
+      case 'quiet':
+        this.store.set({ quiet: cue.reason });
+        this.host.log('QUIET', cue.reason);
+        return;
+      case 'cancel':
+        this.cancel(cue.cueId);
+        return;
+      case 'presence':
+      case 'open_web':
+        // macOS only: the web has its own page for every stage.
+        return;
+      default:
+        break;
+    }
+    if (expired) { this.finish(env.cueId, 'skipped'); return; }
+    switch (cue.type) {
+      case 'guide': {
+        this.setLine({ cueId: env.cueId, kind: 'guide', text: cue.text, step: cue.step || null });
+        this.setTarget(cue.target, env.cueId);
+        if (cue.target?.kind === 'region') this.setRegions([{ regionId: cue.target.regionId, label: cue.target.label, box: cue.target.box, evidenceId: cue.target.evidenceId }], env.cueId);
+        if (cue.speak && !this.host.personBusy() && this.speakCue(env.cueId, cue.text) === 'speaking') return;
+        this.finish(env.cueId, 'shown');
+        return;
+      }
+      case 'ask':
+      case 'warn': {
+        if (this.host.personBusy()) { this.finish(env.cueId, 'skipped'); return; }
+        this.setLine({ cueId: env.cueId, kind: cue.type, text: cue.text, step: null });
+        const withBox = cue.regions.filter((r) => r.box !== null);
+        this.setRegions(withBox, env.cueId);
+        const first = withBox[0] ?? null;
+        this.setTarget(first === null ? null : { kind: 'region', ...first }, env.cueId);
+        if (cue.type === 'warn') { this.store.set({ pose: 'warn' }); this.host.pose('warn'); }
+        if (this.speakCue(env.cueId, cue.text) === 'no_voice') this.finish(env.cueId, 'shown');
+        return;
+      }
+      case 'say': {
+        if (this.host.personBusy()) { this.finish(env.cueId, 'skipped'); return; }
+        this.setLine({ cueId: env.cueId, kind: 'say', text: cue.text, step: null });
+        if (this.speakCue(env.cueId, cue.text) === 'no_voice') this.finish(env.cueId, 'shown');
+        return;
+      }
+      case 'teachback': {
+        // The teach-back is kept for the Review view even when it cannot be read aloud now.
+        this.store.set({ teachBack: { version: cue.version, text: cue.text, cueId: env.cueId } });
+        if (this.host.personBusy()) { this.finish(env.cueId, 'skipped'); return; }
+        this.setLine({ cueId: env.cueId, kind: 'teachback', text: cue.text, step: null });
+        if (this.speakCue(env.cueId, cue.text, TEACHBACK_MAX_CHARS) === 'no_voice') this.finish(env.cueId, 'shown');
+        return;
+      }
+      case 'point': {
+        this.setTarget(cue.target, env.cueId);
+        if (cue.target.kind === 'region') {
+          this.setRegions([{ regionId: cue.target.regionId, label: cue.target.label, box: cue.target.box, evidenceId: cue.target.evidenceId }], env.cueId);
+        }
+        this.finish(env.cueId, 'shown');
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  private cancel(cueId: string): void {
+    const s = this.store.getState();
+    if (s.line?.cueId === cueId) this.setLine(null);
+    if (s.regionsCueId === cueId) this.setRegions([], null);
+    if (this.targetCueId === cueId) this.setTarget(null, null);
+    if (this.speaking?.cueId === cueId) this.finish(cueId, 'interrupted');
+  }
+}

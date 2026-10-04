@@ -1,4 +1,6 @@
 import { EvidenceLinks, NotWired, StepCards, clockOf } from '../components/Parts.tsx';
+import { ConductorLine } from '../conductor/ConductorLine.tsx';
+import { useConductorLeads } from '../conductor/hooks.ts';
 import { useShellState } from '../hooks.ts';
 import type { FeedStatus } from '../state/types.ts';
 
@@ -19,6 +21,7 @@ export function LearnView() {
   const synthetic = useShellState((s) => s.screen.source?.synthetic ?? false);
   const sawSynthetic = observations.some((o) => o.synthetic);
   const waitingWhy = useShellState((s) => [...s.decisions].reverse().find((d) => d.topic === 'waiting')?.whyNow ?? null);
+  const leads = useConductorLeads();
   const counts = {
     asked: feed.filter((f) => f.status === 'asked' || f.status === 'answered' || f.status === 'said').length,
     deferred: feed.filter((f) => f.status === 'deferred' || f.status === 'unspoken').length,
@@ -26,13 +29,20 @@ export function LearnView() {
 
   return (
     <div className="as-view" data-testid="view-learn">
-      {!brain.wired && (
+      <ConductorLine />
+      {leads && (
+        <p className="as-note" data-testid="learn-conductor-hint">
+          Share your whole screen, start Learn and work in any app. Clipa watches quietly and asks only at a natural pause: never while
+          you type or talk. Answer by voice; Reflect then shows the map she made of your steps and rules.
+        </p>
+      )}
+      {!leads && !brain.wired && (
         <NotWired>
           the question policy ({brain.name}). Clipa will not ask anything yet, and the Work Map stays empty. The voice, the session log
           and the observation flow below are real.
         </NotWired>
       )}
-      {brain.wired && (
+      {!leads && brain.wired && (
         <p className="as-note" data-testid="learn-hint">
           Clipa asks only at a natural pause: not while you speak or while the screen is still changing, and not while she hears you type
           in the demo workspace (typing in other windows is not seen). Answer by voice; your words go into the draft map with the screen

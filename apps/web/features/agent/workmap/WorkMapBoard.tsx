@@ -44,6 +44,8 @@ export interface WorkMapBoardProps {
   onConfirmRequest?: (item: { kind: 'step' | 'guardrail'; id: string }) => void;
   /** The expert clicked an open gap: Review can ask it now. */
   onGapSelect?: (gap: Question) => void;
+  /** The expert selected a card (a step, a guardrail or a gap): Review can talk about it (the conductor's `ui ask_about`). */
+  onCardSelect?: (card: { kind: 'step' | 'guardrail' | 'gap'; id: string }) => void;
   /** Label the whole board as synthetic (sample or simulated session). */
   synthetic?: boolean;
   title?: string;
@@ -275,7 +277,10 @@ export function WorkMapBoard(props: WorkMapBoardProps): ReactNode {
   };
   const selectFrame = (f: Keyframe): void =>
     seek(`frame:${f.id}`, f.evidenceId ? { evidenceId: f.evidenceId, startMs: f.startMs, endMs: f.endMs } : null, frameLabel(f));
-  const selectCard = (c: BoardCard): void => seek(cardKey(c), c.moment, momentLabel(c));
+  const selectCard = (c: BoardCard): void => {
+    seek(cardKey(c), c.moment, momentLabel(c));
+    props.onCardSelect?.({ kind: c.kind, id: c.id });
+  };
 
   const stateClass = (key: string): string => (selected === key ? ' is-selected' : frameCards.has(key) ? ' is-related' : '');
 
