@@ -1,11 +1,11 @@
 ---
 id: TASK-3.52
 title: 'Generic vision: screen_activity observations with regions for any app'
-status: To Do
+status: In Progress
 assignee:
-  - '@qwadratic'
+  - '@kigulx'
 created_date: '2026-10-04 06:01'
-updated_date: '2026-10-04 06:07'
+updated_date: '2026-10-04 06:39'
 labels:
   - stream-b
 dependencies: []
@@ -38,4 +38,6 @@ Ivan's demo runs on any app (an email, a table), on the web and on macOS. The vi
 
 <!-- SECTION:NOTES:BEGIN -->
 4 Oct 06:30 UTC: not started. The contract is in the Hive integration thread and TASK-3.41 notes; the conductor already parses screen_activity (apps/api/agent/conductor/protocol.ts).
+
+Kirill explicitly assigned TASK-3.52 to a new Codex orchestrator in the status chat on 4 Oct. Stream A resumes its vision/contracts implementation; preserve the existing additive screen_activity proposal and coordinate with B rather than duplicating TASK-3.53. Use an isolated worktree. Slack is forbidden.
 <!-- SECTION:NOTES:END -->
