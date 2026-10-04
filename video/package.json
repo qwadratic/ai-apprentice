@@ -1,0 +1,43 @@
+{
+  "name": "ai-apprentice-video",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Remotion toolkit for the AI Apprentice demo and tech videos (standalone, not a root workspace member).",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "studio": "remotion studio",
+    "typecheck": "tsc --noEmit",
+    "record": "tsx recorder/record.ts",
+    "record:sample": "tsx recorder/record.ts sample",
+    "render": "tsx render.ts",
+    "render:sample": "tsx render.ts Sample",
+    "render:title": "tsx render.ts TitleCard",
+    "render:clip": "tsx render.ts CaptionedClip",
+    "render:intro": "tsx render.ts ClipaIntro",
+    "render:outro": "tsx render.ts ClipaOutro",
+    "render:layers": "tsx render.ts LayersDiagram",
+    "still": "tsx render.ts --still"
+  },
+  "dependencies": {
+    "@fontsource/inter": "^5.2.8",
+    "@fontsource/jetbrains-mono": "^5.3.0",
+    "@remotion/bundler": "4.0.532",
+    "@remotion/cli": "4.0.532",
+    "@remotion/renderer": "4.0.532",
+    "@remotion/transitions": "4.0.532",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "remotion": "4.0.532"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.2.0",
+    "playwright-core": "1.56.1",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
+}
