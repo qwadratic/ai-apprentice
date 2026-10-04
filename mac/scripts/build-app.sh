@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Build release binary and assemble build/Apprentice.app (ad-hoc signed).
+# Build release binary and assemble build/Clipa.app (ad-hoc signed).
 # Usage: scripts/build-app.sh            native arch
 #        UNIVERSAL=1 scripts/build-app.sh  arm64 + x86_64
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-APP_NAME="Apprentice"
+APP_NAME="Clipa"
 APP="build/${APP_NAME}.app"
 
 ARCH_FLAGS=()
@@ -35,4 +35,4 @@ codesign --verify --verbose=2 "${APP}"
 echo
 echo "Built ${APP}"
 echo "Run:  open ${APP}"
-echo "If macOS keeps old permission state after a rebuild:  tccutil reset All com.hacknation.apprentice"
+echo "If macOS keeps old permission state after a rebuild:  tccutil reset All com.hacknation.clipa"

@@ -5,15 +5,15 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleExecutable</key>
-	<string>Apprentice</string>
+	<string>Clipa</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.hacknation.apprentice</string>
+	<string>com.hacknation.clipa</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Apprentice</string>
+	<string>Clipa</string>
 	<key>CFBundleDisplayName</key>
-	<string>Apprentice</string>
+	<string>Clipa</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
