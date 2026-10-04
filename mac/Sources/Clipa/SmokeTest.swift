@@ -7,7 +7,8 @@ import Foundation
 /// No screen capture, no microphone, no audio output, no overlay. It prints statuses only, never a token or a URL.
 @MainActor
 enum SmokeTest {
-    static func run() async -> Int32 {
+    /// `playback`: also start the audio engine and play the agent's answer (needs an audio output device).
+    static func run(playback: Bool = false) async -> Int32 {
         let config = ClipaConfig.load()
         let api = ServerAPI(config: config)
         let log = SessionLog.shared
@@ -59,7 +60,9 @@ enum SmokeTest {
                     let voice = VoiceAgent()
                     var responses = 0
                     voice.onAgentResponse = { _ in responses += 1 }
-                    voice.connect(url: url, role: "interviewer", microphone: false, audio: false)
+                    var spoke = 0
+                    voice.onAgentSpeaking = { active in if !active { spoke += 1 } }
+                    voice.connect(url: url, role: "interviewer", microphone: false, audio: playback)
                     await wait(15) { voice.isLive || voice.state == .failed }
                     report("voice \(voice.state.rawValue) \(voice.detail)")
                     if voice.isLive {
@@ -70,6 +73,11 @@ enum SmokeTest {
                         await wait(20) { responses > 0 && voice.audioChunks > 0 }
                         report("voice: \(responses) agent response(s), \(voice.audioChunks) audio chunk(s)")
                         if voice.audioChunks == 0 { failures.append("no agent audio") }
+                        if playback {
+                            await wait(20) { spoke > 0 }
+                            report("playback: \(spoke > 0 ? "the answer played to the end" : "nothing finished playing") \(voice.detail)")
+                            if spoke == 0 { failures.append("playback did not finish") }
+                        }
                     } else {
                         failures.append("voice not live")
                     }

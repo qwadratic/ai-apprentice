@@ -6,10 +6,11 @@ import AppKit
 struct ClipaMain {
     @MainActor
     static func main() {
-        if CommandLine.arguments.contains("--smoke") {
+        let arguments = CommandLine.arguments
+        if arguments.contains("--smoke") || arguments.contains("--smoke-audio") {
             // Headless check of the server path (see SmokeTest.swift); no menu bar, no overlay.
             Task { @MainActor in
-                let code = await SmokeTest.run()
+                let code = await SmokeTest.run(playback: arguments.contains("--smoke-audio"))
                 exit(code)
             }
             dispatchMain()

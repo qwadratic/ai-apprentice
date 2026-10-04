@@ -43,3 +43,10 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         timeout-minutes: 3
         run: build/Clipa.app/Contents/MacOS/Clipa --smoke
+
+      # Informative only: CI Macs may have no audio output device.
+      - name: Smoke test with audio playback (manual runs, informative)
+        if: github.event_name == 'workflow_dispatch'
+        continue-on-error: true
+        timeout-minutes: 3
+        run: build/Clipa.app/Contents/MacOS/Clipa --smoke-audio
