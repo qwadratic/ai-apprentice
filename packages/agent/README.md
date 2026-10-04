@@ -1,19 +1,51 @@
 # @apprentice/agent
 
-Stream B's standalone package: the agent side of the AI Apprentice. It has no runtime dependencies and needs no network or keys; its own `package.json` and lockfile hold only dev tools (TypeScript, `@types/node`), so it can be developed and tested before stream A's root workspace lands.
+Stream B's package: the agent side of the AI Apprentice. It needs no network or keys. Its one runtime dependency is `@apprentice/contracts` (stream A's canonical screen types: `ScreenObservation`, `ScreenStatus`, `ActionCheckpoint`, `CheckpointReply`); the brain modules import those and define no private copies.
 
 ## Run the tests
 
+From the repository root, `npm ci && npm run check` (typecheck, tests and build of every workspace). Or in this package:
+
 ```
-cd packages/agent
-npm ci
-npm run typecheck   # tsc --noEmit (TypeScript 7), strict
-npm test            # node --test, Node >= 22.18 (native TypeScript stripping)
+npm ci              # root lockfile; installs the workspace
+npm run typecheck   # builds @apprentice/contracts first, then tsc --noEmit (TypeScript 7), strict
+npm test            # builds @apprentice/contracts first, then node --test, Node >= 22.18 (native TypeScript stripping)
 ```
 
-Code rules for this package: `.ts` files only, explicit `.ts` import extensions, no enums, no parameter properties, no path aliases, `import type` for types, no `any`, no `@ts-ignore`, no non-null assertions (tests use `must()` from `test/helpers.ts`). The tsconfig enables `strict`, `noUncheckedIndexedAccess`, `noImplicitOverride`, `verbatimModuleSyntax` and `erasableSyntaxOnly`. Validation is hand-written (`src/validation.ts`) until zod lands with the skeleton.
+Code rules for this package: `.ts` files only, explicit `.ts` import extensions, no enums, no parameter properties, no path aliases, `import type` for types, no `any`, no `@ts-ignore`, no non-null assertions (tests use `must()` from `test/helpers.ts`). The tsconfig enables `strict`, `noUncheckedIndexedAccess`, `noImplicitOverride`, `verbatimModuleSyntax` and `erasableSyntaxOnly`. Validation of the older draft types is hand-written (`src/validation.ts`). `src/index.ts` is browser-safe: no `node:` import, and the only non-relative import is `@apprentice/contracts` (a test checks both).
 
-## Contents
+## The brain (TASK-3.29)
+
+The agent decides; ElevenLabs only speaks. Three modules, all pure and deterministic, exported from `src/index.ts`:
+
+| Module | What |
+| --- | --- |
+| `src/policy/` | `ConversationPolicy`: a deterministic gate, then ranking. The gate never asks while the expert types (`input_activity`), speaks, is being spoken to, is off the record or while the screen is still changing; skips a topic already asked or already answered in the map; and keeps a question budget (rolling 10 minutes, persona maximum) and a cooldown. A natural pause is all four channels quiet for the persona's thresholds (`PERSONAS`: strict, plain, thorough, quiet; `QuietTracker`). Decisions: `ASK_NOW`, `DEFER` (to the next pause, or held for Review with an expiry), `SKIP`, and in Teach `WARN` (bypasses budget and cooldown) and `PREDICT` (at a decision point of the map). Every decision is a `BrainDecision` in `policy.log`: `decision`, `reasons[]`, the four `quiet` channels, `evidenceIds`, `whyNow`, the budget, and for `ASK_NOW` the `question` and the `utterance` (`formatAskLine` gives the `[ASK] [tag] text` line for the voice agent). Question text comes from topic templates (`topics.ts`, longest to shortest variant, picked by the persona's word limit); templates describe what is on screen and ask why, they never state a rule. Time is injected (`now` option or an argument), so tests run on `FakeClock`. |
+| `src/knowledge/` | The Work Map. `reduceMap(state, event)` is a pure reducer over observations, extracted answers and review events (`correct`, `confirm`); it returns a new frozen state. Steps, decisions (with the expert's quote and evidence ids) and guardrails (`condition`, `requiredAction`, `scope` that defaults to the customer named on screen, `exceptions`, `unknowns`, `quote`, `evidenceIds`). A correction seals the draft as an immutable `superseded` version and opens the next number; a confirmation seals an immutable `confirmed` version; confirming is refused (`MapConfirmationError`) unless every item it confirms has at least one evidence id and one quote. `latestConfirmed(state)` is the only version Teach may apply. Answer extraction sits behind `AnswerExtractor` (`HeuristicAnswerExtractor` now; an LLM one later: record its output and the reducer replays the same map). `planFollowUps` (at least three follow-ups while gaps remain: scope, exceptions, why the expert stops, who decides and for how long), `buildTeachBack`, `applyTeachBackReply` and `reviewStatus` (when the debrief is done) are in `review.ts`. |
+| `src/tutor/` | `checkpoint({checkpoint, observations, map})` answers an `ActionCheckpoint` with a `CheckpointReply`-compatible `TutorVerdict` (`clear`, `warn`, `unknown`; message quoting the expert; `evidenceIds`; `basedOn` echoing the revisions). It first checks the checkpoint against the current observations (`assertCurrentCheckpoint`), then the latest confirmed map. An unrecognised customer, a rule whose reason the expert could not give, a conflicting rule, an unconfirmed map or a field the order does not show give `unknown`, never a guess; a customer the rule does not cover is `clear` with no personal rule applied. `buildPrediction` / `evaluatePrediction` compare what the new hire says they would do with the map (persona style: one word, two choices, what and why); `summarizeMastery` lists what is mastered and what to practise. |
+
+Tests (`test/`): `policy` (fake clock: never while typing, only at natural pauses, budget, cooldown, WARN bypass, PREDICT, off the record, decision log), `map`, `review`, `tutor` (T1-T6 against `fixtures/agent/expected/`), `flow` (a whole Learn, Review and Teach loop on a fake clock) and `no-rule-text` (greps `src/` for the customer_07 rule text and for four-word runs from the expert's answers). Inputs: `fixtures/agent/teach/t1..t6.json`; scripted expert and novice and the scenario: `fixtures/agent/sim/`; expected results: `fixtures/agent/expected/`, read only by tests.
+
+Usage sketch (a host feeds events, ticks, and speaks what the policy decides):
+
+```ts
+const policy = new ConversationPolicy({ mode: "learn", persona: "plain", now: () => Date.now() - sessionEpochMs });
+screen.onObservation((o) => { policy.observe(o); state = reduceMap(state, { type: "observation", observation: o }); });
+voice.onUserSpeaking((on) => policy.humanSpeech(on));
+voice.onAgentSpeaking((on) => policy.agentSpeech(on));
+setInterval(() => {
+  for (const d of policy.tick()) if (d.decision === "ASK_NOW" && d.utterance) voice.say(formatAskLine(d.utterance));
+}, 500);
+// after the answer is transcribed:
+const x = await extractor.extract({ topic: q.topic, text, questionId: q.id, atMs, evidenceIds: q.evidenceIds, targetId: q.targetId, entityRef: q.entityRef });
+state = reduceMap(state, { type: "answer", extraction: x });
+policy.setMap(workingMap(state));
+policy.finishQuestion(q.id);
+```
+
+Feed only Learn and Review observations to the map reducer; in Teach the map is read-only (`latestConfirmed`).
+
+## Earlier contents
 
 | Path | What |
 | --- | --- |
@@ -51,4 +83,5 @@ clock.advance(26_000);
 
 ## Known gaps
 
-- Nothing known beyond the open TASK-1 items: A publishes `packages/contracts`, then B migrates its imports; the polling return path (`GET /screen/sessions/{sessionId}/updates`) is pinned by A.
+- Open TASK-1 items: A publishes the polling return path (`GET /screen/sessions/{sessionId}/updates`); B's older draft types in `src/contract-draft.ts` still exist next to `@apprentice/contracts` and are not used by the brain modules.
+- Heuristic parts of the brain, to be replaced behind the same interfaces: `HeuristicAnswerExtractor` reads English keywords and sentences (no negation, pronouns or paraphrase), and knows one rule family (named order fields must be in the message), one stop-and-ask family for an unrecognised customer, and a generic stop condition that is recorded on the map but not machine-checked. The tutor therefore enforces only the customer rule and the unrecognised-customer stop. Facts are matched as normalised substrings (case, spacing, commas, dashes), so OCR errors or a reformatted date can read as "missing". `evaluatePrediction` compares keywords. The policy's change detection is tied to the order, email and ticket schema; persona numbers, cooldowns and the budget window are starting values. The quiet persona's "prediction only before Send" is not triggered by the policy (it skips `PREDICT` at order open; the checkpoint still warns).

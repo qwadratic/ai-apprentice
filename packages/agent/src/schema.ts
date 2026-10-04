@@ -130,7 +130,7 @@ export type QuestionKind = (typeof QUESTION_KINDS)[number];
 export const QUESTION_STATUSES = ["candidate", "queued", "asked", "answered", "dropped", "expired"] as const;
 export type QuestionStatus = (typeof QUESTION_STATUSES)[number];
 
-export const POLICY_DECISIONS = ["ASK_NOW", "DEFER", "SKIP", "WARN"] as const;
+export const POLICY_DECISIONS = ["ASK_NOW", "DEFER", "SKIP", "WARN", "PREDICT"] as const;
 export type PolicyDecision = (typeof POLICY_DECISIONS)[number];
 
 export interface QuestionCandidate {

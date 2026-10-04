@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "id": "t3",
+  "title": "Another known customer, image only",
+  "orderId": "ORD-1902",
+  "draft": { "bodyText": "", "attachTemplateImage": true }
+}

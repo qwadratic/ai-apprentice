@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "id": "t4",
+  "title": "Customer not in the customer list",
+  "orderId": "ORD-4410",
+  "draft": { "bodyText": "", "attachTemplateImage": true }
+}
