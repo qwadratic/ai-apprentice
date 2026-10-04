@@ -5,7 +5,7 @@ import type {VisionOfferContext, VisionPublicationContext, VisionQueueEvent, Vis
 import {normalizeFrame} from './evidence-store.ts';
 import type {ProcessedFrame, ScreenEvidenceRecord, ScreenEvidenceStore} from './evidence-store.ts';
 import type {VisionRunner} from './runner-client.ts';
-import {createObservationFactory, parseVisionResult, visionSchemaFor} from './vision-contract.ts';
+import {createObservationFactory, parseVisionResult, VISION_RESULT_SCHEMA, WORKSPACE_VISION_SCHEMA} from './vision-contract.ts';
 import type {ScreenObservationParser, VisionResult} from './vision-contract.ts';
 
 export const visibleOnlySystem = `Describe only facts directly visible in the processed image.
@@ -43,6 +43,8 @@ export interface ScreenServiceOptions {
   readonly prompt?: string;
   /** Frames with no known surface (any app). */
   readonly genericPrompt?: string;
+  /** false: a frame with no known surface is read as before screen_activity (workspace kinds only). Default true. */
+  readonly genericVision?: boolean;
   readonly queueOptions?: ServiceQueueOptions; readonly onEvent?: (event: VisionQueueEvent) => void;
 }
 export function createScreenService(options: ScreenServiceOptions): ScreenService {
@@ -54,11 +56,13 @@ export function createScreenService(options: ScreenServiceOptions): ScreenServic
     validate: parseVisionResult, makeObservation: createObservationFactory(options.parseObservation),
     fingerprint: frame => createHash('sha256').update(frame.mediaType).update(frame.bytes).digest('hex'),
     analyze: async (frame, {signal, surface}) => {
-      const targetedPrompt = surface === null ? genericPrompt :
+      const generic = surface === null && options.genericVision !== false;
+      const targetedPrompt = generic ? genericPrompt : surface === null ? prompt :
         `${prompt}\nAnalyze the ${surfaceLabels[surface]} surface. Return its matching kind, or incomplete if it is not readable.`;
       const result = await options.runner.vision({images: [{media_type: frame.mediaType,
         data: Buffer.from(frame.bytes).toString('base64')}], prompt: targetedPrompt,
-        system: surface === null ? genericVisionSystem : visibleOnlySystem, schema: visionSchemaFor(surface)}, {signal});
+        system: generic ? genericVisionSystem : visibleOnlySystem,
+        schema: generic ? VISION_RESULT_SCHEMA : WORKSPACE_VISION_SCHEMA}, {signal});
       return result.json;
     },
   });

@@ -55,10 +55,6 @@ const SCREEN_ACTIVITY_BRANCH = Object.freeze({type: 'object', required: ['outcom
 export const VISION_RESULT_SCHEMA: Readonly<Record<string, unknown>> = Object.freeze({
   $schema: 'http://json-schema.org/draft-07/schema#', oneOf: [...WORKSPACE_BRANCHES, SCREEN_ACTIVITY_BRANCH, INCOMPLETE_BRANCH],
 });
-/** The schema for a frame: its own workspace kinds when its surface is known, every kind otherwise. */
-export function visionSchemaFor(surface: VisionSurface | null): Readonly<Record<string, unknown>> {
-  return surface === null ? VISION_RESULT_SCHEMA : WORKSPACE_VISION_SCHEMA;
-}
 
 export class VisionContractError extends Error {
   readonly code: 'invalid_model_output' | 'vision_incomplete';

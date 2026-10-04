@@ -12,7 +12,7 @@ import {createScreenHandlers} from './handlers.ts';
 import type {VisionRunner, VisionRunnerRequest} from './runner-client.ts';
 import {createScreenService, defaultVisionPrompt, genericVisionPrompt, genericVisionSystem, visibleOnlySystem} from './service.ts';
 import {ScreenSessionHub} from './session-transport.ts';
-import {createObservationFactory, parseVisionResult, VISION_RESULT_SCHEMA, visionSchemaFor, WORKSPACE_VISION_SCHEMA} from './vision-contract.ts';
+import {createObservationFactory, parseVisionResult, VISION_RESULT_SCHEMA, WORKSPACE_VISION_SCHEMA} from './vision-contract.ts';
 
 const origin = 'https://demo.example';
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR42mP8z8BQDwAFgQIAff9vEwAAAABJRU5ErkJggg==', 'base64');
@@ -29,8 +29,8 @@ function evidence(id: string): ScreenEvidenceRecord {
   return {schemaVersion: 1, id, kind: 'frame', sessionId: 'session', frameId: 'frame-1', assetRef: `/asset/${id}`,
     startMs: 1, endMs: 1, mediaType: 'image/png', byteLength: png.length};
 }
-function hub(runner: VisionRunner): ScreenSessionHub {
-  return new ScreenSessionHub(({publish, onEvent}) => createScreenService({runner, parseObservation: parseScreenObservation,
+function hub(runner: VisionRunner, genericVision?: boolean): ScreenSessionHub {
+  return new ScreenSessionHub(({publish, onEvent}) => createScreenService({runner, parseObservation: parseScreenObservation, genericVision,
     evidence: createMemoryEvidenceStore(), publish, onEvent, queueOptions: {sampleIntervalMs: 0, now: () => 100_010}}),
   parseScreenStatus, () => 100_010, 8, 128);
 }
@@ -43,10 +43,10 @@ function upload(surface: 'email' | null, sourceRevision: string | null) {
     provenance: {surface, sourceRevision, captureGeneration: 7}};
 }
 /** One frame through the real HTTP path; returns what the runner was sent and what the session published. */
-async function runFrame(surface: 'email' | null, sourceRevision: string | null, answer: Record<string, unknown>) {
+async function runFrame(surface: 'email' | null, sourceRevision: string | null, answer: Record<string, unknown>, genericVision?: boolean) {
   const sent: VisionRunnerRequest[] = [];
   const runner: VisionRunner = {async vision(input) { sent.push(input); return {json: answer, ms: 3}; }};
-  const handlers = createScreenHandlers({hub: hub(runner), allowOrigin: () => true});
+  const handlers = createScreenHandlers({hub: hub(runner, genericVision), allowOrigin: () => true});
   const started = await (await handlers.start(request(`${origin}/s`, 'POST', {sessionEpochMs: 100_000, clientGeneration: 1}), {sessionId: 's'}))
     .json() as {sessionToken: string};
   const accepted = await handlers.frames(request(`${origin}/s/frames`, 'POST', upload(surface, sourceRevision), started.sessionToken), {sessionId: 's'});
@@ -82,13 +82,18 @@ test('malformed screen_activity output is rejected', () => {
   assert.throws(() => parseVisionResult(missing), {code: 'invalid_model_output'});
 });
 
-test('the workspace schema is byte-for-byte the schema before screen_activity; only surface-less frames get the new kind', () => {
+test('the workspace schema is byte-for-byte the schema before screen_activity', () => {
   const sha = createHash('sha256').update(JSON.stringify(WORKSPACE_VISION_SCHEMA)).digest('hex');
   assert.equal(sha, 'e8fd389657e52ed8f146ae244a0a53c26ca6d7e52759d9a0e8a43800fbd5beb7');
   assert.equal(JSON.stringify(WORKSPACE_VISION_SCHEMA).includes('screen_activity'), false);
   assert.equal(JSON.stringify(VISION_RESULT_SCHEMA).includes('screen_activity'), true);
-  for (const surface of ['order', 'email', 'ticket'] as const) assert.equal(visionSchemaFor(surface), WORKSPACE_VISION_SCHEMA);
-  assert.equal(visionSchemaFor(null), VISION_RESULT_SCHEMA);
+});
+
+test('genericVision false reads a frame with no surface exactly as before screen_activity', async () => {
+  const {sent, updates} = await runFrame(null, null, activity(), false);
+  assert.equal(sent[0]?.prompt, defaultVisionPrompt); assert.equal(sent[0]?.system, visibleOnlySystem);
+  assert.equal(sent[0]?.schema, WORKSPACE_VISION_SCHEMA);
+  assert.equal(updates.observations.length, 1, 'a stray screen_activity answer is still a valid generic observation');
 });
 
 test('screen_activity becomes an observation only for a frame with no workspace surface', () => {

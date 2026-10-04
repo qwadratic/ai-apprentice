@@ -15,7 +15,15 @@ file or compatible processed-media store. `createRunnerClient` reads
 Neither value belongs in browser configuration, fixtures, responses or logs.
 
 The runner must return the strict `VISION_RESULT_SCHEMA`. `parseVisionResult`
-rejects extra fields, unsupported fact shapes and incomplete results. The
+rejects extra fields, unsupported fact shapes and incomplete results. A frame of
+a known workspace surface is read with `WORKSPACE_VISION_SCHEMA` (order, email,
+ticket or incomplete), unchanged since before generic vision. A frame with no
+surface (a shared screen of any app) may also return `screen_activity`:
+`{app, surface, summary, change, entities, pendingAction, pendingRegionId,
+regions: [{id, label, box: [x, y, w, h]}]}`, boxes normalised 0..1 to the frame,
+at most 6 regions and 8 entities; masked areas are never read. Such an
+observation has `entityRef` and `sourceRevision` null, so it never satisfies a
+checkpoint. `VISION_GENERIC=off` reads surface-less frames as before. The
 observation factory validates its output again with the canonical parser. It
 copies only visible facts; unknown identities stay `null`, and customer/order
 references remain separate fields.
