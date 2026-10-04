@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@qwadratic'
 created_date: '2026-10-03 21:10'
-updated_date: '2026-10-04 01:12'
+updated_date: '2026-10-04 01:54'
 labels:
   - stream-b
   - ux
@@ -40,3 +40,9 @@ Estimate: about 2 h of agent time. Card key: B-app-shell.
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+PR #22 merged (0e4172a): shell, modes, status, Off the record, persona picker, debug drawer, session with token, voice (ported from the lab), Clipa presenter, A's ScreenPanel slot, Brain seam with NullBrain. Remaining for the ACs: wire the TASK-3.29 brain + TASK-3.30 LLM route + TASK-3.28 director (next task).
+<!-- SECTION:NOTES:END -->
