@@ -109,7 +109,8 @@ function recordingSegment(value: unknown): RecordingSegment {
 }
 function failure(error: unknown): Response {
   if (error instanceof RecordingStoreError) {
-    const status = error.code === 'asset_not_found' ? 404 : error.code === 'storage_failed' ? 503 : 409;
+    const status = error.code === 'asset_not_found' ? 404 : error.code === 'storage_failed' ? 503 :
+      error.code === 'quota_exceeded' ? 413 : error.code === 'storage_full' ? 507 : 409;
     return json({ok: false, code: error.code}, status);
   }
   if (error instanceof RequestError || error instanceof SyntaxError || error instanceof TypeError) {

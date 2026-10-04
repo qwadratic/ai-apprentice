@@ -1,4 +1,4 @@
-import {mkdir, open, readFile, rename, rm, stat, writeFile} from 'node:fs/promises';
+import {mkdir, open, readFile, readdir, rename, rm, stat, statfs, writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import type {RecordingSegment} from '../../../../packages/screen/evidence/index.ts';
 
@@ -8,7 +8,7 @@ export type RecordingAsset = Readonly<{
 }>;
 
 export type RecordingStoreErrorCode = 'asset_not_found' | 'chunk_conflict' | 'chunk_out_of_order' |
-  'finalization_incomplete' | 'storage_failed';
+  'finalization_incomplete' | 'storage_failed' | 'quota_exceeded' | 'storage_full';
 
 export class RecordingStoreError extends Error {
   readonly code: RecordingStoreErrorCode;
@@ -27,10 +27,34 @@ export interface RecordingStore {
 
 type Pending = {sessionId: string; assetId: string; mimeType: string; chunkCount: number; byteLength: number};
 
-export function createFileRecordingStore(root: string, options: {readonly maxAssetBytes?: number} = {}): RecordingStore {
+export interface RecordingStoreOptions {
+  readonly maxAssetBytes?: number;
+  /** Bytes one session may hold in all its recordings, pending and final. */
+  readonly maxSessionBytes?: number;
+  /** Recordings one session may start. */
+  readonly maxSessionAssets?: number;
+  /** Free space the disk keeps: a chunk that would leave less is refused. */
+  readonly minFreeBytes?: number;
+  /** Free bytes on the volume of `root`; injected for tests. */
+  readonly freeBytes?: (root: string) => Promise<number>;
+}
+
+const diskFree = async (root: string): Promise<number> => {
+  const s = await statfs(root);
+  return Number(s.bavail) * Number(s.bsize);
+};
+
+export function createFileRecordingStore(root: string, options: RecordingStoreOptions = {}): RecordingStore {
   if (!path.isAbsolute(root)) throw new TypeError('Recording storage root must be absolute.');
   const maxAssetBytes = options.maxAssetBytes ?? 256_000_000;
-  if (!Number.isSafeInteger(maxAssetBytes) || maxAssetBytes < 1) throw new TypeError('Asset limit required.');
+  const maxSessionBytes = options.maxSessionBytes ?? 1_000_000_000;
+  const maxSessionAssets = options.maxSessionAssets ?? 200;
+  const minFreeBytes = options.minFreeBytes ?? 1_000_000_000;
+  const freeBytes = options.freeBytes ?? diskFree;
+  for (const limit of [maxAssetBytes, maxSessionBytes, maxSessionAssets]) {
+    if (!Number.isSafeInteger(limit) || limit < 1) throw new TypeError('Recording limits required.');
+  }
+  if (!Number.isSafeInteger(minFreeBytes) || minFreeBytes < 0) throw new TypeError('Recording limits required.');
   const locks = new Map<string, Promise<unknown>>();
   const location = (sessionId: string, assetId: string) => path.join(root, sessionId, assetId);
   const locked = async <T>(key: string, work: () => Promise<T>): Promise<T> => {
@@ -47,15 +71,29 @@ export function createFileRecordingStore(root: string, options: {readonly maxAss
     try { return JSON.parse(await readFile(path.join(directory, 'pending.json'), 'utf8')) as Pending; }
     catch (error: unknown) { if (isMissing(error)) return undefined; throw storage(error); }
   };
+  /** Bytes and recordings this session already holds, pending and final. */
+  const sessionUsage = async (sessionId: string): Promise<{bytes: number; assets: number}> => {
+    let names: string[];
+    try { names = await readdir(path.join(root, sessionId)); }
+    catch (error: unknown) { if (isMissing(error)) return {bytes: 0, assets: 0}; throw storage(error); }
+    let bytes = 0; let assets = 0;
+    for (const name of names) {
+      const directory = path.join(root, sessionId, name);
+      const entry = await loadFinal(directory) ?? await loadPending(directory);
+      if (!entry) continue;
+      assets += 1; bytes += Number.isSafeInteger(entry.byteLength) ? entry.byteLength : 0;
+    }
+    return {bytes, assets};
+  };
   return {
     async append(sessionId, assetId, index, mimeType, bytes) {
       validateInput(sessionId, assetId, mimeType);
       if (!Number.isSafeInteger(index) || index < 0 || !(bytes instanceof Uint8Array) || !bytes.byteLength) throw new TypeError('Invalid recording chunk.');
       const key = `${sessionId}/${assetId}`;
-      return locked(key, async () => {
+      // The session lock makes the quota check and the write one step for all of a session's recordings.
+      return locked(`session:${sessionId}`, () => locked(key, async () => {
         const directory = location(sessionId, assetId);
         try {
-          await mkdir(directory, {recursive: true});
           if (await loadFinal(directory)) throw new RecordingStoreError('chunk_conflict');
           let pending = await loadPending(directory);
           if (!pending) {
@@ -69,7 +107,12 @@ export function createFileRecordingStore(root: string, options: {readonly maxAss
             throw new RecordingStoreError('chunk_conflict');
           }
           if (index !== pending.chunkCount) throw new RecordingStoreError('chunk_out_of_order');
-          if (pending.byteLength + bytes.byteLength > maxAssetBytes) throw new RecordingStoreError('storage_failed');
+          if (pending.byteLength + bytes.byteLength > maxAssetBytes) throw new RecordingStoreError('quota_exceeded');
+          const usage = await sessionUsage(sessionId);
+          if (index === 0 && usage.assets >= maxSessionAssets) throw new RecordingStoreError('quota_exceeded');
+          if (usage.bytes + bytes.byteLength > maxSessionBytes) throw new RecordingStoreError('quota_exceeded');
+          await mkdir(directory, {recursive: true});
+          if (await freeBytes(root) - bytes.byteLength < minFreeBytes) throw new RecordingStoreError('storage_full');
           const chunkPath = path.join(directory, `${index}.chunk`);
           await writeFile(chunkPath, bytes, {flag: 'wx'});
           try { await atomicJson(directory, 'pending.json', {...pending,
@@ -77,7 +120,7 @@ export function createFileRecordingStore(root: string, options: {readonly maxAss
           catch (error: unknown) { await rm(chunkPath, {force: true}).catch(() => undefined); throw error; }
           return 'created';
         } catch (error: unknown) { if (error instanceof RecordingStoreError) throw error; throw storage(error); }
-      });
+      }));
     },
     async finalize(sessionId, assetId, chunkCount, mimeType, segment) {
       validateInput(sessionId, assetId, mimeType);

@@ -146,3 +146,33 @@ async function send(outgoing: ServerResponse, response: Response): Promise<void>
   outgoing.writeHead(response.status, Object.fromEntries(response.headers.entries()));
   outgoing.end(Buffer.from(await response.arrayBuffer()));
 }
+
+test('a session cannot fill the disk: total bytes, number of recordings and a free-space floor', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'recording-quota-'));
+  const six = new Uint8Array([1, 2, 3, 4, 5, 6]);
+  const roomy = async () => 1e12;
+  const bytes = createFileRecordingStore(root, {maxSessionBytes: 10, minFreeBytes: 0, freeBytes: roomy});
+  assert.equal(await bytes.append('session-a', 'one', 0, 'video/webm', six), 'created');
+  await assert.rejects(bytes.append('session-a', 'two', 0, 'video/webm', six), {code: 'quota_exceeded'});
+  await assert.rejects(bytes.append('session-a', 'one', 1, 'video/webm', six), {code: 'quota_exceeded'}, 'pending bytes count too');
+  assert.equal(await bytes.append('session-b', 'one', 0, 'video/webm', six), 'created', 'other sessions keep their own quota');
+
+  const count = createFileRecordingStore(path.join(root, 'count'), {maxSessionAssets: 2, minFreeBytes: 0, freeBytes: roomy});
+  await count.append('session-a', 'one', 0, 'video/webm', six);
+  await count.append('session-a', 'two', 0, 'video/webm', six);
+  await assert.rejects(count.append('session-a', 'three', 0, 'video/webm', six), {code: 'quota_exceeded'});
+  assert.equal(await count.append('session-a', 'two', 1, 'video/webm', six), 'created', 'an existing recording can still grow');
+
+  const full = createFileRecordingStore(path.join(root, 'full'), {minFreeBytes: 1000, freeBytes: async () => 1003});
+  await assert.rejects(full.append('session-a', 'one', 0, 'video/webm', six), {code: 'storage_full'});
+  const handlers = createRecordingHandlers({store: full, authorize: () => true});
+  const response = await handlers.chunk(new Request('https://local/chunks', {method: 'POST',
+    headers: {'content-type': 'video/webm', 'x-recording-chunk-index': '0'}, body: six}), {sessionId: 'session-a', assetId: 'one'});
+  assert.equal(response.status, 507);
+  const over = createRecordingHandlers({store: bytes, authorize: () => true});
+  const tooMuch = await over.chunk(new Request('https://local/chunks', {method: 'POST',
+    headers: {'content-type': 'video/webm', 'x-recording-chunk-index': '0'}, body: six}), {sessionId: 'session-a', assetId: 'three'});
+  assert.equal(tooMuch.status, 413);
+  assert.equal((await tooMuch.json() as {code: string}).code, 'quota_exceeded');
+  await rm(root, {recursive: true, force: true});
+});
