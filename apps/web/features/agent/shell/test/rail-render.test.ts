@@ -17,22 +17,24 @@ import type { Mode } from '../state/types.ts';
 register('../journey/tsx-hooks.mjs', import.meta.url);
 const { Header } = (await import('../components/Header.tsx')) as { Header: ComponentType<{ debugOpen: boolean; onToggleDebug: () => void }> };
 
-function runtime(store: Store, clipa: ClipaStore): ShellRuntime {
+function runtime(store: Store, clipa: ClipaStore, autoLead = true): ShellRuntime {
   const controller = {
     store,
     setMode: (mode: Mode) => store.dispatch({ type: 'MODE_SET', mode }),
     setPersona: () => {},
     isMicMuted: () => false,
     setMicMuted: () => {},
+    isAutoLead: () => autoLead,
+    setAutoLead: () => {},
     goOffRecord: async () => {},
     backOnRecord: () => {},
   };
   return { controller, clipa, workspace: null, live: null, dispose: () => {} } as unknown as ShellRuntime;
 }
 
-function render(store: Store = createStore(), clipa: ClipaStore = createClipaStore()): string {
+function render(store: Store = createStore(), clipa: ClipaStore = createClipaStore(), autoLead = true): string {
   return renderToStaticMarkup(
-    createElement(ShellContext.Provider, { value: runtime(store, clipa) }, createElement(Header, { debugOpen: false, onToggleDebug: () => {} })),
+    createElement(ShellContext.Provider, { value: runtime(store, clipa, autoLead) }, createElement(Header, { debugOpen: false, onToggleDebug: () => {} })),
   );
 }
 
@@ -52,6 +54,11 @@ test('the header holds the logo, the rail and the tools; the rail is a tablist o
   assert.match(html, />Off the record</);
   assert.match(html, />Debug</);
   assert.match(html, /<details class="as-menu">/, 'the tone sits in a small menu');
+});
+
+test('the header has the Lead me through switch: pressed when on, plain when off', () => {
+  assert.match(render(), /class="as-btn as-btn--auto is-on" aria-pressed="true" data-testid="auto-lead"[^>]*>Lead me through: on</);
+  assert.match(render(createStore(), createClipaStore(), false), /class="as-btn as-btn--auto" aria-pressed="false" data-testid="auto-lead"[^>]*>Lead me through: off</);
 });
 
 test('the selected stage is the only tab stop, controls its panel and carries Clipa\'s seat', () => {
