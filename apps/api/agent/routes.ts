@@ -19,9 +19,9 @@ export interface AgentRuntime {
   background: Set<Promise<void>>;
 }
 
-type Body = { ok: true; body: unknown } | { ok: false; status: 400 | 413; error: string; maxBytes?: number };
+export type Body = { ok: true; body: unknown } | { ok: false; status: 400 | 413; error: string; maxBytes?: number };
 
-function reply(res: Response, status: number, body: unknown, headers: Record<string, string> = {}): void {
+export function reply(res: Response, status: number, body: unknown, headers: Record<string, string> = {}): void {
   res.status(status).set({ 'Cache-Control': 'no-store', ...headers }).json(body);
 }
 
@@ -29,7 +29,7 @@ function reply(res: Response, status: number, body: unknown, headers: Record<str
  * createApi has already parsed JSON bodies up to its own 12 MB limit, so the smaller per-route limit is
  * enforced on the declared length and on the re-serialised size. Other content types are read from the stream.
  */
-async function readBody(req: Request, max: number): Promise<Body> {
+export async function readBody(req: Request, max: number): Promise<Body> {
   const declared = Number(req.headers['content-length'] ?? 0);
   if (declared > max) return { ok: false, status: 413, error: 'body_too_large', maxBytes: max };
   if (req.body !== undefined) {
@@ -47,6 +47,12 @@ async function readBody(req: Request, max: number): Promise<Body> {
   }
   try { return { ok: true, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown }; }
   catch { return { ok: false, status: 400, error: 'invalid_json' }; }
+}
+
+/** A browser origin must be allow-listed; no Origin is accepted only from a direct loopback request (local dev). */
+export function originAllowed(config: Pick<AgentConfig, 'allowedOrigins'>, req: Request): boolean {
+  const origin = req.get('Origin');
+  return origin ? config.allowedOrigins.has(origin) : isLocalDevRequest(req);
 }
 
 export function registerAgentRoutes(app: Express, rt: AgentRuntime): void {
@@ -68,10 +74,7 @@ export function registerAgentRoutes(app: Express, rt: AgentRuntime): void {
   };
 
   /** A browser origin must be allow-listed; no Origin is accepted only from a direct loopback request (local dev). */
-  const originOk = (req: Request): boolean => {
-    const origin = req.get('Origin');
-    return origin ? config.allowedOrigins.has(origin) : isLocalDevRequest(req);
-  };
+  const originOk = (req: Request): boolean => originAllowed(config, req);
   const forbidOrigin = (res: Response): void => reply(res, 403, { ok: false, error: 'origin_not_allowed' });
   const limited = (res: Response): void => reply(res, 429, { ok: false, error: 'rate_limited' }, { 'Retry-After': '60' });
   const denied = (res: Response, auth: Extract<AuthResult, { ok: false }>): void =>

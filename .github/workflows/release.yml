@@ -8,8 +8,11 @@ name: release
 # Nothing here pushes to git (no deploy branch) and nothing talks to the VM, so the workflow
 # needs no contents: write.
 #
-# Stale re-runs: a non-manual run only publishes while its commit is still the newest
-# releasable state of main. Re-running an old run must not roll the site back.
+# Stale runs: prepare skips a non-manual run whose commit is no longer the newest releasable
+# state of main. If main moves while a run is already past prepare, its first attempt still
+# finishes (Pages and the VM together); the newer run waits in the release concurrency group and
+# then moves both. A re-run (attempt > 1) of a superseded run fails in every publishing job
+# (RELEASE_GUARD), so re-running an old run never rolls the site or the API back.
 # "Newest" ignores backlog/**: those pushes do not start this workflow (paths-ignore), so
 # a code push followed at once by a backlog bookkeeping push still publishes the code push.
 #
@@ -46,6 +49,31 @@ permissions:
 concurrency:
   group: release
   cancel-in-progress: false
+
+env:
+  # Run by pages-build, pages-deploy and deploy-vm, each on a full checkout: "Re-run failed jobs"
+  # reuses the outputs of jobs that passed and skips their steps, so every publishing job checks
+  # again. Needs SHA, EVENT, ATTEMPT, FREEZE and CONFIRM in the step's env.
+  RELEASE_GUARD: |
+    if [ "$FREEZE" = "1" ] && ! { [ "$EVENT" = "workflow_dispatch" ] && [ "$CONFIRM" = "true" ]; }; then
+      echo "::error::DEPLOY_FREEZE=1: not releasing $SHA."
+      exit 1
+    fi
+    if [ "$EVENT" = "workflow_dispatch" ]; then exit 0; fi
+    git fetch --quiet origin main
+    head=$(git rev-parse origin/main)
+    if [ "$SHA" = "$head" ]; then exit 0; fi
+    if ! git merge-base --is-ancestor "$SHA" "$head"; then
+      echo "::error::$SHA is no longer on main ($head); refusing to release it."
+      exit 1
+    fi
+    if git diff --quiet "$SHA" "$head" -- . ':(exclude)backlog'; then exit 0; fi
+    if [ "$ATTEMPT" = "1" ]; then
+      echo "::notice::main moved to $head during this run; releasing $SHA now, and the newer run releases over it."
+      exit 0
+    fi
+    echo "::error::$SHA is no longer the head of main ($head); a re-run must not release an older commit. Use a manual run for a rollback."
+    exit 1
 
 jobs:
   prepare:
@@ -157,19 +185,14 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.sha }}
           fetch-depth: 0
-      - name: Still the newest releasable commit (repeated here because re-runs reuse prepare's output)
+      - name: Not frozen, and still the newest releasable commit
         env:
           SHA: ${{ needs.prepare.outputs.sha }}
           EVENT: ${{ github.event_name }}
-        run: |
-          set -euo pipefail
-          if [ "$EVENT" = "workflow_dispatch" ]; then exit 0; fi
-          git fetch --quiet origin main
-          head=$(git rev-parse origin/main)
-          if [ "$SHA" != "$head" ] && ! git diff --quiet "$SHA" "$head" -- . ':(exclude)backlog'; then
-            echo "::error::$SHA is no longer the head of main ($head). A re-run must not publish an older commit; use a manual run (with the freeze) for a rollback."
-            exit 1
-          fi
+          ATTEMPT: ${{ github.run_attempt }}
+          FREEZE: ${{ vars.DEPLOY_FREEZE }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: bash -euo pipefail -c "$RELEASE_GUARD"
       # Every releasable commit is after the webhook merge (prepare refuses older ones), so both the root
       # workspace and the launch page exist.
       - name: Root workspace and launch page exist at this commit
@@ -212,6 +235,19 @@ jobs:
           cp -R apps/web/features/agent/launchpad/dist/. "$SITE_DIR/"
           cp -R apps/web/dist/. "$SITE_DIR/app/"
           find "$SITE_DIR" -type f | sort
+      # Anthropic keys, ElevenLabs keys (sk_ + hex) and any api-key/xi-api-key assignment of a long literal.
+      # A bare "api-key" grep would flag the app's own header-redaction code, so only assigned values count.
+      # grep exits 1 on no match; 0 (a match) and 2 (an error, e.g. a PCRE limit) both fail the job.
+      # The step runs under bash -e, so grep's status is caught with ||. -R follows symlinks (the Pages
+      # artifact dereferences them) and -a scans files with NUL bytes too.
+      - name: The published site carries no key-shaped values
+        run: |
+          set -uo pipefail
+          rc=0
+          grep -RalP 'sk-ant-[\w-]{20,}|sk_[a-fA-F0-9]{40,}|(?i:api[_-]?key|xi-api-key|elevenlabs_api_key)["\x27]?\s*[:=]\s*["\x27][\w-]{20,}' "$SITE_DIR" || rc=$?
+          if [ $rc -eq 1 ]; then echo "No key-shaped values in $SITE_DIR"; exit 0; fi
+          if [ $rc -eq 0 ]; then echo "::error::A key-shaped value is in the published site (files above)"; else echo "::error::The key scan failed (grep exit $rc)"; fi
+          exit 1
       - name: Write deploy.json at the site root
         env:
           SHA: ${{ needs.prepare.outputs.sha }}
@@ -229,15 +265,31 @@ jobs:
 
   pages-deploy:
     name: publish to Pages
-    needs: pages-build
+    needs: [prepare, pages-build]
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       pages: write
       id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      # deploy-pages takes the run's artifact from any attempt, so a re-run of only this job would
+      # publish an older build; the guard must run here too.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Not frozen, and still the newest releasable commit
+        env:
+          SHA: ${{ needs.prepare.outputs.sha }}
+          EVENT: ${{ github.event_name }}
+          ATTEMPT: ${{ github.run_attempt }}
+          FREEZE: ${{ vars.DEPLOY_FREEZE }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: bash -euo pipefail -c "$RELEASE_GUARD"
       - id: deployment
         uses: actions/deploy-pages@v4
 
@@ -260,26 +312,14 @@ jobs:
           ref: ${{ needs.prepare.outputs.sha }}
           fetch-depth: 0
           persist-credentials: false
-      # Repeated here because "re-run failed jobs" reuses prepare's outputs and skips the other guards:
-      # a re-run must never move the API back to an older sha or past a freeze.
       - name: Not frozen, and still the newest releasable commit
         env:
-          FREEZE: ${{ vars.DEPLOY_FREEZE }}
+          SHA: ${{ needs.prepare.outputs.sha }}
           EVENT: ${{ github.event_name }}
+          ATTEMPT: ${{ github.run_attempt }}
+          FREEZE: ${{ vars.DEPLOY_FREEZE }}
           CONFIRM: ${{ inputs.confirm }}
-        run: |
-          set -euo pipefail
-          if [ "$FREEZE" = "1" ] && ! { [ "$EVENT" = "workflow_dispatch" ] && [ "$CONFIRM" = "true" ]; }; then
-            echo "::error::DEPLOY_FREEZE=1: not deploying the API."
-            exit 1
-          fi
-          if [ "$EVENT" = "workflow_dispatch" ]; then exit 0; fi
-          git fetch --quiet origin main
-          head=$(git rev-parse origin/main)
-          if [ "$SHA" != "$head" ] && ! git diff --quiet "$SHA" "$head" -- . ':(exclude)backlog'; then
-            echo "::error::$SHA is no longer the head of main ($head); a re-run must not deploy an older commit."
-            exit 1
-          fi
+        run: bash -euo pipefail -c "$RELEASE_GUARD"
       - name: Request the deploy
         env:
           DEPLOY_WEBHOOK_SECRET: ${{ secrets.DEPLOY_WEBHOOK_SECRET }}

@@ -29,6 +29,9 @@ const QUEUE_MAX = 10;
 const TIMEOUT_MS = Number(process.env.RUNNER_TIMEOUT_MS || 60_000);
 const MAX_BODY = 12 * 1024 * 1024;
 const MAX_TURNS = Number(process.env.RUNNER_MAX_TURNS || 3);
+// Per-call spend ceiling: text completions (structured extraction) are small; vision keeps the larger one.
+const MAX_BUDGET_USD = 0.5;
+const COMPLETE_MAX_BUDGET_USD = Number(process.env.RUNNER_COMPLETE_MAX_BUDGET_USD || 0.1);
 const CWD = process.env.RUNNER_CWD || '/var/lib/apprentice/runner-cwd';
 const SYSTEM_PROMPT =
   'You are a precise extraction and reasoning helper inside an internal service. ' +
@@ -73,7 +76,7 @@ function childEnv(): Record<string, string | undefined> {
   return env;
 }
 
-function baseOptions(model: string): Options {
+function baseOptions(model: string, maxBudgetUsd = MAX_BUDGET_USD): Options {
   return {
     model,
     tools: [],
@@ -82,7 +85,7 @@ function baseOptions(model: string): Options {
     persistSession: false,
     cwd: CWD,
     maxTurns: MAX_TURNS,
-    maxBudgetUsd: 0.5,
+    maxBudgetUsd,
     env: childEnv(),
   };
 }
@@ -133,16 +136,20 @@ type RunResult =
   | { status: 200; body: { ok: true; text?: string; json?: unknown; ms: number }; firstMs?: number }
   | { status: 502 | 504; body: { ok: false; error: string; subtype?: string; ms: number }; firstMs?: number };
 
-async function run(req: CompleteReq | VisionReq, images?: VisionReq['images']): Promise<RunResult> {
+async function run(req: CompleteReq | VisionReq, images: VisionReq['images'] | undefined, clientGone: AbortSignal): Promise<RunResult> {
   const started = Date.now();
   const abort = new AbortController();
   let timedOut = false;
+  // A client that disconnected no longer needs the answer: stop the SDK call (and its spend) at once.
+  const onClientGone = (): void => abort.abort();
+  if (clientGone.aborted) onClientGone();
+  else clientGone.addEventListener('abort', onClientGone, { once: true });
   const timer = setTimeout(() => {
     timedOut = true;
     abort.abort();
   }, TIMEOUT_MS);
   const options: Options = {
-    ...baseOptions(req.model || MODEL),
+    ...baseOptions(req.model || MODEL, images ? MAX_BUDGET_USD : COMPLETE_MAX_BUDGET_USD),
     abortController: abort,
     systemPrompt: req.system ? `${SYSTEM_PROMPT}\n\n${req.system}` : SYSTEM_PROMPT,
   };
@@ -197,6 +204,7 @@ async function run(req: CompleteReq | VisionReq, images?: VisionReq['images']): 
     return { status: 502, body: { ok: false, error: 'sdk_exception', ms }, firstMs };
   } finally {
     clearTimeout(timer);
+    clientGone.removeEventListener('abort', onClientGone);
     if (!abort.signal.aborted) abort.abort();
   }
 }
@@ -246,8 +254,12 @@ const server = http.createServer(async (req, res) => {
   const rid = /^[A-Za-z0-9._-]{1,64}$/.test(given) ? given : randomUUID();
   // A queued request whose client went away is dropped before it runs.
   let clientGone = false;
+  const clientAbort = new AbortController();
   res.on('close', () => {
-    if (!res.writableEnded) clientGone = true;
+    if (!res.writableEnded) {
+      clientGone = true;
+      clientAbort.abort(); // also stops a call that is already running
+    }
   });
   const started = Date.now();
   const route = (req.url || '/').split('?')[0];
@@ -335,7 +347,13 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     try {
-      const r = await run(body, isVision ? (body as VisionReq).images : undefined);
+      const r = await run(body, isVision ? (body as VisionReq).images : undefined, clientAbort.signal);
+      if (clientGone) {
+        status = 499;
+        meta.error = 'client_gone';
+        meta.run_ms = r.body.ms;
+        return;
+      }
       status = r.status;
       meta.first_ms = r.firstMs;
       meta.run_ms = r.body.ms;
