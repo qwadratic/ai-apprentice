@@ -8,6 +8,7 @@ import { system as genericQuestionSystem } from './prompts/generic-question.ts';
 import { system as guardrailCheckSystem } from './prompts/guardrail-check.ts';
 import { system as mapEditSystem } from './prompts/map-edit.ts';
 import { system as mapSynthesisSystem } from './prompts/map-synthesis.ts';
+import { system as processMatchSystem } from './prompts/process-match.ts';
 import { system as replyClassificationSystem } from './prompts/reply-classification.ts';
 
 export interface RunnerRequest { system: string; prompt: string; schema: Json }
@@ -367,28 +368,31 @@ const genericQuestion: LlmTask = {
 
 // ---- map_synthesis ----------------------------------------------------------
 export interface GenericDecision { summary: string; reason: string | null; quote: string | null; quoteAtMs: number | null }
-export interface GenericStep { id: string; kind: 'action' | 'judgment'; goal: string; action: string; decision: GenericDecision | null; evidenceIds: string[] }
-export interface GenericGuardrail { id: string; condition: string; requiredAction: string; reason: string | null; quote: string | null; quoteAtMs: number | null; escalateTo: string | null; exceptions: string[]; evidenceIds: string[] }
+export interface GenericProcess { id: string; title: string; summary: string }
+export interface GenericStep { id: string; processId: string | null; kind: 'action' | 'judgment'; goal: string; action: string; decision: GenericDecision | null; evidenceIds: string[] }
+export interface GenericGuardrail { id: string; processId: string | null; condition: string; requiredAction: string; reason: string | null; quote: string | null; quoteAtMs: number | null; escalateTo: string | null; exceptions: string[]; evidenceIds: string[] }
 export interface GenericGap { question: string; targetId: string | null; evidenceIds: string[]; regionIds: string[] }
-export interface MapSynthesisOutput { steps: GenericStep[]; guardrails: GenericGuardrail[]; gaps: GenericGap[]; teachBack: string }
+export interface MapSynthesisOutput { processes: GenericProcess[]; steps: GenericStep[]; guardrails: GenericGuardrail[]; gaps: GenericGap[]; teachBack: string }
 
-const STEP_KEYS = ['id', 'kind', 'goal', 'action', 'decision', 'evidenceIds'] as const;
+const PROCESS_KEYS = ['id', 'title', 'summary'] as const;
+const STEP_KEYS = ['id', 'processId', 'kind', 'goal', 'action', 'decision', 'evidenceIds'] as const;
 const DECISION_KEYS = ['summary', 'reason', 'quote'] as const;
-const RULE_KEYS = ['id', 'condition', 'requiredAction', 'reason', 'quote', 'escalateTo', 'exceptions', 'evidenceIds'] as const;
+const RULE_KEYS = ['id', 'processId', 'condition', 'requiredAction', 'reason', 'quote', 'escalateTo', 'exceptions', 'evidenceIds'] as const;
 const GAP_KEYS = ['question', 'targetId', 'evidenceIds', 'regionIds'] as const;
 
 function mapSchema(obsIds: readonly string[]): Json {
   const ev = idEnum(obsIds);
   return {
-    type: 'object', additionalProperties: false, required: ['steps', 'guardrails', 'gaps', 'teachBack'],
+    type: 'object', additionalProperties: false, required: ['processes', 'steps', 'guardrails', 'gaps', 'teachBack'],
     properties: {
+      processes: { type: 'array', items: { type: 'object', additionalProperties: false, required: [...PROCESS_KEYS], properties: { id: STRING, title: STRING, summary: STRING } } },
       steps: { type: 'array', items: { type: 'object', additionalProperties: false, required: [...STEP_KEYS], properties: {
-        id: STRING, kind: { type: 'string', enum: ['action', 'judgment'] }, goal: STRING, action: STRING,
+        id: STRING, processId: nullable(STRING), kind: { type: 'string', enum: ['action', 'judgment'] }, goal: STRING, action: STRING,
         decision: nullable({ type: 'object', additionalProperties: false, required: [...DECISION_KEYS], properties: { summary: STRING, reason: nullable(STRING), quote: nullable(STRING) } }),
         evidenceIds: ev,
       } } },
       guardrails: { type: 'array', items: { type: 'object', additionalProperties: false, required: [...RULE_KEYS], properties: {
-        id: STRING, condition: STRING, requiredAction: STRING, reason: nullable(STRING), quote: nullable(STRING), escalateTo: nullable(STRING), exceptions: stringArray, evidenceIds: ev,
+        id: STRING, processId: nullable(STRING), condition: STRING, requiredAction: STRING, reason: nullable(STRING), quote: nullable(STRING), escalateTo: nullable(STRING), exceptions: stringArray, evidenceIds: ev,
       } } },
       gaps: { type: 'array', items: { type: 'object', additionalProperties: false, required: [...GAP_KEYS], properties: {
         question: STRING, targetId: nullable(STRING), evidenceIds: ev, regionIds: { type: 'array', items: STRING },
@@ -404,13 +408,26 @@ function mapSchema(obsIds: readonly string[]): Json {
  * renumbered s1.. and g1.., and gaps point at the renumbered ids.
  */
 export function checkMap(raw: unknown, obs: readonly GenericObservation[], transcript: readonly GenericTurn[]): MapSynthesisOutput | null {
-  if (!isRecord(raw) || !exactKeys(raw, ['steps', 'guardrails', 'gaps', 'teachBack'])) return null;
-  const { steps, guardrails, gaps, teachBack } = raw;
-  if (!Array.isArray(steps) || !Array.isArray(guardrails) || !Array.isArray(gaps)) return null;
+  if (!isRecord(raw) || !exactKeys(raw, ['processes', 'steps', 'guardrails', 'gaps', 'teachBack'])) return null;
+  const { processes, steps, guardrails, gaps, teachBack } = raw;
+  if (!Array.isArray(processes) || !Array.isArray(steps) || !Array.isArray(guardrails) || !Array.isArray(gaps)) return null;
   if (!isStr(teachBack, CAPS.teachBack, 1)) return null;
   const allowed = new Set(obs.map((o) => o.id));
   const regionIds = new Set(regionIdsOf(obs));
   const renamed = new Map<string, string>();
+  // Processes are renumbered p1..; a step or rule that names none belongs to the only process, when there is one.
+  const outProcesses: GenericProcess[] = [];
+  const processIds = new Map<string, string>();
+  for (const p of processes.slice(0, 3)) {
+    if (!isRecord(p) || !exactKeys(p, PROCESS_KEYS) || !isStr(p.title, 80, 1) || !isStr(p.summary, CAPS.condition)) return null;
+    const newId = `p${outProcesses.length + 1}`;
+    if (typeof p.id === 'string') processIds.set(p.id, newId);
+    outProcesses.push({ id: newId, title: p.title, summary: p.summary });
+  }
+  const processOf = (v: unknown): string | null => {
+    const named = typeof v === 'string' ? processIds.get(v) : undefined;
+    return named ?? (outProcesses.length === 1 ? 'p1' : null);
+  };
   const outSteps: GenericStep[] = [];
   for (const s of steps.slice(0, 10)) {
     if (!isRecord(s) || !exactKeys(s, STEP_KEYS)) return null;
@@ -427,7 +444,7 @@ export function checkMap(raw: unknown, obs: readonly GenericObservation[], trans
     }
     const newId = `s${outSteps.length + 1}`;
     if (typeof s.id === 'string') renamed.set(s.id, newId);
-    outSteps.push({ id: newId, kind: s.kind, goal: s.goal, action: s.action, decision, evidenceIds });
+    outSteps.push({ id: newId, processId: processOf(s.processId), kind: s.kind, goal: s.goal, action: s.action, decision, evidenceIds });
   }
   const outRules: GenericGuardrail[] = [];
   for (const g of guardrails.slice(0, 8)) {
@@ -441,7 +458,7 @@ export function checkMap(raw: unknown, obs: readonly GenericObservation[], trans
     const newId = `g${outRules.length + 1}`;
     if (typeof g.id === 'string') renamed.set(g.id, newId);
     outRules.push({
-      id: newId, condition: g.condition, requiredAction: g.requiredAction,
+      id: newId, processId: processOf(g.processId), condition: g.condition, requiredAction: g.requiredAction,
       reason: q && typeof g.reason === 'string' && g.reason.trim() ? g.reason : null, quote: q?.quote ?? null, quoteAtMs: q?.atMs ?? null,
       escalateTo: typeof g.escalateTo === 'string' && g.escalateTo.trim() ? g.escalateTo : null, exceptions: g.exceptions, evidenceIds,
     });
@@ -455,7 +472,7 @@ export function checkMap(raw: unknown, obs: readonly GenericObservation[], trans
     if (evidenceIds === null || regions === null) return null;
     outGaps.push({ question: q.question, targetId: typeof q.targetId === 'string' ? renamed.get(q.targetId) ?? null : null, evidenceIds, regionIds: regions });
   }
-  return { steps: outSteps, guardrails: outRules, gaps: outGaps, teachBack };
+  return { processes: outProcesses, steps: outSteps, guardrails: outRules, gaps: outGaps, teachBack };
 }
 
 const mapSynthesis: LlmTask = {
@@ -648,6 +665,47 @@ const mapEdit: LlmTask = {
   },
 };
 
+// ---- process_match -----------------------------------------------------------
+// Which known process is on screen now: the conductor uses it to pick the expert's strategy (what to ask, which rules).
+export interface ProcessMatchOutput { processId: string | null; confidence: number }
+
+const processMatch: LlmTask = {
+  maxInputBytes: 32 * 1024,
+  fast: true,
+  prepare(body) {
+    if (!isRecord(body) || !onlyKeys(body, ['processes', 'observations'])) return fail('body');
+    const list = body.processes;
+    if (!Array.isArray(list) || list.length < 1 || list.length > 12) return fail('processes');
+    const processes: Array<{ id: string; title: string; summary: string; steps: string[]; rules: string[] }> = [];
+    for (const [i, p] of (list as unknown[]).entries()) {
+      const f = `processes.${i}`;
+      if (!isRecord(p) || !onlyKeys(p, ['id', 'title', 'summary', 'steps', 'rules'])) return fail(f);
+      const pid = id(p.id, `${f}.id`); if (!pid.ok) return pid;
+      const title = text(p.title, `${f}.title`, 120); if (!title.ok) return title;
+      const summary = text(p.summary ?? '', `${f}.summary`, 300, 0); if (!summary.ok) return summary;
+      const steps = textList(p.steps ?? [], `${f}.steps`, 10, 300); if (!steps.ok) return steps;
+      const rules = textList(p.rules ?? [], `${f}.rules`, 8, 400); if (!rules.ok) return rules;
+      processes.push({ id: pid.value, title: title.value, summary: summary.value, steps: steps.value, rules: rules.value });
+    }
+    const observations = parseObservations(body.observations, 'observations', 6); if (!observations.ok) return observations;
+    const ids = [...new Set(processes.map((p) => p.id))];
+    const schema: Json = {
+      type: 'object', additionalProperties: false, required: ['processId', 'confidence'],
+      properties: { processId: nullable({ type: 'string', enum: ids }), confidence: { type: 'number' } },
+    };
+    return {
+      ok: true, request: { system: processMatchSystem, prompt: prompt({ processes, observations: observations.value }), schema },
+      check(raw): ProcessMatchOutput | null {
+        if (!isRecord(raw) || !exactKeys(raw, ['processId', 'confidence'])) return null;
+        const { processId, confidence } = raw;
+        if (typeof confidence !== 'number' || !Number.isFinite(confidence) || confidence < 0 || confidence > 1) return null;
+        if (processId !== null && (typeof processId !== 'string' || !ids.includes(processId))) return null;
+        return { processId, confidence };
+      },
+    };
+  },
+};
+
 export const LLM_TASKS: Readonly<Record<string, LlmTask>> = Object.freeze({
   answer_extraction: answerExtraction,
   reply_classification: replyClassification,
@@ -656,4 +714,5 @@ export const LLM_TASKS: Readonly<Record<string, LlmTask>> = Object.freeze({
   map_synthesis: mapSynthesis,
   guardrail_check: guardrailCheck,
   map_edit: mapEdit,
+  process_match: processMatch,
 });
