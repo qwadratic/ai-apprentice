@@ -7,7 +7,7 @@ import { isRecord } from '../config.ts';
 import type { GenericQuestionOutput, GuardrailCheckOutput, MapEditOutput, MapSynthesisOutput, ProcessMatchOutput, ReplyOutput } from '../llm-tasks.ts';
 import type { TaskResult } from '../llm.ts';
 import { demoMap } from './demo-map.ts';
-import { GUIDE, MAC_DONE_LINE, NUDGES, OFF_LINE, OPEN_WEB, PROPOSE, SHOW_LOOKS_DONE, STAGE_ABOUT, STAGE_CONFIRM, STAGE_NAMES, STAGE_START, detectLanguage, donePhraseOnly, doneSaid, offSaid, stageAsked, stageCommand, yesSaid } from './lines.ts';
+import { GUIDE, MAC_DONE_LINE, NUDGES, OFF_LINE, OPEN_WEB, PROPOSE, RESOLVED, SHOW_LOOKS_DONE, STAGE_ABOUT, STAGE_CONFIRM, STAGE_NAMES, STAGE_START, detectLanguage, donePhraseOnly, doneSaid, offSaid, stageAsked, stageCommand, yesSaid } from './lines.ts';
 import { applyEdits } from './map-edits.ts';
 import type { ConductorMap, MapComment } from './map-edits.ts';
 import { mapTitle, storableMap } from './map-store.ts';
@@ -284,7 +284,12 @@ export class Conductor {
   private readonly askTimes: number[] = [];
   private lastAskAt = -Infinity;
   private lastTeachCheckAt = -Infinity;
-  private readonly warned = new Set<string>();
+  /**
+   * The rule Clipa warned about and that is still open (Pass it on): one warning per rule, so it is not said again while the
+   * person fixes it. It ends when a check comes back clear (Clipa says it is ready), when the warning never got said (cancelled
+   * or skipped), and when the stage or the record changes.
+   */
+  private openWarn: string | null = null;
   /** The learned process Clipa recognised on screen in this stage, and the app it was recognised in. */
   private recognized: LearnedProcess | null = null;
   private recognizedFor: string | null = null;
@@ -455,7 +460,11 @@ export class Conductor {
   }
 
   private cancelActive(): void {
-    if (this.active && !this.active.done) this.emit({ type: 'cancel', cueId: this.active.cueId });
+    if (this.active && !this.active.done) {
+      // A warning that was never said is not an open warning: the rule is warned about again at the next pause.
+      if (this.active.type === 'warn') this.openWarn = null;
+      this.emit({ type: 'cancel', cueId: this.active.cueId });
+    }
     this.active = null;
   }
 
@@ -529,6 +538,9 @@ export class Conductor {
           this.active.done = true;
           if (this.active.type === 'ask' || this.active.type === 'warn') this.presence('dot');
         }
+        // The face skipped the warning (the person was busy, or its moment had passed): it was never said, so it is due again.
+        // Only the newest warning counts; a late report about an older one changes nothing.
+        if (e.outcome === 'skipped' && this.openWarn !== null && [...this.cues].reverse().find((c) => c.cue.type === 'warn')?.cueId === e.cueId) this.openWarn = null;
         return;
       default:
         break;
@@ -688,6 +700,8 @@ export class Conductor {
     this.questionContext = null;
     if ((this.liveMode === 'learn' || this.liveMode === 'teach') && (this.active?.type === 'ask' || this.active?.type === 'warn')) this.cancelActive();
     if (clearProcess) {
+      // Another place, a new stage or the record switched: the warning belongs to a moment that is gone.
+      this.openWarn = null;
       if (this.recognized && this.liveMode === 'teach' && !this.offRecord) {
         this.emit({ type: 'context', text: '[map] The visible context changed. No current expert process is recognized. Do not apply earlier process rules; wait for a new recognized process.' });
       }
@@ -1460,13 +1474,20 @@ export class Conductor {
     const current = revision === this.contextRevision;
     if (!(current && out?.status === 'warn' && out.guardrailId && out.message)) this.pose('listen');
     if (!current || !out) return;
+    // The rule Clipa warned about is kept now: she says so once, in a generic line, and is glad about it.
+    if (out.status === 'clear' && this.openWarn !== null && (out.guardrailId === null || out.guardrailId === this.openWarn)) {
+      this.openWarn = null;
+      this.pose('celebrate');
+      this.emit({ type: 'say', text: RESOLVED });
+      return;
+    }
     if (out.status === 'unknown' && out.message) { this.quiet(out.message); return; }
     if (out.status !== 'warn' || !out.guardrailId || !out.message) return;
+    // One warning per rule: while it is open (said, and not fixed yet) the same rule is not warned about again.
+    if (this.openWarn === out.guardrailId) { this.pose('listen'); return; }
+    this.openWarn = out.guardrailId;
     const latest = observations[observations.length - 1];
     const latestId = typeof latest?.id === 'string' ? latest.id : '';
-    const key = `${out.guardrailId}:${latestId}`;
-    if (this.warned.has(key)) { this.pose('listen'); return; }
-    this.warned.add(key);
     const rule = rules.find((g) => g.id === out.guardrailId);
     const regions = this.regionsFor([latestId], out.regionIds, true);
     this.pose('warn');

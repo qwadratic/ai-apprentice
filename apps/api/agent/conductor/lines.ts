@@ -147,6 +147,8 @@ export const PROPOSE: Readonly<Record<'review' | 'teach', string>> = {
 export const MAC_DONE_LINE = "Got it. End Show, and I'll open Reflect in the browser.";
 /** Said before Clipa ends the session because the person asked her to stop. */
 export const OFF_LINE = "Okay, I'm off. Press Start when you need me.";
+/** Pass it on: the rule Clipa warned about is kept now (the check comes back clear). Said once; it names no rule. */
+export const RESOLVED = 'That fixes it. Ready for review.';
 
 const plainText = (text: string): string => text.toLowerCase().replace(/[‘’`´]/g, "'").replace(/ё/g, 'е');
 const words = (text: string): Array<{ w: string; start: number; end: number }> =>

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Conductor, MapRegistry, RULES } from '../agent/conductor/engine.ts';
-import { MAC_DONE_LINE, NUDGES, OFF_LINE, PROPOSE, SHOW_LOOKS_DONE, STAGE_CONFIRM, STAGE_START, detectLanguage, doneSaid, offSaid, stageAsked, stageCommand, yesSaid } from '../agent/conductor/lines.ts';
+import { MAC_DONE_LINE, NUDGES, OFF_LINE, PROPOSE, RESOLVED, SHOW_LOOKS_DONE, STAGE_ABOUT, STAGE_CONFIRM, STAGE_START, detectLanguage, doneSaid, offSaid, stageAsked, stageCommand, yesSaid } from '../agent/conductor/lines.ts';
 import { demoMap } from '../agent/conductor/demo-map.ts';
 import { applyEdits } from '../agent/conductor/map-edits.ts';
 import type { ConductorMap } from '../agent/conductor/map-edits.ts';
@@ -1228,4 +1228,106 @@ test('workspace: Pass it on recognises the process once and the checks see the o
   assert.ok(check, 'the rules were checked at the pause');
   assert.deepEqual([...new Set((check.body.observations as Array<{ surface: string }>).map((o) => o.surface))].sort(), ['email draft', 'order view']);
   assert.equal(lookingAt(r.cues).length, 1);
+});
+
+// ---- Pass it on: one warning per rule, then a ready line ----------------------------------------------------------------
+interface Verdict { status: 'warn' | 'clear' | 'unknown'; guardrailId: string | null; message: string | null; regionIds: string[] }
+const WARN: Verdict = { status: 'warn', guardrailId: 'g1', message: 'Add the details as text.', regionIds: [] };
+const CLEAR: Verdict = { status: 'clear', guardrailId: null, message: null, regionIds: [] };
+
+/** A new hire on a confirmed map; the rule checks answer with `verdict.now`. The first frames are in and the first check is due. */
+async function warnRig(): Promise<{ r: Rig; verdict: { now: Verdict } }> {
+  const maps = new MapRegistry();
+  maps.confirm('expert-session', MAP as never, 1);
+  const verdict = { now: WARN };
+  const r = rig({ process_match: () => ok({ processId: 'm1-p1', confidence: 0.9 }), guardrail_check: () => ok(verdict.now) }, maps, 'hire-1');
+  await r.send(hello('web', 'new_hire', 'expert-session'), { type: 'session', mode: 'teach', live: true, reason: null }, { type: 'share', state: 'capturing', reason: null });
+  await r.send(orderFrame('n1'), emailFrame('n2', 'Image only'));
+  await r.advance(RULES.settleMs + 10); // recognised
+  return { r, verdict };
+}
+const checks = (r: Rig) => r.calls.filter((c) => c.task === 'guardrail_check').length;
+/** The person edits the email and pauses: the next check runs. */
+async function editAndPause(r: Rig, id: string, body: string): Promise<void> {
+  await r.send(emailFrame(id, body));
+  await r.advance(RULES.teachCheckGapMs + RULES.pauseMs);
+}
+
+test('Pass it on: one warning per rule while it is open; once the check is clear Clipa says it is ready, once', async () => {
+  await withRules({ nudges: false }, async () => {
+    const { r, verdict } = await warnRig();
+    await r.advance(RULES.pauseMs); // the first check, at the first pause
+    assert.equal(of(r.cues, 'warn').length, 1);
+    await r.send({ type: 'cue_done', cueId: of(r.cues, 'warn')[0]!.cueId, outcome: 'spoken' });
+    // Another email frame and another pause: the rule is checked again and still broken, but it is not warned about twice.
+    await editAndPause(r, 'n3', 'Image only, sent again');
+    assert.equal(checks(r), 2, 'checked again');
+    assert.equal(of(r.cues, 'warn').length, 1, 'one warning per rule');
+    assert.equal(of(r.cues, 'cancel').length, 0);
+    // The details are in: the check comes back clear, and Clipa says it is ready, glad about it.
+    verdict.now = CLEAR;
+    await editAndPause(r, 'n4', 'Delivery at 12 Sample Street');
+    assert.equal(checks(r), 3);
+    assert.deepEqual(said(r.cues), [RESOLVED]);
+    assert.equal(RESOLVED, 'That fixes it. Ready for review.');
+    assert.equal(cueOf(r.cues, 'state').at(-1)?.clipa, 'celebrate');
+    // Once: later clear checks say nothing more.
+    await editAndPause(r, 'n5', 'Delivery at 12 Sample Street, 10:00');
+    assert.equal(checks(r), 4);
+    assert.deepEqual(said(r.cues), [RESOLVED]);
+    // A rule broken again after the fix is warned about again.
+    verdict.now = WARN;
+    await editAndPause(r, 'n6', 'Image only, again');
+    assert.equal(of(r.cues, 'warn').length, 2);
+  });
+});
+
+test('Pass it on: a warning that was never said (cancelled by typing, skipped by the face) is due again; an interrupted one is not', async () => {
+  await withRules({ nudges: false }, async () => {
+    const { r } = await warnRig();
+    await r.advance(RULES.pauseMs);
+    const warns = () => of(r.cues, 'warn');
+    assert.equal(warns().length, 1);
+    // The person goes back to typing before it was said: it is out of date, and the rule is warned about at the next pause.
+    await r.send({ type: 'activity', state: 'typing' });
+    assert.deepEqual(cueOf(r.cues, 'cancel').map((c) => c.cueId), [warns()[0]!.cueId]);
+    await r.send({ type: 'activity', state: 'pause' });
+    await editAndPause(r, 'n3', 'Image only, edited');
+    assert.equal(warns().length, 2, 'warned again');
+    // The face skipped it (the person was busy): it was not said either.
+    await r.send({ type: 'cue_done', cueId: warns()[1]!.cueId, outcome: 'skipped' });
+    await editAndPause(r, 'n4', 'Image only, edited again');
+    assert.equal(warns().length, 3, 'warned again');
+    // Its moment passed before the face reported anything: the same.
+    await r.advance(RULES.warnTtlMs + 100);
+    assert.equal(cueOf(r.cues, 'cancel').length, 2, 'the third warning ran out');
+    await editAndPause(r, 'n5', 'Image only, edited once more');
+    assert.equal(warns().length, 4, 'warned again');
+    // The person heard it and spoke over its end: not said in full, but said. No repeat.
+    await r.send({ type: 'cue_done', cueId: warns()[3]!.cueId, outcome: 'interrupted' });
+    await editAndPause(r, 'n6', 'Image only, edited a last time');
+    assert.equal(warns().length, 4, 'an interrupted warning was heard');
+  });
+});
+
+test('Pass it on: a warning does not outlive the off-the-record switch or a new stage: no ready line for it', async () => {
+  const resets: ClientEvent[][] = [
+    [{ type: 'off_record', on: true }, { type: 'off_record', on: false }],
+    [{ type: 'session', mode: 'teach', live: false, reason: 'user' }, { type: 'session', mode: 'teach', live: true, reason: null }],
+  ];
+  for (const reset of resets) {
+    await withRules({ nudges: false }, async () => {
+      const { r, verdict } = await warnRig();
+      await r.advance(RULES.pauseMs);
+      assert.equal(of(r.cues, 'warn').length, 1);
+      await r.send({ type: 'cue_done', cueId: of(r.cues, 'warn')[0]!.cueId, outcome: 'spoken' });
+      await r.send(...reset);
+      verdict.now = CLEAR;
+      await r.send(orderFrame('n7'), emailFrame('n8', 'Delivery at 12 Sample Street'));
+      await r.advance(RULES.settleMs + 10);
+      await r.advance(RULES.teachCheckGapMs + RULES.pauseMs);
+      assert.equal(checks(r), 2, `checked again after ${JSON.stringify(reset[0])}`);
+      assert.deepEqual(said(r.cues), [], 'nothing was open any more');
+    });
+  }
 });
