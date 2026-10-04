@@ -35,8 +35,10 @@ export interface BoardInput {
   blockers?: readonly BoardBlocker[];
 }
 
-export type Surface = 'order_view' | 'email_draft' | 'ticket';
+/** `screen`: a generic screen_activity observation (any app, the whole screen shared). */
+export type Surface = 'order_view' | 'email_draft' | 'ticket' | 'screen';
 export type ChangeKind =
+  | 'screen_change'
   | 'order_opened'
   | 'email_started'
   | 'attachment_added'
@@ -204,6 +206,7 @@ const SURFACE_LABELS: Readonly<Record<Surface, string>> = {
   order_view: 'Order',
   email_draft: 'Email draft',
   ticket: 'Ticket',
+  screen: 'Screen',
 };
 
 const TOPIC_LABELS: Readonly<Record<string, string>> = {
@@ -267,6 +270,36 @@ function missingOf(evidenceIds: readonly string[], quote: string | null): Array<
 // ---------------------------------------------------------------------------
 
 type VisionObservation = Exclude<ScreenObservation, { kind: 'input_activity' }>;
+
+const WORKSPACE_KINDS: ReadonlySet<string> = new Set(['order_view', 'email_draft', 'ticket']);
+
+/** What a generic screen_activity observation (stream A, any app) says, read defensively: it is newer than the contracts union. */
+interface GenericScreen { app: string | null; surface: string; summary: string; change: string | null; pendingAction: string | null }
+
+function genericScreenOf(obs: unknown): GenericScreen {
+  const raw = (obs as { facts?: unknown }).facts;
+  const f = typeof raw === 'object' && raw !== null ? (raw as Record<string, unknown>) : {};
+  const s = (v: unknown): string | null => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null);
+  return { app: s(f.app), surface: s(f.surface) ?? 'screen', summary: s(f.summary) ?? '', change: s(f.change), pendingAction: s(f.pendingAction) };
+}
+
+function genericChanges(now: GenericScreen, prev: GenericScreen | null): ChangeEvent[] {
+  if (now.change !== null) return [{ kind: 'screen_change', label: clip(now.change, 90) }];
+  if (prev === null || prev.app !== now.app || prev.surface !== now.surface) {
+    return [{ kind: 'screen_change', label: clip(`${now.app ? `${now.app}: ` : ''}${now.surface} opened`, 90) }];
+  }
+  if (now.summary !== '' && now.summary !== prev.summary) return [{ kind: 'screen_change', label: clip(now.summary, 90) }];
+  return [];
+}
+
+function genericFacts(g: GenericScreen): FactRow[] {
+  const rows: FactRow[] = [{ key: 'kind', value: 'screen_activity' }];
+  if (g.app) rows.push({ key: 'app', value: g.app });
+  rows.push({ key: 'surface', value: g.surface });
+  if (g.summary) rows.push({ key: 'summary', value: clip(g.summary, 90) });
+  if (g.pendingAction) rows.push({ key: 'pendingAction', value: g.pendingAction });
+  return rows;
+}
 
 function factRows(obs: VisionObservation): FactRow[] {
   const rows: FactRow[] = [{ key: 'kind', value: obs.kind }];
@@ -367,31 +400,43 @@ export function buildKeyframes(
     .sort((a, b) => a.timestampMs - b.timestampMs || a.sequence - b.sequence);
   const prevBySurface = new Map<Surface, VisionObservation>();
   let order: OrderLike | null = null;
+  let prevScreen: GenericScreen | null = null;
   const frames: Keyframe[] = [];
-  for (const obs of vision) {
-    if (obs.kind === 'order_view') order = obs.facts;
-    const changes = changesOf(obs, prevBySurface.get(obs.kind) ?? null, order);
-    prevBySurface.set(obs.kind, obs);
-    if (changes.length === 0) continue;
+  const push = (obs: VisionObservation, surface: Surface, surfaceLabel: string, changes: ChangeEvent[], facts: FactRow[]): void => {
     const evidenceId = frameEvidenceOf(obs.evidenceIds, evidence);
     const ev = evidenceId === null ? undefined : evidence.get(evidenceId);
     frames.push({
       id: obs.id,
       index: frames.length + 1,
       atMs: obs.timestampMs,
-      surface: obs.kind,
-      surfaceLabel: SURFACE_LABELS[obs.kind],
-      entityRef: obs.entityRef,
+      surface,
+      surfaceLabel,
+      entityRef: obs.entityRef ?? null,
       evidenceId,
       evidenceIds: [...obs.evidenceIds],
       startMs: ev?.startMs ?? obs.timestampMs,
       endMs: ev?.endMs ?? obs.timestampMs + 1000,
       changes,
-      facts: factRows(obs),
+      facts,
       stepIds: [],
       guardrailIds: [],
       gapIds: [],
     });
+  };
+  for (const obs of vision) {
+    if (!WORKSPACE_KINDS.has(obs.kind)) {
+      // A generic screen observation (any app): a keyframe when the app, the surface or the summary changed.
+      const g = genericScreenOf(obs);
+      const changes = genericChanges(g, prevScreen);
+      prevScreen = g;
+      if (changes.length > 0) push(obs, 'screen', g.app ?? SURFACE_LABELS.screen, changes, genericFacts(g));
+      continue;
+    }
+    if (obs.kind === 'order_view') order = obs.facts;
+    const changes = changesOf(obs, prevBySurface.get(obs.kind) ?? null, order);
+    prevBySurface.set(obs.kind, obs);
+    if (changes.length === 0) continue;
+    push(obs, obs.kind, SURFACE_LABELS[obs.kind], changes, factRows(obs));
   }
   return frames;
 }
@@ -414,6 +459,8 @@ function momentOf(evidenceIds: readonly string[], frames: readonly Keyframe[], e
 }
 
 function scopeText(g: MapGuardrail): string {
+  // A generic rule (the conductor's map) has no customer scope: it holds whenever its condition does.
+  if (g.trigger === 'stop_condition' && g.scope.kind === 'all' && !g.scope.explicit) return 'Whenever the condition holds';
   if (g.scope.kind === 'all') return 'Every customer';
   const who = listOf(g.scope.customers) || 'this customer';
   return g.scope.explicit ? `Only ${who}` : `Only ${who} (assumed from the screen)`;

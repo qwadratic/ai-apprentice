@@ -1,9 +1,17 @@
 import { useState } from 'react';
 import { EvidenceLinks, NotWired, StepCards } from '../components/Parts.tsx';
+import { ConductorReview } from '../conductor/ConductorReview.tsx';
+import { useConductorLeads } from '../conductor/hooks.ts';
 import { useShell, useShellState } from '../hooks.ts';
 
-/** Review: the gaps still open, the teach-back with Confirm or Correct, and the map so far. */
+/** Review (Reflect): the conductor's board while the conductor leads, else the in-browser brain's debrief (the fallback). */
 export function ReviewView() {
+  const leads = useConductorLeads();
+  return leads ? <ConductorReview /> : <BrainReview />;
+}
+
+/** Review: the gaps still open, the teach-back with Confirm or Correct, and the map so far. */
+function BrainReview() {
   const { controller } = useShell();
   const brain = useShellState((s) => s.brain);
   const gaps = useShellState((s) => s.review.gaps);

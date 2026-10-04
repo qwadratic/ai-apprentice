@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { ScreenCapture } from '../../../../../../packages/screen/capture/index.ts';
 import { mountScreenPanel } from '../../../screen/ScreenPanel/index.ts';
+import { RegionOverlay } from '../conductor/RegionOverlay.tsx';
+import { SCREEN_MOUNT_ATTR, TARGET_ATTR } from '../conductor/targets.ts';
 import { useShell, useShellState } from '../hooks.ts';
 
 /**
@@ -18,6 +20,8 @@ export function ScreenSlot({ collapsed, onToggle }: { collapsed: boolean; onTogg
   const { controller, live: liveMount } = useShell();
   const live = useShellState((s) => s.phase === 'live');
   const rootRef = useRef<HTMLDivElement | null>(null);
+  // The conductor's regions are outlined over the preview: the overlay is placed relative to this section.
+  const sectionRef = useRef<HTMLElement | null>(null);
 
   // With stream A's integrated runtime, its own screen panel mounts in this box for the session and owns the capture: this slot
   // then starts no capture of its own (the screen is never captured twice).
@@ -42,7 +46,14 @@ export function ScreenSlot({ collapsed, onToggle }: { collapsed: boolean; onTogg
   }, [controller, liveMount]);
 
   return (
-    <section className="as-card as-screen" aria-labelledby="as-screen-title" data-collapsed={collapsed ? 'true' : 'false'}>
+    <section
+      ref={sectionRef}
+      className="as-card as-screen"
+      aria-labelledby="as-screen-title"
+      data-collapsed={collapsed ? 'true' : 'false'}
+      {...{ [TARGET_ATTR]: 'share' }}
+      style={{ position: 'relative' }}
+    >
       <div className="as-card__head">
         <h2 className="as-card__title" id="as-screen-title">Screen</h2>
         <button type="button" className="as-btn as-btn--small" aria-expanded={!collapsed} aria-controls="as-screen-mount" onClick={onToggle}>
@@ -52,8 +63,8 @@ export function ScreenSlot({ collapsed, onToggle }: { collapsed: boolean; onTogg
       <p className="as-note">
         {liveMount !== null
           ? live
-            ? 'Choose the window to share in the panel below. Shared frames are masked on this page first, then analysed by vision on our server. Until you share a window, the sample observations run and are labelled synthetic.'
-            : 'Start a mode first (right), then choose the window to share in the panel. Until you share a window, the sample observations run and are labelled synthetic.'
+            ? 'Share your entire screen (or a window) in the panel below. Frames are masked on this page first, then read by vision on our server; Clipa outlines what she asks about on this preview.'
+            : 'Start a mode first, then share your entire screen (or a window) in the panel below.'
           : live
             ? 'Choose the window to share below. The preview stays on this page: frames are not analysed or sent yet (vision is not wired).'
             : 'Start a mode first (right), then choose the window to share. The preview stays on this page: frames are not analysed or sent yet.'}
@@ -65,7 +76,9 @@ export function ScreenSlot({ collapsed, onToggle }: { collapsed: boolean; onTogg
         hidden={collapsed}
         inert={liveMount === null && !live}
         data-live={live ? 'true' : 'false'}
+        {...{ [SCREEN_MOUNT_ATTR]: 'mount' }}
       />
+      <RegionOverlay containerRef={sectionRef} />
     </section>
   );
 }

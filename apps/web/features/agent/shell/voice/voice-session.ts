@@ -69,10 +69,13 @@ export class VoiceSession {
     return true;
   }
 
-  /** Speaks `text` through the agent: it is sent as `[ASK] text`. Returns the message that was sent, or null. */
-  ask(text: string): string | null {
+  /**
+   * Speaks `text` through the agent: it is sent as `[ASK] text`. Returns the message that was sent, or null. `maxChars` raises the
+   * usual limit for a line that must be read in full (the conductor's teach-back).
+   */
+  ask(text: string, maxChars?: number): string | null {
     if (!this.handle || !this.isConnected()) return null;
-    const message = askMessage(text);
+    const message = askMessage(text, maxChars);
     this.handle.sendUserMessage(message);
     return message;
   }

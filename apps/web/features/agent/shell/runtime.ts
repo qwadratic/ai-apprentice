@@ -1,17 +1,23 @@
 // Wires the real world (browser fetch, timers, ElevenLabs, localStorage, the Clipa motion director) into the controller.
 import { createClipaDirector } from '../clipa/src/index.ts';
+import type { ClipaTarget } from '../clipa/src/index.ts';
 import '../../demo-workspace/workspace.css';
 import { createDemoWorkspaceAdapter } from './slots/demo-workspace-adapter.ts';
 import type { WorkspaceAdapter } from './slots/workspace-adapter.ts';
 import { createAgentApi } from './api.ts';
 import type { FetchLike } from './api.ts';
 import { AgentBrain } from './brain/agent-brain.ts';
-import { createDirectorPresenter } from './clipa/director-presenter.ts';
+import { POINT_HOLD_MS, createDirectorPresenter } from './clipa/director-presenter.ts';
 import { InputGuard, watchPageInput } from './clipa/input-guard.ts';
 import { createClipaStore } from './clipa/presenter.ts';
 import type { ClipaStore } from './clipa/presenter.ts';
 import { resolveClipaTarget } from './clipa/targets.ts';
 import { API_BASE } from './config.ts';
+import { readJoinParams, withoutJoinParams } from './conductor/join.ts';
+import type { Target } from './conductor/protocol.ts';
+import type { ConductorLine } from './conductor/store.ts';
+import type { BrainDecision } from './brain/types.ts';
+import { CONDUCTOR_SURFACE, clipaHint, resolveTarget as resolveConductorTarget } from './conductor/targets.ts';
 import { ShellController } from './controller.ts';
 import type { ControllerTimers, KeyValueStorage } from './controller.ts';
 import { SampleObservationSource } from './screen/sample-source.ts';
@@ -31,9 +37,21 @@ export interface ShellRuntime {
   workspace: WorkspaceAdapter | null;
   /** Stream A's integrated runtime (real bridge, screen panel, workspace) mounted per session; null until A's commit is on main. */
   live: LiveMount | null;
+  /**
+   * Clipa flies to a conductor target (a UI element marked data-clipa-target, or a region of the screen preview); null: she stays.
+   * The conductor's cues call it; a Clipa layer may call it too.
+   */
+  pointAt(target: Target | null): void;
+  /** Clipa's bubble text ('' clears it). Shown only, never spoken: speech goes through the voice agent. */
+  say(text: string): void;
   /** Removes the Clipa layer and the page listeners. The controller is disposed separately. */
   dispose(): void;
 }
+
+/** The web app's version in the conductor hello. */
+export const WEB_FACE_VERSION = 'web-1.1';
+/** Clipa stays beside a region of the screen preview this long: it is what the question or warning is about. */
+const REGION_HOLD_MS = 9000;
 
 const browserTimers: ControllerTimers = {
   setTimeout: (callback, ms) => window.setTimeout(callback, ms),
@@ -86,16 +104,68 @@ export function createRuntime(): ShellRuntime {
   const guard = new InputGuard(() => performance.now());
   const stopWatching = watchPageInput(guard, document);
   // The policy's typing channel: page key presses (the workspace's own heartbeats stop whenever the screen is not `capturing`).
+  // The conductor hears it too: `activity typing`, then `idle` after a quiet moment (its pause signal).
   let lastInputAt: number | null = null;
-  const stopInputClock = watchPageInput({ noteInput: () => { lastInputAt = Date.now(); } }, document);
+  let onTyping: () => void = () => {};
+  const stopInputClock = watchPageInput({ noteInput: () => { lastInputAt = Date.now(); onTyping(); } }, document);
+  // Conductor targets the director flies to: the hint names the target, this map holds it (a region's box is read from the
+  // live preview when she flies, so it follows the preview). UI names the conductor resolver does not find fall back to the
+  // rail's resolver (data-clipa-target names and its fallbacks).
+  const pointed = new Map<string, Target>();
   const director = createClipaDirector({
     root: document.body,
     dock: 'bottom-right',
-    resolveTarget: (target) => resolveClipaTarget(document, target),
+    resolveTarget: (target) => {
+      if (target.surface === CONDUCTOR_SURFACE) {
+        const t = target.hint === undefined ? undefined : pointed.get(target.hint);
+        if (t === undefined) return null;
+        return resolveConductorTarget(document, t) ?? (t.kind === 'ui' ? resolveClipaTarget(document, { surface: 'ui', hint: t.name }) : null);
+      }
+      return resolveClipaTarget(document, target);
+    },
     isInputActive: () => guard.isActive(),
     onLog: (entry) => note('CLIPA', `${entry.kind}: ${entry.message}`),
   });
   const presenter = createDirectorPresenter({ store, director, guard });
+  const toClipaTarget = (target: Target): ClipaTarget => {
+    const hint = clipaHint(target);
+    if (pointed.size > 50) pointed.clear();
+    pointed.set(hint, target);
+    return { surface: CONDUCTOR_SURFACE, hint };
+  };
+  /** Beside a conductor target in the pointing pose (a region a little longer: it is what a question is about). */
+  const pointAt = (target: Target | null): void => {
+    if (target === null) return;
+    presenter.pointAt(toClipaTarget(target), target.kind === 'region' ? REGION_HOLD_MS : POINT_HOLD_MS);
+  };
+  /** A conductor line: she flies beside the target (or stands up on the rail) and shows it in her bubble while it is said. */
+  const say = (text: string, target?: Target | null): void => {
+    const line = text.trim();
+    if (line === '') { presenter.say(''); return; }
+    presenter.speakAt(line, target ? toClipaTarget(target) : undefined);
+  };
+  /**
+   * One motion per cue (controller ConductorOptions.present): a line with its target, or only a target, or only a line. A
+   * warning flies to its target in the warning pose (the director's WARN sequence; it preempts whatever she is doing).
+   */
+  const present = (text: string | null, target: Target | null | undefined, kind?: ConductorLine['kind']): void => {
+    const line = text?.trim() ?? '';
+    if (kind === 'warn' && line !== '') {
+      const warn: BrainDecision = {
+        decision: 'WARN', topic: 'guardrail', kind: 'guardrail', whyNow: 'the conductor warned before a pending action', evidenceIds: [],
+        utterance: { text: line }, expectsAnswer: false, clipa: { state: 'warning', ...(target ? { target: toClipaTarget(target) } : {}) },
+      };
+      presenter.say(line);
+      presenter.play?.(warn);
+      return;
+    }
+    if (line !== '') { say(line, target); return; }
+    if (text === '') presenter.say('');
+    if (target) pointAt(target);
+  };
+  // `?conductor=off` keeps the in-browser brain in the lead (the fallback); otherwise the page is a face of the conductor.
+  const query = new URLSearchParams(window.location.search);
+  const conductorOn = query.get('conductor') !== 'off';
 
   // An arrow function: an unbound window.fetch would throw "Illegal invocation".
   const fetchFn: FetchLike = (input, init) => fetch(input, init);
@@ -115,8 +185,16 @@ export function createRuntime(): ShellRuntime {
     isHidden: () => document.hidden,
     storage: browserStorage,
     lastInputAt: () => lastInputAt,
+    ...(conductorOn ? {
+      conductor: {
+        base: API_BASE, version: WEB_FACE_VERSION, present,
+        // The rail marks the guide's stage as next and shows its line under the rail.
+        guide: (step) => store.setGuide?.(step),
+      },
+    } : {}),
   });
   note = (type, text) => controller.note(type, text);
+  onTyping = () => controller.noteTyping();
   // A's createRuntimeWorkspace mounts the demo workspace itself (providesWorkspace).
   const live = new LiveMount({
     factory: liveFactory, controller, apiBase: API_BASE, providesWorkspace: true,
@@ -131,6 +209,8 @@ export function createRuntime(): ShellRuntime {
     // Stream A's demo workspace; its checkpoint port (A's adapter over the real bridge, PR #21) plugs in here when it lands.
     workspace: createDemoWorkspaceAdapter(),
     live,
+    pointAt,
+    say: (text) => say(text),
     dispose() {
       live?.dispose();
       stopWatching();
@@ -139,5 +219,12 @@ export function createRuntime(): ShellRuntime {
     },
   };
   harness?.onRuntime?.(runtime);
+  // The macOS hand-over (`?join=CODE&page=review`): the code is single-use, so it leaves the address bar at once.
+  const join = readJoinParams(window.location.search);
+  if (join.join !== null || join.page !== null) {
+    try { window.history.replaceState(window.history.state, '', withoutJoinParams(window.location.href)); } catch { /* the address stays */ }
+  }
+  if (conductorOn) void controller.bootConductor({ join: join.join, page: join.page });
+  else if (join.page !== null) controller.setMode(join.page);
   return runtime;
 }
