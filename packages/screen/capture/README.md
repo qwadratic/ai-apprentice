@@ -43,7 +43,7 @@ The orchestrator must wire this internal port to the approved contract, map stat
 Requires Node 24+ for the dependency-free test runner's TypeScript stripping. From the repository root:
 
 ```sh
-node --test packages/screen/capture/tests/capture.test.mjs
+node --test packages/screen/capture/tests/capture.test.ts
 ```
 
 The tests exercise mask validation/pixels, pause gates, abort/lease invalidation, a busy consumer, stale encoders/promises, resize races, mute, denial, picker/play cancellation, source ending, unsupported manual streams, error cleanup, and unique identities after restart. The canvas model is for deterministic race/pixel tests; it does not prove native browser capture.
@@ -52,7 +52,7 @@ Run the optional browser test with an existing Playwright installation/browser, 
 
 ```sh
 PLAYWRIGHT_MODULE=/absolute/path/to/playwright PLAYWRIGHT_CHANNEL=chrome \
-  node --test packages/screen/capture/tests/browser.test.mjs
+  node --test packages/screen/capture/tests/browser.test.ts
 ```
 
 It uses a synthetic canvas as a test display source in real Chrome. It decodes real processed PNGs and a video frame from the processed stream, verifies that the synthetic email's entire region is black, compares PNG to preview pixels exactly, exercises numeric/pointer masks, pause/resume, resize review, source end, and unmount. The underlying display video may round RGB values during conversion; only unmasked reference colors permit a two-level tolerance. Mask coverage remains exact black in the PNG. Set `CAPTURE_SCREENSHOT_PATH` to save a local test screenshot.
