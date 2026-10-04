@@ -212,7 +212,8 @@ jobs:
             apps/web/features/agent/launchpad/package-lock.json
       - name: Build the web app (stream A scaffold + stream B shell) for Pages
         env:
-          WEB_BASE_PATH: /ai-apprentice/
+          # The Pages path follows the repository name, so a rename needs no change here.
+          WEB_BASE_PATH: /${{ github.event.repository.name }}/
           VITE_API_BASE: https://apprentice.exe.xyz
         run: |
           set -euo pipefail
