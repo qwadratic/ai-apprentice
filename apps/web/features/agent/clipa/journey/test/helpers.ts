@@ -15,12 +15,15 @@ export class FakeDirector implements JourneyDirector {
   /** While set, idle() does not resolve: Clipa is "busy" with something else. */
   idleGate: Promise<void> | null = null;
   failPoint: ClipaFailure | null = null;
+  /** While set, a flight started by point() does not arrive: the state is already 'pointing', as in the real director. */
+  pointGate: Promise<void> | null = null;
 
-  point(target?: ClipaTarget): Promise<ClipaResult> {
+  async point(target?: ClipaTarget): Promise<ClipaResult> {
     this.calls.push(`point:${target?.hint ?? '-'}`);
-    if (this.failPoint) return Promise.resolve({ ok: false, reason: this.failPoint });
+    if (this.failPoint) return { ok: false, reason: this.failPoint };
     this.state = 'pointing';
-    return Promise.resolve(ok);
+    if (this.pointGate) await this.pointGate;
+    return ok;
   }
   speak(text: string): Promise<ClipaResult> {
     this.calls.push(`speak:${text}`);

@@ -166,4 +166,66 @@ describe('typing, talking and off-record keep Clipa quiet', () => {
     await flush();
     assert.deepEqual(director.calls, [], 'the warning stays the agent own');
   });
+
+  it('calls Clipa home in the middle of a flight when typing starts', async () => {
+    const { bus, director } = rig();
+    let arrive = (): void => {};
+    director.pointGate = new Promise<void>((resolve) => {
+      arrive = resolve;
+    });
+    bus.emit({ type: 'session_started' });
+    await flush();
+    assert.deepEqual(director.points, ['share-screen']);
+    director.clear();
+    bus.emit({ type: 'typing', active: true });
+    assert.deepEqual(director.calls, ['retreat']);
+    arrive();
+    await flush();
+    assert.deepEqual(director.lines, [], 'she never says the line she was flying to');
+  });
+
+  it('steps aside without moving Clipa while the agent speaks (the agent works her pose)', async () => {
+    const { bus, director } = rig();
+    bus.emit({ type: 'session_started' });
+    await flush();
+    director.clear();
+    bus.emit({ type: 'talking', active: true, by: 'agent' });
+    assert.deepEqual(director.calls, []);
+  });
+
+  it('gives the agent a free stage when it asks: she leaves her control so the question is not queued behind her', async () => {
+    const { bus, director } = rig();
+    bus.emit({ type: 'session_started', mode: 'learn' });
+    await flush();
+    assert.equal(director.state, 'pointing');
+    director.clear();
+    bus.emit({ type: 'agent_asked' });
+    assert.deepEqual(director.calls, ['retreat']);
+  });
+
+  it('does not pull Clipa away from the agent own pose when it asks', async () => {
+    const { bus, director } = rig();
+    bus.emit({ type: 'session_started', mode: 'learn' });
+    await flush();
+    director.state = 'speaking'; // the agent has already taken her over
+    director.clear();
+    bus.emit({ type: 'agent_asked' });
+    assert.deepEqual(director.calls, []);
+  });
+
+  it('ignores repeated typing and talking events with the same value', async () => {
+    const { bus, director, journey } = rig();
+    bus.emit({ type: 'session_started' });
+    await flush();
+    director.clear();
+    let changes = 0;
+    journey.subscribe(() => {
+      changes += 1;
+    });
+    bus.emit({ type: 'typing', active: true });
+    bus.emit({ type: 'typing', active: true });
+    bus.emit({ type: 'typing', active: true });
+    assert.equal(changes, 1);
+    assert.deepEqual(director.calls, ['retreat']);
+  });
 });

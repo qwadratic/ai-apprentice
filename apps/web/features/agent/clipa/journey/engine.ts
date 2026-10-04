@@ -209,7 +209,10 @@ export function createJourney(options: JourneyOptions): Journey {
   let token = 0;
   let inflight: Presentation | null = null;
   let pending: Presentation | null = null;
+  /** Clipa is out at one of our targets (we put her there and nobody has taken over). */
   let presenting = false;
+  /** We have a director call in progress (the flight, the bubble). */
+  let directing = false;
   let nudgeDue = false;
   let retries = 0;
   let nudgeTimer: unknown = null;
@@ -346,10 +349,21 @@ export function createJourney(options: JourneyOptions): Journey {
 
   // ---- presenting a line ----------------------------------------------------------------------------------------------
 
-  function retreatIfPresenting(): void {
-    if (!presenting) return;
+  /**
+   * Gives the stage back. `retreat` true: send her home, whatever she is doing (the person typed or spoke, or the
+   * session went off the record). 'if-pointing': only when she is still at our control (the agent is about to ask
+   * and its approach would otherwise queue behind her). false: just stop owning her, because the agent is working
+   * her pose and bubble right now.
+   */
+  function standDown(retreat: boolean | 'if-pointing'): void {
+    const ours = presenting || directing;
     presenting = false;
-    if (director.state !== 'dock' && director.state !== 'off') void director.retreat();
+    directing = false;
+    if (!ours || retreat === false) return;
+    const state = director.state;
+    if (state === 'dock' || state === 'off') return;
+    if (retreat === 'if-pointing' && state !== 'pointing') return;
+    void director.retreat();
   }
 
   /** Drops a presentation in progress; a step's own line (not a nudge or replay) is kept to say later. */
@@ -438,12 +452,14 @@ export function createJourney(options: JourneyOptions): Journey {
 
     const text = textFor(step, kind);
     const name = resolvable(step, text);
+    directing = true;
     let flown = await director.point(name ? journeyClipaTarget(name) : undefined);
     // The control went away between the lookup and the flight: say it in place instead.
     if (live() && name && !flown.ok && flown.reason === 'no-target') flown = await director.point();
     if (!live()) return;
     if (!flown.ok) {
       inflight = null;
+      directing = false;
       fail(flown.reason, kind, i);
       return;
     }
@@ -451,6 +467,7 @@ export function createJourney(options: JourneyOptions): Journey {
     const said = await director.speak(text.line);
     if (!live()) return;
     inflight = null;
+    directing = false;
     if (!said.ok) {
       fail(said.reason, kind, i);
       return;
@@ -546,7 +563,7 @@ export function createJourney(options: JourneyOptions): Journey {
     if (destroyed || done) return;
     const step = at(index);
     if (!isActive(step) || !gateOpen(step)) {
-      retreatIfPresenting();
+      standDown(true);
       return;
     }
     if (delivered.has(step.id)) return;
@@ -555,7 +572,7 @@ export function createJourney(options: JourneyOptions): Journey {
       // The agent has the floor here (teach-back, the checkpoint warning): Clipa stands aside and does not touch
       // the director, so the agent's own pose and bubble stay as they are.
       delivered.add(step.id);
-      presenting = false;
+      standDown(false);
       armNudge();
       return;
     }
@@ -590,31 +607,31 @@ export function createJourney(options: JourneyOptions): Journey {
     seen.add(event.type);
     switch (event.type) {
       case 'typing':
+        if (typing === event.active) return;
         typing = event.active;
-        quietChanged(event.active);
+        quietChanged(event.active, true);
         return;
-      case 'talking':
-        if (event.by === 'agent') talkingAgent = event.active;
+      case 'talking': {
+        const by = event.by === 'agent' ? 'agent' : 'person';
+        if ((by === 'agent' ? talkingAgent : talkingPerson) === event.active) return;
+        if (by === 'agent') talkingAgent = event.active;
         else talkingPerson = event.active;
-        quietChanged(event.active);
+        // The agent speaking has its own choreography: Clipa steps aside but does not move her.
+        quietChanged(event.active, by === 'person');
         return;
+      }
       case 'off_record':
         if (offRecord === event.on) return;
         offRecord = event.on;
-        if (event.on) {
-          presenting = false;
-          void director.setOff(true);
-        } else {
-          void director.setOff(false);
-        }
-        quietChanged(event.on);
+        void director.setOff(event.on);
+        quietChanged(event.on, true);
         return;
       case 'agent_asked':
         questions += 1;
         if (event.guardrail) guardrailQuestions += 1;
         agentBusyUntil = clock.now() + agentQuietMs;
         interrupt();
-        presenting = false; // the agent has the stage now
+        standDown('if-pointing'); // the agent has the stage now
         if (pending) scheduleResume();
         commit();
         return;
@@ -624,7 +641,7 @@ export function createJourney(options: JourneyOptions): Journey {
 
     if (done) return;
     // The agent takes the stage at these moments, so Clipa no longer owns the pose she is in.
-    if (event.type === 'checkpoint_warned' || event.type === 'teachback_started') presenting = false;
+    if (event.type === 'checkpoint_warned' || event.type === 'teachback_started') standDown(false);
     if (event.type === 'session_started' && event.mode) mode = event.mode;
     if (event.type === 'mode_changed') mode = event.mode;
 
@@ -641,11 +658,11 @@ export function createJourney(options: JourneyOptions): Journey {
   }
 
   /** Typing, talking or off-record started (loud) or ended. Loud: Clipa goes quiet at once. */
-  function quietChanged(loud: boolean): void {
+  function quietChanged(loud: boolean, retreat: boolean): void {
     if (loud) {
       interrupt();
       clearSettle();
-      retreatIfPresenting();
+      standDown(retreat);
     } else {
       scheduleResume();
     }
@@ -678,7 +695,7 @@ export function createJourney(options: JourneyOptions): Journey {
     reset() {
       if (destroyed) return;
       leaveStep();
-      retreatIfPresenting();
+      standDown(true);
       index = 0;
       outcomes = {};
       nudged.clear();

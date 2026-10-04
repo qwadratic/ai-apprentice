@@ -80,7 +80,8 @@ All through `bus.emit(...)` (or `journey.dispatch(...)`). Types are in `events.t
 - **Re-nudge:** at most one per step, a fixed time after the line, and never while quiet. It is stored, so a reload does not repeat it.
 - **Reload:** the step is stored in `localStorage` under `apprentice.journey.v1` (every access in try/catch; a stale, corrupt or finished entry is ignored). Steps that need a live capture rewind to the start, because a reload ends the capture.
 - **Phones:** without `getDisplayMedia` the first step offers the camera (`use-camera`); with neither it says plainly that the device cannot share and suggests a laptop. `canShareScreen()` and `canUseCamera()` are in `capabilities.ts`.
-- **Reduced motion:** the director honours `prefers-reduced-motion` (no flight, a fade); the strip drops its transitions.
+- **Reduced motion:** the director honours `prefers-reduced-motion` (no flight, a fade) as long as it is created with the default `reducedMotion: 'auto'`; the strip drops its transitions.
+- **Who moves Clipa:** the journey only calls `point`, `speak`, `retreat` and `setOff`, and only when nobody else holds the stage. It lets go of her (without moving her) when the agent warns, starts the teach-back or speaks, and it sends her home when the agent asks while she is still at one of its controls, so the agent's approach is not queued behind her.
 - **Progress strip:** `ProgressStrip.tsx` shows Share, Learn, Review, Teach, Summary. A finished phase is a button that makes Clipa say its first step again; nothing else changes.
 
 ## Checks
