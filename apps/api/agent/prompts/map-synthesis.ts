@@ -22,8 +22,9 @@ export const system = [
   '  decision (null for a plain action; for a judgment: summary at most 200 characters, reason at most 300 characters or null, quote or null), and evidenceIds.',
   '- guardrails: up to 8 rules the expert would apply again, each with processId: condition (when it applies), requiredAction (what must happen, or when to stop and ask),',
   '  reason or null, quote or null, escalateTo (who to ask, or null), exceptions the expert stated, and evidenceIds. Ids g1, g2 ...',
-  '- gaps: up to 6 questions that are still open: an unexplained judgment, a rule without a reason, an unclear scope, a missing limit or who decides.',
+  '- gaps: at most 3 questions that are still open, only about the rules, in this order: who a rule applies to; an exception (is it still fine when ...?);',
+  '  when to stop and ask. A judgment that has no reason yet asks why first. Leave out what the expert already answered, and never ask about a plain action.',
   '  Each has the question (at most 25 words, narrow and open), targetId (the step or guardrail id it is about, or null), evidenceIds, and regionIds (empty).',
-  '- teachBack: a spoken summary the apprentice reads back for the expert to confirm, at most 60 words: the steps in short, then each rule with its reason in the expert\'s words.',
-  '  Say plainly what is still unknown. End by asking whether this is right.',
+  '- teachBack: a spoken summary the apprentice reads back for the expert to confirm, at most 35 words, only the rules: for whom, what to do,',
+  '  the reason in the expert\'s words, the exception, and one clause for anything still unknown. No steps. End with "Right?".',
 ].join('\n');

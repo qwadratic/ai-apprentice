@@ -490,7 +490,7 @@ export function checkMap(raw: unknown, obs: readonly GenericObservation[], trans
     });
   }
   const outGaps: GenericGap[] = [];
-  for (const q of gaps.slice(0, 6)) {
+  for (const q of gaps.slice(0, 3)) {
     if (!isRecord(q) || !exactKeys(q, GAP_KEYS) || !isStr(q.question, CAPS.question, 1)) return null;
     if (q.targetId !== null && typeof q.targetId !== 'string') return null;
     const evidenceIds = pick(q.evidenceIds, allowed, 4);

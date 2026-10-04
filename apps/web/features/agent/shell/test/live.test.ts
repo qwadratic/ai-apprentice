@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { MockScreenBridge } from '@apprentice/contracts/mock';
 import type { ScreenBridge } from '@apprentice/contracts';
+import { TEACH_CASE_ID, liveWorkspaceBind } from '../screen/live-bind.ts';
 import { LiveMount } from '../screen/live-mount.ts';
 import { LIVE_LABEL } from '../screen/runtime-workspace-source.ts';
 import type { RuntimeWorkspaceMount, RuntimeWorkspaceOptions } from '../screen/runtime-workspace-source.ts';
@@ -187,6 +188,58 @@ test('the mount\'s capture is registered with the controller: its state shows, a
   assert.equal(rig.controller.store.getState().screen.capture.state, 'capturing');
   await rig.controller.end();
   assert.equal(capture.stops >= 1, true);
+});
+
+test('Pass it on opens the workspace on the new order (image only); Show keeps the practice order', async () => {
+  const rig = createRig();
+  const resets: Array<{ mode: string | null; caseId: string | undefined }> = [];
+  const ports: unknown[] = [];
+  const factory = (): RuntimeWorkspaceMount => {
+    const bridge = new MockScreenBridge(rig.clock.now(), (sessionId) => buildScenario('t1', sessionId));
+    // The part of A's WorkspaceController the shell's bind uses.
+    const workspace = {
+      reset: (caseId?: string) => { resets.push({ mode: rig.controller.store.getState().session?.mode ?? null, caseId }); },
+      setCheckpoint: (port?: unknown) => { ports.push(port); },
+    };
+    return { runtime: null, bridge: bridge as ScreenBridge, capture: new FakeCapture(), workspace, setOffRecord: async () => {}, dispose: () => {} };
+  };
+  const live = new LiveMount({
+    factory, controller: rig.controller, apiBase: '', providesWorkspace: true,
+    bind: liveWorkspaceBind({ host: rig.controller, now: () => rig.clock.now() }),
+  });
+  live.setRoots({ workspace: {} as HTMLElement, screen: {} as HTMLElement });
+
+  await rig.controller.start('learn');
+  await settle();
+  assert.equal(live.mountedFor(), 'sess-1');
+  assert.deepEqual(resets, [], 'Show keeps the workspace\'s first case, the practice order');
+  assert.equal(ports.length, 1, 'the checkpoint port is connected in Show too');
+  await rig.controller.end();
+  await settle();
+
+  await rig.controller.start('teach');
+  await settle();
+  assert.equal(TEACH_CASE_ID, 'new-image');
+  assert.deepEqual(resets, [{ mode: 'teach', caseId: 'new-image' }], 'Teach opens on the new order with the image only');
+  assert.equal(ports.length, 2, 'the checkpoint port is connected after the reset');
+  live.dispose();
+});
+
+test('a reset that fails is noted and the checkpoint port is still connected', async () => {
+  const rig = createRig();
+  const ports: unknown[] = [];
+  const factory = (): RuntimeWorkspaceMount => ({
+    runtime: null, bridge: new MockScreenBridge(rig.clock.now(), (sessionId) => buildScenario('t1', sessionId)) as ScreenBridge, capture: new FakeCapture(),
+    workspace: { reset: () => { throw new Error('Unknown demo case.'); }, setCheckpoint: (port?: unknown) => { ports.push(port); } },
+    setOffRecord: async () => {}, dispose: () => {},
+  });
+  const live = new LiveMount({ factory, controller: rig.controller, apiBase: '', providesWorkspace: true, bind: liveWorkspaceBind({ host: rig.controller, now: () => rig.clock.now() }) });
+  live.setRoots({ workspace: {} as HTMLElement, screen: {} as HTMLElement });
+  await rig.controller.start('teach');
+  await settle();
+  assert.equal(ports.length, 1);
+  assert.ok(rig.controller.store.getState().events.some((e) => /The new order could not be opened: Unknown demo case\./.test(e.text)));
+  live.dispose();
 });
 
 test('a screen-only mount (no workspace of its own) needs only the screen root', async () => {

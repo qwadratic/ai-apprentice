@@ -61,9 +61,9 @@ This is stream A's DEMO-REAL-3 proposal, cases 1 and 2. It presents best.
 - **Generic vision is new.** In the dry run, check that Gmail and Sheets each produce a question.
 - **Sheets has no Send-like action.** Typing into a cell is a weak pending action, so Pass it on uses the email.
 
-## Option B: the demo workspace (customer_07)
+## Option B: the demo workspace (customer_07) · Recommended
 
-The proven path: doc-10 v1, the order table, then the email, then the ticket. It does not depend on TASK-3.52.
+The proven path: doc-10 v1, the order table, then the email, then the ticket. It does not depend on TASK-3.52. It is the path of the reference video, and the step-by-step script is `docs/pitch/demo-script.md`; where the table below differs from it, the script wins.
 
 - **Processes:** one process across two surfaces (the order table and the email). The ticket close-out may come out as a second process, but do not promise it.
 
@@ -97,9 +97,7 @@ The workspace email from B, plus the Google Sheet from A.
 
 ## Recommendation
 
-1. **Show A** if TASK-3.52 and TASK-3.53 are deployed by 07:35 UTC and a 3-minute dry run passes: one question on Gmail, one on Sheets, and the warning before Send.
-2. **Otherwise show C**, if Sheets gave a question in the dry run.
-3. **Otherwise show B.**
+**Show B**, as in the reference video and `docs/pitch/demo-script.md`: one why-question in Show, one confirmed rule with its exception in Reflect, and in Pass it on the warning before Send on ORD-2057, then "Ready for review". A and C stay optional segments (real apps; see "Works on any app" in the script).
 
 Hold to these rules:
 
