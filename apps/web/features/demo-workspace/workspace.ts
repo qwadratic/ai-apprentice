@@ -116,6 +116,7 @@ export function createWorkspace(options: Options) {
     const abort = new AbortController();
     let complete!: () => void;
     const completion = new Promise<void>(resolve => { complete = resolve; });
+    let dispatched = false;
     const current = () => !disposed && active?.id === id && sameScope(scope, state.scope);
     function finish(check: CheckState) {
       if (!current()) return;
@@ -135,13 +136,15 @@ export function createWorkspace(options: Options) {
     void (async () => {
       try {
         const reply = await port.check(structuredClone(scope), abort.signal, () => {
-          if (!current() || state.check.status !== 'acquiring') return;
+          if (dispatched || !current() || state.check.status !== 'acquiring') return;
+          dispatched = true;
           clearTimeout(active!.timer);
           active!.timer = setTimeout(() => finish({ status: 'error', message: 'Agent reply timed out. Preview again before sending.' }), replyTimeoutMs);
           state.check = { status: 'pending', requestId: id };
           emit();
         });
         if (!current()) return;
+        if (!dispatched) throw new Error('The checkpoint was not dispatched after acquiring screen evidence.');
         if (!validOutcome(reply)) throw new Error('The agent returned an invalid check result.');
         finish({ ...structuredClone(reply), requestId: id });
       } catch (error) {

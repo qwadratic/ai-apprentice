@@ -186,6 +186,82 @@ test('off-record latched before a session blocks panel start and resume', async 
   instance.dispose();
 });
 
+test('failed app resume restores off-record privacy until a successful app resume', async () => {
+  const harness = createHarness(); let resumeCalls = 0; let frameCalls = 0; let generation = 1;
+  let failResume!: () => void; let markResumeRequested!: () => void;
+  const resumeRequested = new Promise<void>(resolve => { markResumeRequested = resolve; });
+  const failedResume = new Promise<Response>(resolve => { failResume = () => resolve(Response.json({ok: false}, {status: 503})); });
+  const instance = createScreenBridgeRuntime({apiBase: '', authHeader: () => 'Bearer browser-session-token-12345',
+    sourceRevision: () => 'email-r1', surface: () => 'email', captureRuntime: harness.runtime, frameIntervalMs: 1,
+    fetch: async (input, init) => {
+      const url = String(input);
+      if (url.endsWith('/start')) return Response.json({sessionId: 's', generation, nextCursor: 0,
+        status: {schemaVersion: 1, sessionId: 's', state: 'capturing'}}, {status: 201});
+      if (url.endsWith('/frames')) {
+        frameCalls++;
+        const body = JSON.parse(String(init?.body));
+        return Response.json({ok: true, outcome: 'accepted', sessionId: 's', generation, frameId: body.frameId}, {status: 202});
+      }
+      if (url.includes('/updates')) return Response.json({sessionId: 's', generation, observations: [], statuses: [], nextCursor: 0});
+      const command = JSON.parse(String(init?.body)).command as 'pause' | 'resume';
+      if (command === 'resume' && ++resumeCalls === 2) { markResumeRequested(); return failedResume; }
+      generation++;
+      return Response.json({sessionId: 's', generation, nextCursor: 0,
+        status: {schemaVersion: 1, sessionId: 's', state: command === 'resume' ? 'capturing' : 'paused'}});
+    }});
+  await instance.bridge.start({sessionId: 's', sessionEpochMs: 0});
+  instance.capture.confirmMasks(instance.capture.getSnapshot().geometry!.revision);
+  await instance.bridge.resume();
+  await instance.bridge.pause();
+
+  const resuming = instance.bridge.resume();
+  await resumeRequested;
+  const pausingAgain = instance.bridge.pause();
+  failResume();
+  await assert.rejects(resuming, /http_503/);
+  await pausingAgain;
+  await instance.panelController.resume();
+  await instance.panelController.start({sessionId: 's', sessionEpochMs: 0});
+  harness.step(); await tick(); await tick();
+  assert.equal(instance.capture.getSnapshot().state, 'paused');
+  assert.equal(frameCalls, 0, 'panel controls cannot upload after a failed app-owned resume');
+
+  await instance.bridge.resume();
+  harness.step(); await tick(); await tick();
+  assert.equal(instance.capture.getSnapshot().state, 'capturing');
+  assert.equal(frameCalls, 1, 'a successful app-owned resume releases the privacy latch');
+  instance.dispose();
+});
+
+test('a runtime starts each session id once and accepts a distinct app session', async () => {
+  const harness = createHarness(); let pickerCalls = 0; let startCalls = 0;
+  harness.runtime.getDisplayMedia = async () => { pickerCalls++; return harness.stream as unknown as MediaStream; };
+  const instance = createScreenBridgeRuntime({apiBase: '', authHeader: () => 'Bearer browser-session-token-12345',
+    sourceRevision: () => null, captureRuntime: harness.runtime, fetch: async (input, init) => {
+      const url = new URL(String(input), 'https://test');
+      const sessionId = decodeURIComponent(url.pathname.split('/')[3]!);
+      if (url.pathname.endsWith('/start')) {
+        startCalls++;
+        return Response.json({sessionId, generation: 1, nextCursor: 0,
+          status: {schemaVersion: 1, sessionId, state: 'capturing'}}, {status: 201});
+      }
+      const body = JSON.parse(String(init?.body));
+      return Response.json({sessionId, generation: body.generation + 1, nextCursor: 0,
+        status: {schemaVersion: 1, sessionId, state: 'stopped'}}, {status: 200});
+    }});
+  await instance.bridge.start({sessionId: 'first', sessionEpochMs: 0});
+  await instance.bridge.stop();
+  await assert.rejects(instance.panelController.start({sessionId: 'first', sessionEpochMs: 0}),
+    /Start a new app session/);
+  assert.equal(pickerCalls, 1, 'a rejected repeated session must not reopen the picker');
+  assert.equal(startCalls, 1, 'a rejected repeated session must not reach the server');
+
+  await instance.panelController.start({sessionId: 'second', sessionEpochMs: 10});
+  assert.equal(pickerCalls, 2);
+  assert.equal(startCalls, 2);
+  instance.dispose();
+});
+
 function observation() {
   return {schemaVersion: 1, id: 'o', sessionId: 's', sequence: 1, timestampMs: 1, source: 'vision', frameId: 'f',
     sourceRevision: 'order-r1', kind: 'order_view', facts: {customerRef: null, orderId: null, deliveryAddress: null, deliveryWindow: null},

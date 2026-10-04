@@ -97,6 +97,7 @@ class Runtime implements ScreenBridgeRuntime {
   #workspaceScope: WorkspaceScope | null = null;
   #waiters = new Set<ObservationWaiter>();
   #pendingCheckpoint: PendingCheckpoint | null = null;
+  readonly #startedSessionIds = new Set<string>();
 
   constructor(options: ScreenBridgeRuntimeOptions) {
     if (!options || typeof options.apiBase !== 'string' || typeof options.authHeader !== 'function' ||
@@ -164,6 +165,10 @@ class Runtime implements ScreenBridgeRuntime {
   async #start(value: SessionStart): Promise<void> {
     if (this.#disposed) throw new Error('Screen bridge has been disposed.');
     const session = parseSessionStart(value);
+    if (this.#startedSessionIds.has(session.sessionId)) {
+      throw new Error('Screen session cannot be restarted. Start a new app session before capturing again.');
+    }
+    this.#startedSessionIds.add(session.sessionId);
     this.#invalidateWorkspace(new DOMException('Screen session changed.', 'AbortError'), true);
     this.#timelineSequence = 0;
     this.#closeActive();
@@ -247,6 +252,7 @@ class Runtime implements ScreenBridgeRuntime {
         active.serverReady = true; this.#emitStatus('capturing'); this.#schedulePoll(active, 0);
       }
     } catch (error) {
+      if (appOwned) this.#offRecord = true;
       if (this.#current(active, privacyGeneration)) {
         this.#captureCommand = true; try { this.capture.pause('user-paused'); } finally { this.#captureCommand = false; }
         this.#emitStatus('error', transportReason(error));
