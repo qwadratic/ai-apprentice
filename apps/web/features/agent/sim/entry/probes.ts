@@ -71,6 +71,8 @@ export interface CaptureReport {
 
 export interface Capture {
   report(): CaptureReport;
+  /** The current frame of the shared screen as a PNG data URL (full size), or null before the first frame. */
+  snapshot(): string | null;
   stop(): void;
 }
 
@@ -100,6 +102,14 @@ export async function startCaptureProbe(devices: MediaDevices): Promise<Capture>
   };
   let nonBlank = sampleNonBlank();
   return {
+    snapshot: () => {
+      if (video.videoWidth === 0) return null;
+      const full = document.createElement('canvas');
+      full.width = video.videoWidth;
+      full.height = video.videoHeight;
+      full.getContext('2d')?.drawImage(video, 0, 0);
+      return full.toDataURL('image/png');
+    },
     report: () => {
       nonBlank = nonBlank || sampleNonBlank();
       const settings = track.getSettings() as MediaTrackSettings & { displaySurface?: string };

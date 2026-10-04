@@ -130,3 +130,59 @@ test('?sim= decides: the guard installs for expert and newhire and touches nothi
   assert.ok(Object.prototype.hasOwnProperty.call(on, 'getUserMedia'));
   result?.media.restore();
 });
+
+// ---- the screen fallback (browsers that cannot capture a tab) ------------------------------------------------------------
+
+function fallbackStream(): { calls: number; provider: () => Promise<MediaStream>; stream: MediaStream } {
+  const stream = asStream(new FakeStream([new FakeTrack('video')]));
+  const state = { calls: 0, stream, provider: (): Promise<MediaStream> => { state.calls += 1; return Promise.resolve(stream); } };
+  return state;
+}
+
+test('fallback: a tab capture that works is used and the fallback stays unused', async () => {
+  const devices = new FakeMediaDevices();
+  const fb = fallbackStream();
+  const installed = installSimMedia({ mic: fakeMic(), mediaDevices: devices, screen: { fallback: fb.provider } });
+  const stream = await devices.getDisplayMedia({ video: true });
+  assert.notEqual(stream, fb.stream);
+  assert.equal(fb.calls, 0);
+  assert.deepEqual(installed.calls.at(-1), { kind: 'getDisplayMedia', synthetic: true, via: 'tab' });
+});
+
+test('fallback: a tab capture that fails (NotReadableError in headless Chrome) falls back to the screen source', async () => {
+  const devices = new FakeMediaDevices();
+  devices.getDisplayMedia = (): Promise<MediaStream> => Promise.reject(new DOMException('Could not start video source', 'NotReadableError'));
+  const fb = fallbackStream();
+  const installed = installSimMedia({ mic: fakeMic(), mediaDevices: devices, screen: { fallback: fb.provider } });
+  assert.equal(await devices.getDisplayMedia!({ video: true }), fb.stream);
+  assert.equal(fb.calls, 1);
+  assert.deepEqual(installed.calls.at(-1), { kind: 'getDisplayMedia', synthetic: true, via: 'fallback' });
+});
+
+test('fallback: a tab capture that never answers falls back after the timeout, and a late stream is ended', async () => {
+  const devices = new FakeMediaDevices();
+  const late = new FakeStream([new FakeTrack('video')]);
+  let answer: (s: MediaStream) => void = () => undefined;
+  devices.getDisplayMedia = (): Promise<MediaStream> => new Promise((resolve) => { answer = resolve; });
+  const fb = fallbackStream();
+  installSimMedia({ mic: fakeMic(), mediaDevices: devices, screen: { fallback: fb.provider, timeoutMs: 30 } });
+  assert.equal(await devices.getDisplayMedia!({ video: true }), fb.stream);
+  answer(asStream(late));
+  await new Promise((r) => setTimeout(r, 5));
+  assert.ok(late.tracks.every((t) => t.stopped), 'the late capture was ended');
+});
+
+test('fallback: forceFallback skips the real call; without a fallback a failing capture still fails', async () => {
+  const devices = new FakeMediaDevices();
+  const fb = fallbackStream();
+  installSimMedia({ mic: fakeMic(), mediaDevices: devices, screen: { fallback: fb.provider, forceFallback: true } }).restore();
+  const forced = new FakeMediaDevices();
+  installSimMedia({ mic: fakeMic(), mediaDevices: forced, screen: { fallback: fb.provider, forceFallback: true } });
+  assert.equal(await forced.getDisplayMedia({ video: true }), fb.stream);
+  assert.equal(forced.displayCalls.length, 0, 'the real call was never made');
+
+  const failing = new FakeMediaDevices();
+  failing.getDisplayMedia = (): Promise<MediaStream> => Promise.reject(new DOMException('no', 'NotReadableError'));
+  installSimMedia({ mic: fakeMic(), mediaDevices: failing });
+  await assert.rejects(failing.getDisplayMedia!({ video: true }), /no/);
+});

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createPersonaDriver } from '../driver.ts';
+import { DEFAULT_VISION_LAG_MS, createPersonaDriver } from '../driver.ts';
 import type { DriverLog, PersonaDriver } from '../driver.ts';
 import { EXPERT, NEW_HIRE } from '../personas.ts';
 import type { Persona } from '../personas.ts';
@@ -11,7 +11,7 @@ import { FakeWorkspace, VirtualClock } from './helpers.ts';
 
 const PLAY_MS = 2500;
 
-function setup(persona: Persona = EXPERT, options: { checks?: CheckStatus[]; thinkScale?: number; micFails?: boolean } = {}) {
+function setup(persona: Persona = EXPERT, options: { checks?: CheckStatus[]; thinkScale?: number; micFails?: boolean; visionLagMs?: number } = {}) {
   const clock = new VirtualClock();
   const workspace = new FakeWorkspace(clock);
   if (options.checks) workspace.checks = options.checks;
@@ -32,6 +32,8 @@ function setup(persona: Persona = EXPERT, options: { checks?: CheckStatus[]; thi
     mic,
     clock,
     onLog: (e) => logs.push(e),
+    // Most tests run without the vision lag so their timings stay simple; the lag has its own tests.
+    visionLagMs: options.visionLagMs ?? 0,
     ...(options.thinkScale === undefined ? {} : { thinkScale: options.thinkScale }),
   });
   return { clock, workspace, played, logs, driver };
@@ -246,4 +248,53 @@ test('pauses are real: the persona stays still for the whole pause so the agent 
   assert.ok(removed && nextAction);
   assert.ok(nextAction.atMs - removed.atMs >= 6000, `${nextAction.atMs - removed.atMs} ms`);
   assert.ok(workspace.calls.length > 0);
+});
+
+// ---- vision lag --------------------------------------------------------------------------------------------------------
+
+/** The time between two logged steps (by their first occurrence after `after`). */
+function gap(logs: DriverLog[], from: string, to: string): number {
+  const a = logs.find((l) => l.kind === 'step' && l.text === from);
+  const b = logs.find((l) => l.kind === 'step' && l.text === to && l.atMs > (a?.atMs ?? 0));
+  assert.ok(a && b, `${from} then ${to}`);
+  return b.atMs - a.atMs;
+}
+
+test('vision lag: a pause lasts the vision lag longer, so the agent has seen the change before the quiet starts', async () => {
+  const none = setup(EXPERT, { visionLagMs: 0 });
+  await none.clock.run(none.driver.run(EXPERT_LEARN));
+  const lagged = setup(EXPERT, { visionLagMs: 5000 });
+  await lagged.clock.run(lagged.driver.run(EXPERT_LEARN));
+  const base = gap(none.logs, 'remove_image', 'type');
+  const slow = gap(lagged.logs, 'remove_image', 'type');
+  assert.ok(slow - base >= 4000, `${base} ms without the lag, ${slow} ms with it`);
+  assert.ok(slow >= 11_000, 'at least the pause (7 s) plus the lag (5 s), minus the jitter');
+});
+
+test('vision lag: a change that no pause follows is given settle time before the next action', async () => {
+  const { clock, driver, logs } = setup(NEW_HIRE, { checks: ['clear'], visionLagMs: 5000 });
+  await clock.run(driver.run(NEW_HIRE_T3));
+  // open -> look: the order has to be seen first; send -> look: the sent state has to be seen first.
+  assert.ok(gap(logs, 'open', 'look') >= 4500, `open to look ${gap(logs, 'open', 'look')} ms`);
+  assert.ok(gap(logs, 'send', 'look') >= 4500, `send to look ${gap(logs, 'send', 'look')} ms`);
+});
+
+test('vision lag: typing that is followed straight by Preview is settled before the Preview, and without a lag it is not', async () => {
+  const lagged = setup(NEW_HIRE, { checks: ['warn', 'clear'], visionLagMs: 5000 });
+  await lagged.clock.run(lagged.driver.run(NEW_HIRE_T1));
+  const typedAt = lagged.logs.filter((l) => l.kind === 'step' && l.text === 'type').at(-1);
+  const previewAfter = lagged.logs.filter((l) => l.kind === 'step' && l.text === 'preview' && l.atMs > (typedAt?.atMs ?? 0))[0];
+  assert.ok(typedAt && previewAfter);
+  // The step is logged when it starts: the gap holds the typing itself (2 s in the fake) plus the settle time.
+  assert.ok(previewAfter.atMs - typedAt.atMs >= 2000 + 4500, `${previewAfter.atMs - typedAt.atMs} ms`);
+  const plain = setup(NEW_HIRE, { checks: ['warn', 'clear'], visionLagMs: 0 });
+  await plain.clock.run(plain.driver.run(NEW_HIRE_T1));
+  const typed0 = plain.logs.filter((l) => l.kind === 'step' && l.text === 'type').at(-1);
+  const preview0 = plain.logs.filter((l) => l.kind === 'step' && l.text === 'preview' && l.atMs > (typed0?.atMs ?? 0))[0];
+  assert.ok(typed0 && preview0);
+  assert.ok(preview0.atMs - typed0.atMs < 3000);
+});
+
+test('the default vision lag matches what was measured on the live stack (4 to 6 s per frame)', () => {
+  assert.ok(DEFAULT_VISION_LAG_MS >= 4000 && DEFAULT_VISION_LAG_MS <= 7000);
 });

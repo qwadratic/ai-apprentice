@@ -66,6 +66,12 @@ export interface PersonaDriverOptions {
   thinkScale?: number;
   /** The longest the persona waits for the agent to finish talking before it answers anyway. */
   maxWaitForAgentMs?: number;
+  /**
+   * How long the agent's vision needs to see a change on screen (measured on the live stack: 4 to 6 s per frame). After a
+   * change that no pause follows the persona waits this long, and every `pause` step lasts this much longer, so the agent
+   * has seen each change before the next action. Default 5000; use 0 against a stub agent that reads the DOM.
+   */
+  visionLagMs?: number;
 }
 
 export interface PersonaDriver {
@@ -84,13 +90,18 @@ export interface PersonaDriver {
 }
 
 const POLL_MS = 100;
-const CHECK_TIMEOUT_MS = 30_000;
+/** The Preview check waits for a fresh observation (vision, 4 to 6 s) and the agent's reply. */
+const CHECK_TIMEOUT_MS = 60_000;
+/** Steps that change what is on screen: the agent has to see the result before the next action. */
+const CHANGES_THE_SCREEN: ReadonlySet<TaskStep['do']> = new Set(['open', 'remove_image', 'attach_image', 'type', 'ack', 'send', 'resolve']);
+export const DEFAULT_VISION_LAG_MS = 5000;
 
 export function createPersonaDriver(options: PersonaDriverOptions): PersonaDriver {
   const { persona, workspace, mic, clock } = options;
   const rng = options.rng ?? createRng(11);
   const thinkScale = options.thinkScale ?? 1;
   const maxWaitForAgentMs = options.maxWaitForAgentMs ?? 20_000;
+  const visionLagMs = Math.max(0, options.visionLagMs ?? DEFAULT_VISION_LAG_MS);
   const log = (kind: DriverLogKind, text: string, data?: DriverLog['data']): void => {
     const entry: DriverLog = { atMs: clock.now(), kind, text };
     if (data) entry.data = data;
@@ -190,7 +201,8 @@ export function createPersonaDriver(options: PersonaDriverOptions): PersonaDrive
         return;
       case 'pause': {
         const startedAtMs = clock.now();
-        await clock.sleep(jittered(rng, step.ms, 0.1));
+        // The quiet the agent needs starts only when it has SEEN the last change: add the vision lag.
+        await clock.sleep(jittered(rng, step.ms + visionLagMs, 0.1));
         // The agent may start talking only now (it needs a moment to notice the pause): give it a grace period.
         if (!busy() && (step.graceMs ?? 0) > 0) await waitFor(() => busy() || lastAgentSpeechAtMs >= startedAtMs, step.graceMs ?? 0);
         // Then wait until the agent has finished and the persona has finished its answer.
@@ -231,9 +243,21 @@ export function createPersonaDriver(options: PersonaDriverOptions): PersonaDrive
         return;
       case 'if_check': {
         const status = workspace.checkResult().status;
-        const branch = step.status.includes(status) ? step.then : (step.else ?? []);
-        for (const inner of branch) await runStep(inner);
+        await runSteps(step.status.includes(status) ? step.then : (step.else ?? []));
         return;
+      }
+    }
+  };
+
+  /** Runs steps in order. A change on screen that no pause follows gets a settle time, so the agent's vision can catch up. */
+  const runSteps = async (steps: readonly TaskStep[]): Promise<void> => {
+    for (let i = 0; i < steps.length; i += 1) {
+      const step = steps[i];
+      if (step === undefined) continue;
+      await runStep(step);
+      const next = steps[i + 1];
+      if (visionLagMs > 0 && !stopped && next !== undefined && next.do !== 'pause' && CHANGES_THE_SCREEN.has(step.do)) {
+        await clock.sleep(jittered(rng, visionLagMs, 0.1));
       }
     }
   };
@@ -256,7 +280,7 @@ export function createPersonaDriver(options: PersonaDriverOptions): PersonaDrive
       log('note', `task ${task.id}: ${task.title}`);
       let completed = false;
       try {
-        for (const step of task.steps) await runStep(step);
+        await runSteps(task.steps);
         completed = !stopped;
       } catch (error) {
         log('error', error instanceof Error ? error.message : String(error));

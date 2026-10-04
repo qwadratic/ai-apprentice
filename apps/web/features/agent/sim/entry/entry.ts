@@ -4,6 +4,9 @@
 // whole run needs no ElevenLabs, brain or network. The page says so, and it says the persona is synthetic.
 //
 // Query: ?sim=expert|newhire (required: without it nothing is installed and the page only explains itself),
+//        ?capture=auto|tab|canvas  auto (default) shares this tab and falls back to a canvas painting of the desktop when the
+//                                  browser cannot capture a tab (headless Chrome); tab never falls back; canvas always paints,
+//        ?lag=MS the agent's vision lag the persona leaves room for (default 0: the stub agent reads the DOM, not pixels),
 //        ?monitor=1 plays the persona's voice through the speakers, ?speed=N compresses waits (clips still play in real time).
 // Start needs a click: getDisplayMedia and the audio context need a user gesture.
 import { createDemoWorkspaceActions, createDomPort } from '../workspace-dom.ts';
@@ -21,6 +24,8 @@ import type { InstalledSimMedia } from '../sim-media.ts';
 import { createSyntheticMic } from '../synthetic-mic.ts';
 import { EXPERT_LEARN, NEW_HIRE_T1 } from '../tasks.ts';
 import { mountSimDesktop } from '../desktop/desktop.ts';
+import { createCanvasScreen } from '../desktop/canvas-screen.ts';
+import type { CanvasScreen } from '../desktop/canvas-screen.ts';
 import '../desktop/desktop.css';
 import './entry.css';
 import { startCaptureProbe, startEars } from './probes.ts';
@@ -36,7 +41,7 @@ export interface SimPageState {
   answered: Array<{ topic: string; clipId: string; known: boolean }>;
   asked: Array<{ topic: string; text: string }>;
   mediaCalls: InstalledSimMedia['calls'];
-  capture: CaptureReport | null;
+  capture: (CaptureReport & { source: 'tab' | 'canvas' | null }) | null;
   ears: EarsReport | null;
   error: string | null;
   workspace: { sent: boolean; ticket: string; attachments: number; check: string } | null;
@@ -45,11 +50,17 @@ export interface SimPageState {
 declare global {
   interface Window {
     __sim?: SimPageState;
+    /** The shared screen at the end of the run, a PNG data URL (kept out of __sim: it is large). */
+    __simFrame?: string | null;
   }
 }
 
 const params = new URLSearchParams(location.search);
 const speed = Number(params.get('speed') ?? '1') || 1;
+const lagParam = params.get('lag');
+const visionLagMs = lagParam === null ? 0 : Math.max(0, Number(lagParam) || 0);
+const captureParam = params.get('capture');
+const captureMode: 'auto' | 'tab' | 'canvas' = captureParam === 'tab' || captureParam === 'canvas' ? captureParam : 'auto';
 const personaId = simModeFromSearch(location.search);
 const root = document.getElementById('sim-root');
 if (!root) throw new Error('the page has no #sim-root');
@@ -171,6 +182,8 @@ async function boot(persona: Persona): Promise<void> {
     let media: InstalledSimMedia | null = null;
     let ears: ReturnType<typeof startEars> | null = null;
     let capture: Awaited<ReturnType<typeof startCaptureProbe>> | null = null;
+    // Assigned inside the fallback callback below, so it lives in an object (TypeScript cannot follow a closure's assignment).
+    const painted: { screen: CanvasScreen | null } = { screen: null };
     const mic = createSyntheticMic({
       loadClip: fetchClip,
       monitor: params.get('monitor') === '1',
@@ -179,7 +192,20 @@ async function boot(persona: Persona): Promise<void> {
       },
     });
     try {
-      const installed = installSimMediaIfRequested(location.search, { mic });
+      const installed = installSimMediaIfRequested(location.search, {
+        mic,
+        screen:
+          captureMode === 'tab'
+            ? true
+            : {
+                // Headless Chrome cannot capture a tab: paint the desktop into a canvas instead (the real call is tried first).
+                fallback: () => {
+                  painted.screen = createCanvasScreen(desktop.root);
+                  return Promise.resolve(painted.screen.stream);
+                },
+                forceFallback: captureMode === 'canvas',
+              },
+      });
       if (!installed) throw new Error('?sim= is not set: the shims were not installed');
       media = installed.media;
       state.mediaCalls = media.calls;
@@ -199,6 +225,7 @@ async function boot(persona: Persona): Promise<void> {
         workspace: workspaceActions,
         mic,
         clock,
+        visionLagMs,
         onLog: (entry: DriverLog) => {
           if (entry.kind === 'step' || entry.kind === 'agent_speaking') return;
           addLog('persona', `${entry.kind}: ${entry.text}`);
@@ -219,7 +246,13 @@ async function boot(persona: Persona): Promise<void> {
       state.report = report;
       state.answered = driver.answered.map((a) => ({ topic: a.topic, clipId: a.clipId, known: a.known }));
       state.asked = [...stub.asked];
-      state.capture = capture.report();
+      const via = media.calls.filter((c) => c.kind === 'getDisplayMedia').at(-1)?.via;
+      window.__simFrame = capture.snapshot();
+      state.capture = { ...capture.report(), source: via === 'fallback' ? 'canvas' : via === 'tab' ? 'tab' : null };
+      if (painted.screen) {
+        const err = painted.screen.lastError();
+        addLog('sim', `the screen share is a canvas painting of the desktop (${painted.screen.framesPainted()} frames painted${err ? `, error: ${err}` : ''})`);
+      }
       state.ears = ears.report();
       state.workspace = readWorkspace();
       state.status = 'done';
@@ -234,6 +267,7 @@ async function boot(persona: Persona): Promise<void> {
       stub?.stop();
       ears?.stop();
       capture?.stop();
+      painted.screen?.stop();
       mic.stop();
       media?.restore();
       document.body.dataset['simStatus'] = state.status;

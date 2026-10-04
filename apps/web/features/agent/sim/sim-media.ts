@@ -14,6 +14,16 @@ export interface MediaDevicesLike {
 export interface ScreenShimOptions {
   /** Extra getDisplayMedia options, applied before the caller's own and the two the shim always sets. */
   extra?: Record<string, unknown>;
+  /**
+   * A screen source for browsers that cannot capture a tab (headless Chrome fails with NotReadableError, or hangs): for
+   * example a canvas.captureStream() of the simulated desktop (see desktop/canvas-screen.ts). Used when the real call
+   * rejects or does not answer within `timeoutMs`, or always when `forceFallback` is set.
+   */
+  fallback?: () => Promise<MediaStream>;
+  /** How long the real getDisplayMedia may take before the fallback is used (default 8000). Only with `fallback`. */
+  timeoutMs?: number;
+  /** Skip the real getDisplayMedia and use the fallback (for tests of the fallback itself). */
+  forceFallback?: boolean;
 }
 
 export interface InstallSimMediaOptions {
@@ -30,7 +40,7 @@ export interface InstalledSimMedia {
   /** Puts the original getUserMedia and getDisplayMedia back. Idempotent. */
   restore(): void;
   /** What the shims did, for the log and the tests. */
-  readonly calls: ReadonlyArray<{ kind: 'getUserMedia' | 'getDisplayMedia'; synthetic: boolean }>;
+  readonly calls: ReadonlyArray<{ kind: 'getUserMedia' | 'getDisplayMedia'; synthetic: boolean; via?: 'tab' | 'fallback' }>;
 }
 
 export class SimMediaInstalledError extends Error {
@@ -69,7 +79,7 @@ export function installSimMedia(options: InstallSimMediaOptions): InstalledSimMe
   if (Reflect.get(target, INSTALLED) === true) throw new SimMediaInstalledError();
 
   const makeStream = options.createStream ?? ((tracks: MediaStreamTrack[]) => new MediaStream(tracks));
-  const calls: Array<{ kind: 'getUserMedia' | 'getDisplayMedia'; synthetic: boolean }> = [];
+  const calls: Array<{ kind: 'getUserMedia' | 'getDisplayMedia'; synthetic: boolean; via?: 'tab' | 'fallback' }> = [];
   const originalUserMedia = target.getUserMedia.bind(target);
   const userMediaSlot = slotOf(target, 'getUserMedia');
 
@@ -92,12 +102,55 @@ export function installSimMedia(options: InstallSimMediaOptions): InstalledSimMe
   if (screen !== false) {
     const originalDisplay = target.getDisplayMedia?.bind(target);
     displaySlot = slotOf(target, 'getDisplayMedia');
-    const extra = typeof screen === 'object' ? (screen.extra ?? {}) : {};
-    const getDisplayMedia = (request?: unknown): Promise<MediaStream> => {
-      calls.push({ kind: 'getDisplayMedia', synthetic: true });
+    const screenOptions: ScreenShimOptions = typeof screen === 'object' ? screen : {};
+    const extra = screenOptions.extra ?? {};
+    const fallback = screenOptions.fallback;
+    const timeoutMs = screenOptions.timeoutMs ?? 8000;
+    const real = (request?: unknown): Promise<MediaStream> => {
       if (!originalDisplay) return Promise.reject(new Error('getDisplayMedia is not supported by this browser'));
       const given = typeof request === 'object' && request !== null ? (request as Record<string, unknown>) : {};
       return originalDisplay({ video: true, audio: false, ...extra, ...given, ...CURRENT_TAB_OPTIONS });
+    };
+    const getDisplayMedia = async (request?: unknown): Promise<MediaStream> => {
+      if (!fallback) {
+        calls.push({ kind: 'getDisplayMedia', synthetic: true, via: 'tab' });
+        return real(request);
+      }
+      if (!screenOptions.forceFallback) {
+        const attempt = real(request);
+        // A call that answers after the timeout is not wanted any more: end its tracks when it arrives.
+        let timedOut = false;
+        attempt.then(
+          (late) => {
+            if (timedOut) for (const track of late.getTracks()) track.stop();
+          },
+          () => undefined,
+        );
+        try {
+          const stream = await new Promise<MediaStream>((resolve, reject) => {
+            const timer = setTimeout(() => {
+              timedOut = true;
+              reject(new Error(`getDisplayMedia did not answer within ${timeoutMs} ms`));
+            }, timeoutMs);
+            attempt.then(
+              (s) => {
+                clearTimeout(timer);
+                resolve(s);
+              },
+              (e: unknown) => {
+                clearTimeout(timer);
+                reject(e instanceof Error ? e : new Error(String(e)));
+              },
+            );
+          });
+          calls.push({ kind: 'getDisplayMedia', synthetic: true, via: 'tab' });
+          return stream;
+        } catch {
+          // fall through to the fallback source
+        }
+      }
+      calls.push({ kind: 'getDisplayMedia', synthetic: true, via: 'fallback' });
+      return fallback();
     };
     Reflect.set(target, 'getDisplayMedia', getDisplayMedia);
   }

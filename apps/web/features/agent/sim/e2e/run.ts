@@ -3,7 +3,15 @@
 //   node apps/web/features/agent/sim/e2e/run.ts                      the synthetic expert does the Learn task (default)
 //   SIM_E2E_PERSONA=newhire node .../run.ts                          the synthetic new hire does Teach T1
 //   SIM_E2E_OUT=/some/dir node .../run.ts                            where the video and report.json go (default: .e2e-out/ next to this file)
-//   SIM_E2E_HEADED=1 node .../run.ts                                 a visible browser instead of headless
+//   SIM_E2E_MODE=auto|headed|headless node .../run.ts                how the browser runs (default auto, see below)
+//   SIM_E2E_LAG=5000 node .../run.ts                                 the vision lag the persona leaves room for (default 0: the stub reads the DOM)
+//
+// Modes. headed: a real (headful) Chromium; without an X server the script starts itself again under `xvfb-run -a` (Xvfb is
+// installed on the VM). The page shares ITS OWN TAB with getDisplayMedia({preferCurrentTab}) and --auto-accept-this-tab-capture:
+// real pixels, the same path as the product. headless: headless Chrome cannot capture a tab (NotReadableError or a hang), so
+// the page paints the simulated desktop into a canvas and shares canvas.captureStream() instead (?capture=canvas). auto picks
+// headed when a display or xvfb-run exists and headless otherwise. Never add --use-fake-ui-for-media-stream: it breaks
+// getDisplayMedia, and the synthetic microphone does not need it. Do not use --auto-select-tab-capture-source-by-title: it hangs.
 //
 // What it does: starts the Vite dev server for apps/web on a free port, launches Chromium with the fake-UI and tab-capture
 // auto-accept flags, opens the simulation page with ?sim=<persona>, clicks Start (a real click: getDisplayMedia needs a user
@@ -14,7 +22,7 @@
 //
 // Playwright is not a dependency of the repo: it is looked up in the working directory and in the global node_modules
 // (npm i -g playwright). The live-stack run (real ElevenLabs agent, real brain) is a later step: it needs the shell.
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer as createNetServer } from 'node:net';
 import type { AddressInfo } from 'node:net';
@@ -48,7 +56,7 @@ interface PwContext {
 }
 interface PwBrowser {
   newContext(options: {
-    viewport: { width: number; height: number };
+    viewport: { width: number; height: number } | null;
     recordVideo?: { dir: string; size: { width: number; height: number } };
   }): Promise<PwContext>;
   close(): Promise<void>;
@@ -123,7 +131,7 @@ interface SimReport {
   answered: Array<{ topic: string; clipId: string; known: boolean }>;
   asked: Array<{ topic: string; text: string }>;
   mediaCalls: Array<{ kind: string; synthetic: boolean }>;
-  capture: { displaySurface: string | null; width: number; height: number; nonBlank: boolean; trackState: string } | null;
+  capture: { source: string | null; displaySurface: string | null; width: number; height: number; nonBlank: boolean; trackState: string } | null;
   ears: { speechMs: number; utterances: number; peak: number } | null;
   workspace: { sent: boolean; ticket: string; attachments: number; check: string } | null;
 }
@@ -154,7 +162,40 @@ const FRAME_COUNTER = `
 })();
 `;
 
+type Mode = 'headed' | 'headless';
+
+function hasCommand(name: string): boolean {
+  try {
+    execFileSync('which', [name], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The mode to run in. For headed without a display the caller starts xvfb-run (see main). */
+function chooseMode(): Mode {
+  const wanted = (process.env['SIM_E2E_MODE'] ?? 'auto').toLowerCase();
+  if (wanted === 'headed' || wanted === 'headless') return wanted;
+  return process.env['DISPLAY'] || hasCommand('xvfb-run') ? 'headed' : 'headless';
+}
+
+// Headless: a fixed viewport (the page is painted into a canvas, so nothing is clipped). Headed: the real window decides.
+const HEADLESS_VIEW = { width: 1440, height: 760 };
+const HEADED_VIDEO = { width: 1280, height: 720 };
+
 async function main(): Promise<void> {
+  const mode = chooseMode();
+  if (mode === 'headed' && !process.env['DISPLAY']) {
+    if (!hasCommand('xvfb-run')) throw new Error('headed mode needs a display: set DISPLAY or install xvfb-run (or use SIM_E2E_MODE=headless)');
+    // No X server: start this script again under Xvfb (a big virtual screen, so the window is never clipped).
+    const again = spawnSync('xvfb-run', ['-a', '-s', '-screen 0 1700x1100x24', process.execPath, ...process.execArgv, ...process.argv.slice(1)], {
+      stdio: 'inherit',
+      env: { ...process.env, SIM_E2E_MODE: 'headed' },
+    });
+    process.exitCode = again.status ?? 1;
+    return;
+  }
   const persona = (process.env['SIM_E2E_PERSONA'] ?? 'expert').toLowerCase().replace(/[-_ ]/g, '') === 'newhire' ? 'newhire' : 'expert';
   const here = dirname(fileURLToPath(import.meta.url));
   const webRoot = join(here, '..', '..', '..', '..');
@@ -181,20 +222,21 @@ async function main(): Promise<void> {
 
   const browser = await pw.chromium.launch({
     ...(executablePath ? { executablePath } : {}),
-    headless: process.env['SIM_E2E_HEADED'] !== '1',
+    headless: mode === 'headless',
     args: [
       '--auto-accept-this-tab-capture',
       '--autoplay-policy=no-user-gesture-required',
       '--no-sandbox',
-      // --use-fake-ui-for-media-stream makes getDisplayMedia pick a fake source and fail ("Could not start video source"),
-      // and the simulation needs it for nothing: getUserMedia is the synthetic microphone. Opt in for the live stack only.
-      ...(process.env['SIM_E2E_FAKE_UI'] === '1' ? ['--use-fake-ui-for-media-stream'] : []),
+      ...(mode === 'headed' ? ['--window-size=1440,900', '--window-position=0,0'] : []),
     ],
   });
   let exitCode = 0;
   try {
     // ---- the run -------------------------------------------------------------------------------------------------------
-    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, recordVideo: { dir: outDir, size: { width: 1440, height: 900 } } });
+    const context =
+      mode === 'headed'
+        ? await browser.newContext({ viewport: null, recordVideo: { dir: outDir, size: HEADED_VIDEO } })
+        : await browser.newContext({ viewport: HEADLESS_VIEW, recordVideo: { dir: outDir, size: HEADLESS_VIEW } });
     const page = await context.newPage();
     const consoleErrors: string[] = [];
     const pageErrors: string[] = [];
@@ -203,7 +245,8 @@ async function main(): Promise<void> {
     });
     page.on('pageerror', (e) => pageErrors.push(e.message));
     await page.addInitScript({ content: FRAME_COUNTER });
-    await page.goto(pageUrl(`?sim=${persona}`));
+    const lag = process.env['SIM_E2E_LAG'] ?? '0';
+    await page.goto(pageUrl(`?sim=${persona}&capture=${mode === 'headed' ? 'tab' : 'canvas'}&lag=${lag}`));
     await page.waitForFunction('document.querySelector("[data-sim-start]") !== null');
     await page.bringToFront();
     const startedAt = Date.now();
@@ -217,6 +260,10 @@ async function main(): Promise<void> {
     const frames = (await page.evaluate('JSON.stringify(window.__frameCounter)')) as string;
     const frameState = JSON.parse(frames) as { frames: number; hiddenSamples: number; samples: number };
     const bodyText = String(await page.evaluate('document.body.innerText'));
+    const frameUrl = await page.evaluate('window.__simFrame || null');
+    if (typeof frameUrl === 'string' && frameUrl.startsWith('data:image/png;base64,')) {
+      writeFileSync(join(outDir, 'shared-screen-last-frame.png'), Buffer.from(frameUrl.slice('data:image/png;base64,'.length), 'base64'));
+    }
     const videoPath = (await page.video()?.path()) ?? null;
     await context.close();
 
@@ -232,7 +279,11 @@ async function main(): Promise<void> {
       'the page used the shimmed getUserMedia and getDisplayMedia',
     );
     check(report.capture?.nonBlank === true, `the shared screen delivered real frames (${report.capture?.width}x${report.capture?.height})`);
-    check(report.capture?.displaySurface === 'browser' || report.capture?.displaySurface === null, `the shared surface is this tab (displaySurface ${report.capture?.displaySurface})`);
+    if (mode === 'headed') {
+      check(report.capture?.source === 'tab' && report.capture.displaySurface === 'browser', `the shared surface is this tab (source ${report.capture?.source}, displaySurface ${report.capture?.displaySurface})`);
+    } else {
+      check(report.capture?.source === 'canvas', `headless: the shared surface is a canvas painting of the desktop (source ${report.capture?.source})`);
+    }
     check(frameState.frames > 10 * (elapsedMs / 1000), `animation frames kept running (${frameState.frames} in ${Math.round(elapsedMs / 1000)} s)`);
     check(frameState.hiddenSamples === 0, `the tab was never hidden (${frameState.hiddenSamples} of ${frameState.samples} samples)`);
     check(videoPath !== null && existsSync(videoPath), 'a video was recorded');
@@ -255,7 +306,7 @@ async function main(): Promise<void> {
     }
 
     // ---- the page without ?sim= ------------------------------------------------------------------------------------------
-    const plainContext = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    const plainContext = await browser.newContext({ viewport: { width: 1280, height: 720 } });
     const plain = await plainContext.newPage();
     await plain.goto(pageUrl(''));
     const untouched = String(
@@ -276,8 +327,8 @@ async function main(): Promise<void> {
       renameSync(videoPath, savedVideo);
     }
     for (const file of readdirSync(outDir)) if (file.endsWith('.webm') && join(outDir, file) !== savedVideo) rmSync(join(outDir, file));
-    writeFileSync(join(outDir, 'report.json'), `${JSON.stringify({ persona, elapsedMs, video: savedVideo, frameState, checks: { passed: notes, failed: failures }, page: report }, null, 2)}\n`);
-    console.log(`${persona}: ${Math.round(elapsedMs / 1000)} s, video ${savedVideo ?? 'none'}`);
+    writeFileSync(join(outDir, 'report.json'), `${JSON.stringify({ persona, mode, elapsedMs, video: savedVideo, frameState, checks: { passed: notes, failed: failures }, page: report }, null, 2)}\n`);
+    console.log(`${persona} (${mode}): ${Math.round(elapsedMs / 1000)} s, video ${savedVideo ?? 'none'}`);
     for (const line of [...notes, ...failures]) console.log(line);
     if (failures.length > 0) exitCode = 1;
   } finally {

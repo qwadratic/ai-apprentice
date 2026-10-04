@@ -3,16 +3,20 @@
 //   import { ... } from '../sim/index.ts';                 // Node-safe: personas, mic, shims, driver, workspace adapter
 //   import { fetchClip } from '../sim/clip-urls.ts';        // browser only (Vite): where the mp3 clips are served from
 //   import { mountSimDesktop } from '../sim/desktop/desktop.ts';   // browser only: the simulated desktop frame
+//   import { createCanvasScreen } from '../sim/desktop/canvas-screen.ts';  // browser only: a screen source for headless Chrome
 //
 // How the shell uses it, only when the page was opened with ?sim=expert or ?sim=newhire (nothing is installed otherwise):
 //   1. const mic = createSyntheticMic({ loadClip: fetchClip });  installSimMediaIfRequested(location.search, { mic });
-//      before the voice session and the screen capture start, so both find the synthetic devices.
+//      before the voice session and the screen capture start, so both find the synthetic devices. In headless Chrome a tab
+//      capture fails (NotReadableError or a hang): pass screen: { fallback: () => Promise.resolve(createCanvasScreen(desktop.root).stream) }
+//      and the shim falls back to a canvas painting of the desktop; a headful Chrome (under xvfb-run) needs no fallback.
 //   2. const desktop = mountSimDesktop(slot, { persona });  mount the workspace into desktop.workspaceHost.
 //   3. const driver = createPersonaDriver({ persona, workspace: createDemoWorkspaceActions({ port: createDomPort(desktop.workspaceHost, desktop.cursor), clock }), mic, clock, onLog });
 //   4. From the voice session: driver.setAgentSpeaking(true/false) while the agent talks, and
 //      driver.onAgentAsk(topic, text) when the agent has asked a question (the topic is the brain's: reason, essentials,
 //      guardrail, scope, exception, why_stop, duration, teachback; in Teach: predict, why_hold, explain).
-//   5. driver.run(EXPERT_LEARN) for the Learn task, driver.run(NEW_HIRE_T1) for Teach T1.
+//   5. driver.run(EXPERT_LEARN) for the Learn task, driver.run(NEW_HIRE_T1) for Teach T1. Against the real agent keep
+//      visionLagMs at its default (5000): the agent's vision needs 4 to 6 s to see a change, and the persona leaves it room.
 //
 // The persona's knowledge lives only in personas.ts and is spoken, never put into a prompt or a knowledge base.
 export { createRealClock, createRng } from './clock.ts';
@@ -22,8 +26,8 @@ export type { Persona, PersonaId, PersonaLine, PersonaTopic, PersonaVoice, Picke
 export { MicStoppedError, createSyntheticMic } from './synthetic-mic.ts';
 export type { AudioContextLike, MicEvent, SyntheticMic, SyntheticMicOptions } from './synthetic-mic.ts';
 export { CURRENT_TAB_OPTIONS, SimMediaInstalledError, installSimMedia, installSimMediaIfRequested, simModeFromSearch } from './sim-media.ts';
-export type { InstallSimMediaOptions, InstalledSimMedia, MediaDevicesLike } from './sim-media.ts';
-export { createPersonaDriver } from './driver.ts';
+export type { InstallSimMediaOptions, InstalledSimMedia, MediaDevicesLike, ScreenShimOptions } from './sim-media.ts';
+export { DEFAULT_VISION_LAG_MS, createPersonaDriver } from './driver.ts';
 export type { AnsweredQuestion, DriverLog, PersonaDriver, PersonaDriverOptions, TaskReport } from './driver.ts';
 export { EXPERT_LEARN, NEW_HIRE_T1, NEW_HIRE_T2, NEW_HIRE_T3, NEW_HIRE_T4, TASKS } from './tasks.ts';
 export type { TaskScript, TaskStep } from './tasks.ts';
