@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@qwadratic'
 created_date: '2026-10-04 01:59'
-updated_date: '2026-10-04 06:06'
+updated_date: '2026-10-05 08:58'
 labels:
   - stream-b
 dependencies: []
@@ -24,7 +24,7 @@ Replace the shell's NullBrain (apps/web/features/agent/shell) with packages/agen
 - [ ] #1 With sample observations and a person answering by voice, Learn asks >=3 questions at natural pauses (>=1 guardrail), Review asks >=3 follow-ups and confirms a teach-back, Teach warns before Send with the expert's quote (T1)
 - [ ] #2 Clipa flies to the focused element for questions and to Send for WARN, never while the person types
 - [ ] #3 LLM failures fall back to heuristics visibly in the debug log; no token or transcript leaks
-- [ ] #4 The app is published at the Pages root and the launch page under status/
+- [x] #4 The app is published at the Pages root and the launch page under status/
 <!-- AC:END -->
 
 ## Definition of Done
@@ -57,6 +57,8 @@ Replace the shell's NullBrain (apps/web/features/agent/shell) with packages/agen
 5. Review with a thin map says 'Run Learn first' (this edits ReviewView.tsx).
 Root cause of 3 and 4 is in stream A's code: the runtime.bridge.onStatus handler in apps/web/features/demo-workspace/mountRuntimeWorkspace.ts disconnects the checkpoint port and drops the heartbeats on any status other than capturing; stream A should fix it there.
 Next: open the PR, merge after CI, post the head to the devops session for the VM rerun (TASK-3.42). Screenshots: coordinator scratchpad fix-*.png.
+
+Docs-cleanup audit (2026-10-05): AC4 checked live - https://qwadratic.github.io/clipa/ and https://qwadratic.github.io/clipa/status/ both answer 200, matching the app-at-the-root-and-launch-page-under-status/ split in release.yml's assemble-the-site step. AC1-AC3 describe specific conversation behaviour (question counts, Clipa's flight targets, the fallback log) that need a live or recorded session to verify properly; not exercised in this pass, left unchecked.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

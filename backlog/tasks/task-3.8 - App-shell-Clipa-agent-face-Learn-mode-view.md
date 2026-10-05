@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@qwadratic'
 created_date: '2026-10-03 21:10'
-updated_date: '2026-10-04 06:06'
+updated_date: '2026-10-05 08:58'
 labels:
   - stream-b
   - ux
@@ -31,7 +31,7 @@ Estimate: about 2 h of agent time. Card key: B-app-shell.
 - [ ] #2 Clipa shows each mapped state (listening, speaking, thinking, idle, off, warning, happy, pointing), driven only by coordinator and session state; the bubble shows the spoken question text
 - [ ] #3 The debug panel shows the decision log with reasons and the observation-to-audio latency
 - [ ] #4 ScreenPanel and ReplayPanel are slot files with the contract props; swapping in A's components changes nothing outside the slot files
-- [ ] #5 No API key or token appears in the production bundle (build output grepped)
+- [x] #5 No API key or token appears in the production bundle (build output grepped)
 <!-- AC:END -->
 
 ## Definition of Done
@@ -45,6 +45,8 @@ Estimate: about 2 h of agent time. Card key: B-app-shell.
 
 <!-- SECTION:NOTES:BEGIN -->
 PR #22 merged (0e4172a): shell, modes, status, Off the record, persona picker, debug drawer, session with token, voice (ported from the lab), Clipa presenter, A's ScreenPanel slot, Brain seam with NullBrain. Remaining for the ACs: wire the TASK-3.29 brain + TASK-3.30 LLM route + TASK-3.28 director (next task).
+
+Docs-cleanup audit (2026-10-05): AC5 checked - release.yml's bundle key-scan (greps the published site for sk-ant-/sk_/api-key-shaped values and fails the job on a match) has passed on the 8 most recent release.yml runs (gh run list), and the live site is reachable. AC1-AC4 (mode switching keeping session state, Clipa's mapped states, the debug panel's content, the ScreenPanel/ReplayPanel slot contract) describe specific UI behaviour that needs a live browser session to verify properly per this repo's finalization guide; not exercised in this pass, left unchecked.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

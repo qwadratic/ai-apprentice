@@ -7,7 +7,7 @@ status: Done
 assignee:
   - '@qwadratic'
 created_date: '2026-10-04 04:06'
-updated_date: '2026-10-04 06:07'
+updated_date: '2026-10-05 08:58'
 labels:
   - stream-b
 dependencies: []
@@ -41,6 +41,8 @@ The live demo runs outside our demo workspace on workflows nobody knows in advan
 
 <!-- SECTION:NOTES:BEGIN -->
 4 Oct 04:25 UTC: Ivan raised the runner's per-call budget for text tasks (RUNNER_COMPLETE_MAX_BUDGET_USD on the VM) from 0.10 to 0.50 USD. map_synthesis takes up to 96 KiB of input; at 0.10 it risked error_max_budget_usd (502 sdk_error). Vision calls already had 0.50 (MAX_BUDGET_USD).
+
+Docs-cleanup audit (2026-10-05): the three LLM tasks are merged and deployed (this task's final summary; the live /health lists the agent module). The specific behavioural invariants in AC1-AC3 (ids drawn only from input, quotes as verbatim spans, never inventing a guardrail) and the test coverage in AC4 need a test run or a live call to verify properly; not exercised in this pass, left unchecked.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

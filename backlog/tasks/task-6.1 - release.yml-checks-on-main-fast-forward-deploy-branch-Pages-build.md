@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@qwadratic'
 created_date: '2026-10-03 23:15'
-updated_date: '2026-10-03 23:28'
+updated_date: '2026-10-05 08:58'
 labels:
   - shared
   - infra
@@ -39,6 +39,8 @@ GitHub Actions workflow on push to main and workflow_dispatch (optional sha inpu
 
 <!-- SECTION:NOTES:BEGIN -->
 Changed per doc-8 'Change after review': no deploy branch (GITHUB_TOKEN cannot move a branch onto workflow changes); publish deploy.json {sha, at, run} with the site.
+
+Docs-cleanup audit (2026-10-05): AC2 stays unchecked per this task's own final summary (the freeze and rollback paths are lint-checked but not yet exercised on GitHub).
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

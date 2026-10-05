@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@qwadratic'
 created_date: '2026-10-03 21:11'
-updated_date: '2026-10-04 06:07'
+updated_date: '2026-10-05 08:58'
 labels:
   - stream-b
   - tutor
@@ -30,7 +30,7 @@ Estimate: about 1.5 h of agent time. Card key: B-tutor-agent.
 <!-- AC:BEGIN -->
 - [ ] #1 With a real key, a Teach session receives the confirmed map as a contextual update and the tutor answers a question about a guardrail using the expert's wording
 - [ ] #2 lookup_guardrail (or the KB fallback) answers for an existing guardrail and says 'not in the map' for a missing one; the tool is served by apps/api/agent with a test
-- [ ] #3 The tutor prompt contains no customer ids or pre-written exception (grep test)
+- [x] #3 The tutor prompt contains no customer ids or pre-written exception (grep test)
 - [ ] #4 A WARN command spoken through the coordinator is audibly the engine's message (verified by transcript comparison)
 - [ ] #5 The same flow passes with FakeVoiceAdapter in CI
 <!-- AC:END -->
@@ -41,6 +41,12 @@ Estimate: about 1.5 h of agent time. Card key: B-tutor-agent.
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Docs-cleanup audit (2026-10-05): AC3 checked by its own prescribed method - grep for customer_0 and customer_1 across apps/api/agent/prompts found no match. AC2 is already contradicted by this task's own final summary (the lookup_guardrail tool was not built). AC1 and AC4 need a live Teach session with transcript comparison; AC5 needs a specific CI run of the FakeVoiceAdapter-backed test, neither traced in this pass. Left unchecked.
+<!-- SECTION:NOTES:END -->
 
 ## Comments
 

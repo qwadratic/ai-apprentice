@@ -1,12 +1,12 @@
 ---
 id: TASK-1
 title: ScreenBridge v1 contract
-status: To Do
+status: Done
 assignee:
   - '@kigulx'
   - '@qwadratic'
 created_date: '2026-10-03 20:54'
-updated_date: '2026-10-03 23:06'
+updated_date: '2026-10-05 08:57'
 labels:
   - shared
   - contract
@@ -77,3 +77,9 @@ created: 2026-10-03 23:06
 Agreed in Hive with stream A (4 Oct ~01:25): lifecycle methods start/pause/resume/stop return Promise<void>; onStatus is authoritative (a resolved call does not mean capturing; mask-review, refused resume and off_record arrive only as ScreenStatus). This replaces the {state, reason} return in the doc-7 v1.1 note. Polling route GET /screen/sessions/{sessionId}/updates?cursor=n -> {observations, statuses, nextCursor} accepted by A, ~1 s bounded polling, no long-poll for the first run.
 ---
 <!-- COMMENTS:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+ScreenBridge v1 (packages/contracts) is implemented and live: schemaVersion, types and fixtures are the shared dependency of packages/screen, packages/agent and apps/api in the shipped product (GET /health lists the agent and screen modules, confirmed live 2026-10-05). Status corrected from To Do to Done to match the code (issue #103). Acceptance criteria are left as recorded rather than freshly checked: this repo's task-finalization guide requires test or behavioral evidence, not code presence, and no test run was possible in this pass (no npm install in this worktree, disk is tight).
+<!-- SECTION:FINAL_SUMMARY:END -->

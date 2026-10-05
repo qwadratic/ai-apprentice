@@ -1,11 +1,11 @@
 ---
 id: TASK-4
 title: VM backend on exe.dev
-status: To Do
+status: Done
 assignee:
   - '@qwadratic'
 created_date: '2026-10-03 20:54'
-updated_date: '2026-10-03 21:10'
+updated_date: '2026-10-05 08:57'
 labels:
   - shared
   - infra
@@ -23,7 +23,7 @@ A separate exe.dev VM hosts the API for both streams: one public HTTPS port (800
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 https://<vm>.exe.xyz/health answers 200 without exe.dev login; CORS allows only ALLOWED_ORIGINS
+- [x] #1 https://<vm>.exe.xyz/health answers 200 without exe.dev login; CORS allows only ALLOWED_ORIGINS
 - [ ] #2 SQLite and media directories survive a VM reboot and a service restart
 - [ ] #3 Secrets exist only in /etc/apprentice/env (mode 0600); the repo and the logs contain none
 - [ ] #4 One command redeploys main and rolls back on a failed health check
@@ -38,3 +38,9 @@ A separate exe.dev VM hosts the API for both streams: one public HTTPS port (800
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+VM backend on exe.dev is live and matches the code. Verified live on 2026-10-05: GET https://apprentice.exe.xyz/health returns 200 ok:true with modules ops, agent, screen, recording and no exe.dev login; a CORS preflight from https://qwadratic.github.io gets 204 with the origin echoed, a foreign origin gets 403 (AC1 checked on this evidence). AC6 (API-key mode before a judge-facing URL) is explicitly not done, by Ivan's own decision - see TASK-4.4. AC2, AC3, AC4, AC5 and AC7 are left unchecked: plausible from infra/README.md but not re-verified here by test or reboot. Status corrected from To Do to Done to match the shipped system (issue #103). Note for Ivan: subtasks TASK-4.1 and TASK-4.2 are still To Do even though the VM and runner they describe are demonstrably running in production; left untouched since this pass was only asked to fix TASK-1, TASK-4 and TASK-6.
+<!-- SECTION:FINAL_SUMMARY:END -->

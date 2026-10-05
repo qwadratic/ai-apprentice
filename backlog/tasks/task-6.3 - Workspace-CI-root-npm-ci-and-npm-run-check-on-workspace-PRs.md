@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@qwadratic'
 created_date: '2026-10-04 00:09'
-updated_date: '2026-10-04 00:21'
+updated_date: '2026-10-05 08:58'
 labels:
   - shared
   - infra
@@ -33,6 +33,12 @@ Stream A's foundation (PR #14) adds a root npm workspace, but A's publishing cre
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Docs-cleanup audit (2026-10-05): AC3 stays unchecked - the final summary says the manual run for codex/task-2.1-foundation-pr was started, not that it completed or passed before the next push.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

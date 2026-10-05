@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Replaces the last scene of a render with a newly rendered outro (cross-fade 0.5 s, like the storyboard) and makes the
 # result web-ready (H.264, faststart, silent AAC):
-#   bash capture/splice-outro.sh out/clipa-demo.mp4 out/demo-outro.mp4 ../apps/web/public/videos/clipa-demo.mp4 [crf]
+#   bash capture/splice-outro.sh out/clipa-tech.mp4 out/tech-outro.mp4 ../apps/web/public/videos/clipa-tech.mp4 [crf]
 set -euo pipefail
 main="$1"
 outro="$2"

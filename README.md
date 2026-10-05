@@ -1,9 +1,9 @@
 <h1 align="center">Clipa</h1>
 <p align="center"><b>Clipa learns how your best people decide, teaches it to the next person, and turns it into agents that ask before they break your rules.</b></p>
-<p align="center">A teal paperclip AI apprentice. Live today: Show → Reflect → Pass it on. Agents come next (see <a href="#where-this-goes">the roadmap</a>).<br>
+<p align="center">A teal paperclip AI apprentice, as a web app with a macOS companion and a Windows preview. Live today: Show → Reflect → Pass it on. Agents come next (see <a href="#where-this-goes">the roadmap</a>).<br>
 Built at Hack-Nation 7 (Vienna, 3–4 Oct 2026) for Challenge 01, "The AI Apprentice" by ElevenLabs.</p>
 <p align="center"><img src="https://img.shields.io/badge/Hack--Nation_7-Challenge_01-0b5d56" alt="Hack-Nation 7, Challenge 01"> <img src="https://img.shields.io/badge/ElevenLabs-Agents-111111" alt="ElevenLabs Agents"> <img src="https://img.shields.io/badge/TypeScript-3178c6?logo=typescript&logoColor=white" alt="TypeScript"> <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a></p>
-<p align="center"><a href="https://qwadratic.github.io/clipa/"><b>Live app</b></a> · <a href="https://qwadratic.github.io/clipa/videos/clipa-story.mp4"><b>Demo video</b></a> (0:52, illustrated) · <a href="https://qwadratic.github.io/clipa/videos/clipa-tech.mp4"><b>Tech video</b></a> (0:59) · <a href="https://github.com/qwadratic/clipa/releases/download/clipa-macos-latest/Clipa.dmg"><b>macOS app</b></a></p>
+<p align="center"><a href="https://qwadratic.github.io/clipa/"><b>Live app</b></a> · <a href="https://qwadratic.github.io/clipa/videos/clipa-story.mp4"><b>Demo video</b></a> (0:52, illustrated) · <a href="https://qwadratic.github.io/clipa/videos/clipa-tech.mp4"><b>Tech video</b></a> (0:59) · <a href="https://github.com/qwadratic/clipa/releases/download/clipa-macos-latest/Clipa.dmg"><b>macOS app</b></a> · <a href="https://github.com/qwadratic/clipa/releases/download/clipa-windows-latest/Clipa-windows.exe"><b>Windows preview</b></a> (<a href="windows/README.md">limits</a>)</p>
 <p align="center"><img src="docs/media/hero.gif" width="800" alt="Clipa, a teal paperclip, flies in and waves"><br>
 <sub>"Hi, I'm Clipa." · "I watch an expert work, ask why at the pauses, and coach the next person."<br>Intro animation · synthetic data · a teammate plays the expert</sub></p>
 
@@ -171,7 +171,11 @@ flowchart LR
 | Screen | `packages/screen`: browser capture, masks, vision queue, evidence, processed recording. Contract: ScreenBridge v1 |
 | macOS | Swift, ScreenCaptureKit, no external dependencies |
 | Videos | Remotion, a Playwright journey recorder, ElevenLabs text-to-speech voice-over |
-| Delivery | Each code merge to `main`: GitHub Actions builds Pages, a signed webhook deploys the VM with a health check and automatic rollback ([infra](infra/README.md)) |
+| Delivery | Each code merge to `release`: GitHub Actions builds Pages, a signed webhook deploys the VM with a health check and automatic rollback ([infra](infra/README.md)) |
+
+## Deploy
+
+The live app and API deploy from the `release` branch. `main` is frozen as the Hack-Nation submission snapshot (the commit judges can check out); everything after submission, including this kind of housekeeping, lands on `release` through pull requests instead.
 
 ## Honesty
 
@@ -246,8 +250,8 @@ The moonshot: a company memory that asks only about what changed. More in [docs/
 ## Team
 
 <table><tr>
-<td align="center" width="50%"><a href="https://github.com/qwadratic"><img src="https://github.com/qwadratic.png?size=96" width="96" alt="Ivan"><br><b>Ivan</b></a><br>@qwadratic<br><sub>Voice, Conductor, Work Map, tutor, app shell</sub></td>
-<td align="center" width="50%"><a href="https://github.com/kigulx"><img src="https://github.com/kigulx.png?size=96" width="96" alt="Kirill"><br><b>Kirill</b></a><br>@kigulx<br><sub>Capture, masks, vision, demo workspace, repo skeleton</sub></td>
+<td align="center" width="50%"><a href="https://github.com/qwadratic"><img src="https://github.com/qwadratic.png?size=96" width="96" alt="Ivan"><br><b>Ivan</b></a><br>@qwadratic<br><sub>Project lead · Voice, Conductor, Work Map, tutor, app shell</sub></td>
+<td align="center" width="50%"><a href="https://github.com/kigulx"><img src="https://github.com/kigulx.png?size=96" width="96" alt="Kyrylo"><br><b>Kyrylo</b></a><br>@kigulx<br><sub>Capture, masks, vision, demo workspace, repo skeleton</sub></td>
 </tr></table>
 
 ## Credits and license
