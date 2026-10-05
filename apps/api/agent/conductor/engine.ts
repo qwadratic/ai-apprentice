@@ -4,7 +4,7 @@
 // with a fake clock and fake tasks.
 import { BaselineProfileSelector, baselinePromptContext } from '../../../../packages/screen/baseline/profiles.ts';
 import { isRecord } from '../config.ts';
-import type { GenericQuestionOutput, GuardrailCheckOutput, MapEditOutput, MapSynthesisOutput, ProcessMatchOutput, ReplyOutput } from '../llm-tasks.ts';
+import type { AnswerCheckOutput, GenericQuestionOutput, GuardrailCheckOutput, MapEditOutput, MapSynthesisOutput, ProcessMatchOutput, ReplyOutput } from '../llm-tasks.ts';
 import type { TaskResult } from '../llm.ts';
 import { demoMap } from './demo-map.ts';
 import { GUIDE, MAC_DONE_LINE, NUDGES, OFF_LINE, OPEN_WEB, PROPOSE, RESOLVED, SHOW_LOOKS_DONE, STAGE_ABOUT, STAGE_CONFIRM, STAGE_NAMES, STAGE_START, detectLanguage, donePhraseOnly, doneSaid, offSaid, stageAsked, stageCommand, yesSaid } from './lines.ts';
@@ -38,6 +38,17 @@ export const RULES = {
   // Switches for the live demo: false turns the feature off and nothing else changes.
   /** Recognise a learned process on screen (process_match), say so and follow its strategy. */
   recognizeProcesses: true,
+  /**
+   * Show and Reflect: the person's answer to one of Clipa's questions is checked (answer_check). An answer that gives no reason,
+   * or a vague one ("just because", "I don't know"), gets ONE short follow-up at the next pause; any adequate reason, of any kind,
+   * is taken as it is. The follow-up spends one question of the budget (Show: learnMaxQuestions, Reflect: reviewMaxGaps) and is
+   * never followed by another for the same point. false: every answer is taken as it is, as before.
+   */
+  answerCheck: true,
+  /** Show: talk this soon after a question still counts as its answer; later talk is not an answer to it. */
+  answerWindowMs: 45_000,
+  /** Show: a follow-up that has not been said this long after the answer is dropped: the moment has passed. */
+  followUpTtlMs: 30_000,
   /** Build the map in the background as soon as Show ends; false: Reflect builds it when it opens, as before. */
   mapAfterShow: true,
   /** The voice agent hears a new screen at once, and the same screen again at most this often. */
@@ -225,6 +236,30 @@ export interface ConductorDeps {
 }
 
 interface Turn { role: 'expert' | 'agent'; text: string; atMs: number }
+type QuestionContext = NonNullable<MapSynthesisOutput['baselineProvenance']>['turns'][number];
+/** One question Clipa asked and waits on: a question at a pause (Show) or an open point of the map (Reflect). */
+interface Asked {
+  stage: 'learn' | 'review';
+  cueId: string;
+  questionId: string;
+  text: string;
+  topic: string;
+  /** Where it points: its follow-up points at the same place. */
+  regions: Region[];
+  evidenceIds: string[];
+  /** Show: the provenance of the answer; the answer to a follow-up comes from the same moment. */
+  context: QuestionContext | null;
+  /** This is the follow-up of an earlier question: its answer is taken as it is (one follow-up per point). */
+  followUp: boolean;
+  at: number;
+}
+/**
+ * The person's answer to `asked` as far as it has been heard. It is checked once it is in ('due', 'running', 'done'), and as a
+ * whole again when more is said before the check or its follow-up is through; revision counts the turns that made it up.
+ */
+interface Answer { asked: Asked; first: Turn; turns: string[]; revision: number; state: 'due' | 'running' | 'done'; at: number }
+/** One short question about the same point that Clipa says at the next pause (answer_check found the answer wanting); `at` is when the answer was heard. */
+interface FollowUp { text: string; of: Asked; at: number }
 /** The order of the stages: while a session runs, a voice command only moves forward. */
 const STAGE_ORDER: Readonly<Record<Mode, number>> = { learn: 0, review: 1, teach: 2 };
 interface Source { client: ClientKind | null; lastSeq: number }
@@ -276,13 +311,20 @@ export class Conductor {
   private readonly contextTurns: Turn[] = [];
   private readonly contextAskedTexts: string[] = [];
   private readonly baselineProvenance: NonNullable<MapSynthesisOutput['baselineProvenance']> = { observations: [], turns: [] };
-  private questionContext: NonNullable<MapSynthesisOutput['baselineProvenance']>['turns'][number] | null = null;
+  private questionContext: QuestionContext | null = null;
   private pendingChange = false;
   private pendingTeachCheck = false;
   private urgentTeachCheck = false;
   private prefetch: Prefetch | null = null;
   private readonly askTimes: number[] = [];
   private lastAskAt = -Infinity;
+  /**
+   * The question Clipa asked last and waits on (Show or Reflect), the person's answer to it (while it is checked) and the
+   * follow-up for it (until it is said). A follow-up is itself an `asked`; its answer is not checked again.
+   */
+  private asked: Asked | null = null;
+  private answer: Answer | null = null;
+  private followUp: FollowUp | null = null;
   private lastTeachCheckAt = -Infinity;
   /**
    * The rule Clipa warned about and that is still open (Pass it on): one warning per rule, so it is not said again while the
@@ -466,9 +508,31 @@ export class Conductor {
       // A warning that was never said is not an open warning: the rule is warned about again at the next pause. One the voice
       // agent had started saying was heard: the person typed over its end, and the fix still gets its ready line.
       if (this.active.type === 'warn' && !this.warnHeard) this.openWarn = null;
+      this.unasked(this.active.cueId);
       this.emit({ type: 'cancel', cueId: this.active.cueId });
     }
     this.active = null;
+  }
+
+  /** The question with this cue was never said (cancelled, or skipped by the face): nobody answered it, nothing follows from it. */
+  private unasked(cueId: string): void {
+    const asked = this.asked;
+    if (asked === null || asked.cueId !== cueId) return;
+    if (this.answer?.asked === asked) this.answer = null;
+    if (this.followUp?.of === asked) this.followUp = null;
+    this.asked = null;
+  }
+
+  /** Nothing is waiting on an answer any more (the stage, the record or the place changed): no check, no follow-up. */
+  private forgetAnswers(): void {
+    this.asked = null;
+    this.answer = null;
+    this.followUp = null;
+  }
+
+  /** An answer is being checked or its follow-up waits to be said: nothing else of Clipa's own is due meanwhile. */
+  private answerBusy(): boolean {
+    return this.followUp !== null || (this.answer !== null && this.answer.state !== 'done');
   }
 
   // ---- events --------------------------------------------------------------
@@ -541,6 +605,8 @@ export class Conductor {
           this.active.done = true;
           if (this.active.type === 'ask' || this.active.type === 'warn') this.presence('dot');
         }
+        // The face skipped a question (the person was busy, or its moment had passed): it was never said, nobody answered it.
+        if (e.outcome === 'skipped') this.unasked(e.cueId);
         // The face skipped the warning (the person was busy, or its moment had passed): it was never said, so it is due again.
         // Only the newest warning counts; a late report about an older one changes nothing.
         if (e.outcome === 'skipped' && this.openWarn !== null && [...this.cues].reverse().find((c) => c.cue.type === 'warn')?.cueId === e.cueId) this.openWarn = null;
@@ -629,6 +695,8 @@ export class Conductor {
     const moved = this.contextWhere !== null && (o.kind === 'screen_activity' ? !sameApp(this.contextWhere, where) : this.contextWhere !== where);
     if (moved) {
       this.invalidateLiveContext(true);
+      // Show: the person went to another place, so a question about the last one is not followed up. Reflect keeps its points.
+      if (this.liveMode === 'learn') this.forgetAnswers();
       this.contextObservationIds.clear();
       // Vision runs seconds behind speech: what the person said while this new screen was already up is about it.
       const kept = this.contextTurns.filter((t) => t.atMs >= o.atMs - RULES.turnsBeforeFrameMs);
@@ -696,8 +764,11 @@ export class Conductor {
         this.recognizedFor = null;
         this.lastRecognitionAt = -Infinity;
       }
-      this.inflight?.abort();
-      this.inflight = null;
+      // The answer being checked does not depend on what the screen shows: a new frame leaves it running, another place drops it.
+      if (clearProcess || this.inflightTask !== 'answer_check') {
+        this.inflight?.abort();
+        this.inflight = null;
+      }
     }
     this.prefetch = null;
     this.pendingSay = null;
@@ -720,6 +791,7 @@ export class Conductor {
 
   private resetLiveContext(): void {
     this.invalidateLiveContext(true);
+    this.forgetAnswers();
     this.baseline.reset();
     this.contextWhere = null;
     this.contextObservationIds.clear();
@@ -828,6 +900,8 @@ export class Conductor {
     const asked = !RULES.voiceStages ? null : this.liveMode === null ? stageAsked(text) : stageCommand(text);
     if (asked !== null && asked !== this.liveMode && this.webFace() && (this.liveMode === null || STAGE_ORDER[asked] > STAGE_ORDER[this.liveMode])) { this.voiceStage(asked); return; }
     if (this.doneCommand(text, answering)) return;
+    // A turn that is none of these may be the answer to the question Clipa asked (checked, with a follow-up when it is wanting).
+    this.hear(turn);
     if (this.liveMode !== 'review' || !this.review.map) return;
     if (this.review.awaiting === 'teachback') { void this.classifyReply(text); return; }
     if (this.review.awaiting === 'gap') {
@@ -924,6 +998,7 @@ export class Conductor {
     this.prefetch = null;
     this.pendingChange = false;
     this.pendingSay = null;
+    this.forgetAnswers();
     if (this.liveMode === 'learn' || this.liveMode === 'teach') { this.inflight?.abort(); this.inflight = null; }
   }
 
@@ -969,7 +1044,7 @@ export class Conductor {
   private tickShowDone(now: number): void {
     if (this.liveMode !== 'learn' || this.persona !== 'expert' || this.stageDone || this.after !== null || this.proposal !== null) return;
     if (this.personTalking || this.agentTalking || this.activity === 'typing') return;
-    if ((this.active && !this.active.done) || this.pendingSay !== null || this.prefetch?.status === 'running') return;
+    if ((this.active && !this.active.done) || this.pendingSay !== null || this.prefetch?.status === 'running' || this.answerBusy()) return;
     if (this.stageObservations < RULES.showIdleMinObservations && !this.answered) return;
     if (now - Math.max(this.lastBusyAt, this.lastPersonAt, this.lastChangeAt, this.lastActivityAt, this.stageStartedAt) < RULES.showIdleMs) return;
     this.stageComplete('review', SHOW_LOOKS_DONE);
@@ -1017,6 +1092,8 @@ export class Conductor {
     // Show or Pass it on is winding down (done, stop, a switch or a proposal waiting): Clipa asks and warns no more.
     const winding = (this.liveMode === 'learn' || this.liveMode === 'teach') && (this.stageDone || this.after !== null || this.proposal !== null);
     if (this.pendingSay && !winding && this.paused(now) && (!this.active || this.active.done)) { this.emit({ type: 'say', text: this.pendingSay }); this.pendingSay = null; return; }
+    // An answer is in: it is checked first (in Reflect once the voice edits of it are through), so its follow-up is ready for the pause.
+    if (!winding && this.answer?.state === 'due' && this.inflight === null && this.voiceQueue.length === 0) { void this.checkAnswer(); return; }
     if (!winding && (this.liveMode === 'learn' || this.liveMode === 'teach') && this.inflight === null && this.shouldRecognize(now)) { void this.recognize(); return; }
     if (this.liveMode === 'learn' && !winding) this.tickLearn(now);
     if (this.inflight !== null) return;
@@ -1035,7 +1112,7 @@ export class Conductor {
     if (this.nudgesInRow >= RULES.nudgeMaxInRow) return;
     if (this.stageDone || this.proposal !== null || this.after !== null) return;
     if (this.personTalking || this.agentTalking || this.activity === 'typing' || this.activity === 'away') return;
-    if ((this.active && !this.active.done) || this.pendingSay !== null || this.prefetch !== null) return;
+    if ((this.active && !this.active.done) || this.pendingSay !== null || this.prefetch !== null || this.answerBusy()) return;
     if (now - Math.max(this.lastPersonAt, this.lastSpokeAt, this.stageStartedAt) < RULES.nudgeAfterMs) return;
     this.nudgesInRow++;
     this.emit({ type: 'say', text: NUDGES[this.nudgeIndex++ % NUDGES.length]! });
@@ -1052,13 +1129,14 @@ export class Conductor {
    * person may still be working), and said the moment a pause begins, if the screen it is about is still the latest.
    */
   private tickLearn(now: number): void {
+    if (this.followUp !== null && this.tickFollowUp(now)) return;
     if (!this.pendingChange || this.latestChangeId === null) return;
     if (this.active && !this.active.done) return;
     const budget = this.learnBudget(now);
     if (budget === 'used') { this.quiet('question budget used up for now'); return; }
     const basis = this.latestChangeId;
     const ready = this.prefetch && this.prefetch.basis === basis && this.prefetch.status !== 'running' ? this.prefetch : null;
-    if (ready && budget === 'ok' && this.paused(now)) { this.sayQuestion(ready); return; }
+    if (ready && budget === 'ok' && this.paused(now) && !this.answerBusy()) { this.sayQuestion(ready); return; }
     const settled = now - this.lastChangeAt >= RULES.settleMs;
     const nearlyAllowed = now - this.lastAskAt >= RULES.learnMinGapMs - 10_000;
     if (settled && nearlyAllowed && this.inflight === null && (!this.prefetch || this.prefetch.basis !== basis)) void this.prepareQuestion(basis);
@@ -1069,6 +1147,12 @@ export class Conductor {
     const r = this.review;
     if (r.phase !== 'gaps' || r.awaiting !== null || this.voiceQueue.length) return;
     if (!this.paused(now) || now - r.answeredAt < RULES.gapAfterAnswerMs) return;
+    // The point just answered wanted more: its one follow-up comes before the next point, and spends from the same budget.
+    const f = this.followUp;
+    if (f !== null && f.of.stage === 'review') {
+      this.followUp = null;
+      if (this.asked === f.of && r.asked.size < RULES.reviewMaxGaps) { this.askFollowUp(f); return; }
+    }
     // The next open point not asked yet: an answer that resolves a gap shortens the list, so a position in it would skip one.
     const next = r.map ? r.map.gaps.findIndex((g) => !r.asked.has(g.question)) : -1;
     if (next < 0 || r.asked.size >= RULES.reviewMaxGaps) { this.finishGaps(); return; }
@@ -1245,7 +1329,112 @@ export class Conductor {
       observationIds: scopedIds.length ? scopedIds : [...current.evidence.observationIds],
       evidenceIds: scopedIds.length ? this.evidenceFor(scopedIds) : [...current.evidence.evidenceIds], questionId,
     };
-    this.emit({ type: 'ask', questionId, text, topic, regions, evidenceIds: this.evidenceFor(scopedIds) }, { ttlMs: RULES.askTtlMs });
+    const evidenceIds = this.evidenceFor(scopedIds);
+    const env = this.emit({ type: 'ask', questionId, text, topic, regions, evidenceIds }, { ttlMs: RULES.askTtlMs });
+    this.answer = null;
+    this.followUp = null;
+    this.asked = { stage: 'learn', cueId: env.cueId, questionId, text, topic, regions, evidenceIds, context: this.questionContext, followUp: false, at: now };
+  }
+
+  /**
+   * The person said something that is no command: it may be the answer to the question Clipa asked. In Show it must come soon
+   * after the question; in Reflect it is the answer while Clipa waits on an open point. The first turn after a question starts
+   * the answer, and what is said before the check (or its follow-up) is through belongs to it: the answer is judged as a whole.
+   * The answer to a follow-up is taken as it is.
+   */
+  private hear(turn: Turn): void {
+    if (!RULES.answerCheck || this.offRecord || turn.text.trim() === '') return;
+    const a = this.asked;
+    if (a === null || this.liveMode !== (a.stage === 'learn' ? 'learn' : 'review')) return;
+    const mine = this.answer?.asked === a ? this.answer : null;
+    if (mine !== null) {
+      if (mine.state === 'done' && this.followUp === null) return; // judged already: this is something else
+      mine.turns.push(turn.text);
+      mine.revision++;
+      mine.at = this.deps.now();
+      mine.state = 'due';
+      this.followUp = null; // it may not be needed any more: the answer is judged again, as a whole
+      if (this.inflightTask === 'answer_check') { this.inflight?.abort(); this.inflight = null; }
+      return;
+    }
+    if (a.followUp) { this.forgetAnswers(); return; }
+    if (a.stage === 'learn' ? this.deps.now() - a.at > RULES.answerWindowMs : this.review.awaiting !== 'gap') {
+      if (a.stage === 'learn') this.asked = null; // the moment has passed: later talk is not an answer to it
+      return;
+    }
+    this.answer = { asked: a, first: turn, turns: [turn.text], revision: 1, state: 'due', at: this.deps.now() };
+  }
+
+  /**
+   * answer_check: one fast call per answer. Any failure or doubt is silent: the answer is then taken as it is. A call that is
+   * overtaken (more was said, the place or the stage changed) leaves nothing behind.
+   */
+  private async checkAnswer(): Promise<void> {
+    try { await this.judgeAnswer(); }
+    // The person may have spoken again in Reflect while the check held the line: their words wait in the queue for the edit.
+    finally { if (this.liveMode === 'review' && !this.offRecord && this.voiceQueue.length > 0) void this.drainVoice(); }
+  }
+
+  private async judgeAnswer(): Promise<void> {
+    const a = this.answer;
+    if (a === null || a.state !== 'due') return;
+    a.state = 'running';
+    const revision = a.revision;
+    const mode = this.liveMode;
+    const review = a.asked.stage === 'review';
+    const at = this.turns.indexOf(a.first);
+    this.pose('think');
+    const out = await this.run<AnswerCheckOutput>('answer_check', {
+      question: a.asked.text.slice(0, 1000), topic: a.asked.topic, answer: a.turns.join(' ').slice(0, 4000),
+      observations: this.genericObservations(4, !review),
+      transcript: at < 0 ? [] : this.turns.slice(Math.max(0, at - 6), at).map((t) => ({ role: t.role, text: t.text.slice(0, 600), atMs: t.atMs })),
+      asked: (review ? [...this.review.asked] : this.contextAskedTexts).slice(-20).map((q) => q.slice(0, 300)),
+      language: this.language,
+    });
+    const overtaken = this.answer === a && a.revision !== revision; // more was said: it is checked again, and that call poses
+    if (!this.offRecord && this.liveMode === mode && !overtaken) this.pose('listen');
+    if (this.offRecord || this.liveMode !== mode || this.answer !== a || overtaken) return;
+    a.state = 'done';
+    if (review && this.review.phase !== 'gaps') this.followUp = null;
+    else if (out !== null && !out.adequate && out.followUp !== null && this.asked === a.asked) this.followUp = { text: out.followUp, of: a.asked, at: a.at };
+    this.tick(); // say it now if the pause has already begun
+  }
+
+  /** Show: the follow-up goes at the next pause, within the question budget; it is dropped when its moment has passed. True when said. */
+  private tickFollowUp(now: number): boolean {
+    const f = this.followUp;
+    if (f === null || f.of.stage !== 'learn') return false;
+    if (now - f.at > RULES.followUpTtlMs || this.asked !== f.of) { this.followUp = null; return false; }
+    if (this.active && !this.active.done) return false;
+    if (this.learnBudget(now) === 'used') { this.followUp = null; this.quiet('question budget used up for now'); return false; }
+    if (!this.paused(now)) return false;
+    this.askFollowUp(f);
+    return true;
+  }
+
+  /**
+   * One short question about the same point, in the same place as the question it follows. It spends one question of the budget
+   * (Show: the ask counters; Reflect: the points asked) and its answer is taken as it is: never a second question in a row.
+   */
+  private askFollowUp(f: FollowUp): void {
+    const now = this.deps.now();
+    const review = f.of.stage === 'review';
+    const questionId = `${f.of.questionId}-f`;
+    this.followUp = null;
+    if (review) {
+      this.review.asked.add(f.text);
+      this.review.awaiting = 'gap';
+    } else {
+      this.askTimes.push(now);
+      this.lastAskAt = now;
+      this.contextAskedTexts.push(f.text);
+      if (this.contextAskedTexts.length > 20) this.contextAskedTexts.shift();
+      this.presence('full', f.of.regions[0] ? 'target' : 'corner');
+      // The answer comes from the same moment as the question it follows.
+      this.questionContext = f.of.context === null ? null : { ...f.of.context, atMs: this.sessionTime(), questionId };
+    }
+    const env = this.emit({ type: 'ask', questionId, text: f.text, topic: f.of.topic, regions: f.of.regions, evidenceIds: f.of.evidenceIds }, review ? {} : { ttlMs: RULES.askTtlMs });
+    this.asked = { ...f.of, cueId: env.cueId, questionId, text: f.text, followUp: true, at: now };
   }
 
   /** As soon as Show ends, the map is built in the background, so Reflect opens with it ready. */
@@ -1355,7 +1544,12 @@ export class Conductor {
       this.emit({ type: 'point', target: { kind: 'region', ...regions[0] } });
       this.attention({ kind: 'region', ...regions[0] });
     } else this.emit({ type: 'point', target: { kind: 'ui', name: 'board_gap' } });
-    this.emit({ type: 'ask', questionId: `gap-${index + 1}`, text: gap.question, topic: 'gap', regions, evidenceIds: this.evidenceFor(gap.evidenceIds) });
+    const questionId = `gap-${index + 1}`;
+    const evidenceIds = this.evidenceFor(gap.evidenceIds);
+    const env = this.emit({ type: 'ask', questionId, text: gap.question, topic: 'gap', regions, evidenceIds });
+    this.answer = null;
+    this.followUp = null;
+    this.asked = { stage: 'review', cueId: env.cueId, questionId, text: gap.question, topic: 'gap', regions, evidenceIds, context: null, followUp: false, at: this.deps.now() };
   }
 
   /** After the gaps: rebuild the map when an answer could not be applied by voice, then read the teach-back. */
@@ -1390,6 +1584,7 @@ export class Conductor {
     this.review.phase = 'teachback';
     this.review.awaiting = 'teachback';
     this.review.unclearAsked = false;
+    this.forgetAnswers(); // no open point is waited on any more
     this.guideOnce('teachback');
     this.emit({ type: 'teachback', version: this.review.version, text: map.teachBack });
   }

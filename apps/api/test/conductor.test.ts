@@ -5,6 +5,7 @@ import { GUIDE, MAC_DONE_LINE, NUDGES, OFF_LINE, OPEN_WEB, PROPOSE, RESOLVED, SH
 import { demoMap } from '../agent/conductor/demo-map.ts';
 import { applyEdits } from '../agent/conductor/map-edits.ts';
 import type { ConductorMap } from '../agent/conductor/map-edits.ts';
+import { LLM_TASKS } from '../agent/llm-tasks.ts';
 import { parseBatch } from '../agent/conductor/protocol.ts';
 import type { ClientEvent, CueEnvelope } from '../agent/conductor/protocol.ts';
 import type { TaskResult } from '../agent/llm.ts';
@@ -1417,4 +1418,258 @@ test('Pass it on: a warning does not outlive the off-the-record switch or a new 
       assert.deepEqual(said(r.cues), [], 'nothing was open any more');
     });
   }
+});
+
+// ---- answers are checked: an adequate reason is taken as it is, a vague one gets one short follow-up --------------------
+const ADEQUATE = { adequate: true, gives: { reason: 'the contract says so', scope: null, exception: null }, followUp: null };
+const VAGUE = (followUp: string | null = 'What would go wrong without it?') => ({ adequate: false, gives: { reason: null, scope: null, exception: null }, followUp });
+const answerChecks = (r: Rig) => r.calls.filter((c) => c.task === 'answer_check');
+const asksOf = (r: Rig) => cueOf(r.cues, 'ask');
+type Answers = Parameters<typeof rig>[0];
+
+/** Show: a question at a pause, said (the face reports it spoken). What the person does next is up to the test. */
+async function askedRig(answers: Answers): Promise<Rig> {
+  const r = rig({ generic_question: () => ok(QUESTION), ...answers });
+  await r.send(...SHOW(), obs('o1', null), obs('o2', 'The recipient changed.'));
+  await r.advance(RULES.pauseMs + 10);
+  assert.equal(asksOf(r).length, 1);
+  await r.send({ type: 'cue_done', cueId: of(r.cues, 'ask')[0]!.cueId, outcome: 'spoken' });
+  return r;
+}
+
+test('answers: an adequate reason, of any kind, is taken as it is; the check sees the question, the answer and the screen', async () => {
+  const r = await askedRig({ answer_check: () => ok(ADEQUATE) });
+  await r.send(turn('The contract with that client says so, and they audit it every quarter.'));
+  assert.equal(answerChecks(r).length, 1);
+  const body = answerChecks(r)[0]!.body;
+  assert.equal(body.question, QUESTION.question);
+  assert.equal(body.topic, QUESTION.topic);
+  assert.equal(body.answer, 'The contract with that client says so, and they audit it every quarter.');
+  assert.ok((body.observations as Array<{ id: string }>).some((o) => o.id === 'o2'), 'it sees the screen');
+  assert.ok(LLM_TASKS.answer_check!.prepare(body).ok, 'the body is one the task accepts');
+  await r.advance(RULES.pauseMs + 10);
+  await r.advance(RULES.learnMinGapMs + RULES.askTtlMs);
+  assert.equal(asksOf(r).length, 1, 'no follow-up');
+  assert.equal(of(r.cues, 'cancel').length, 0);
+  assert.equal((r.c.status() as { asked: number }).asked, 1);
+});
+
+test('answers: a vague answer gets exactly one follow-up at the next pause; a vague answer to it gets no third question', async () => {
+  const r = await askedRig({ answer_check: () => ok(VAGUE()) });
+  await r.send(turn('Just because.'));
+  assert.equal(answerChecks(r).length, 1);
+  assert.equal(asksOf(r).length, 1, 'the pause has not begun');
+  await r.advance(RULES.pauseMs - 100);
+  assert.equal(asksOf(r).length, 1, 'not before the pause');
+  await r.advance(200);
+  assert.equal(asksOf(r).length, 2);
+  const [first, second] = asksOf(r);
+  assert.equal(second?.text, 'What would go wrong without it?');
+  assert.equal(second?.questionId, `${first?.questionId}-f`);
+  assert.deepEqual(second?.regions, first?.regions, 'it points at the same place');
+  assert.deepEqual(second?.evidenceIds, first?.evidenceIds);
+  assert.equal((r.c.status() as { asked: number }).asked, 2, 'it spends one question of the budget');
+  // A vague answer to the follow-up is taken as it is: never a second question in a row for the same point.
+  await r.send({ type: 'cue_done', cueId: of(r.cues, 'ask')[1]!.cueId, outcome: 'spoken' });
+  await r.send(turn('I do not know.'));
+  await r.advance(RULES.pauseMs + 10);
+  await r.advance(RULES.learnMinGapMs + RULES.askTtlMs);
+  assert.equal(asksOf(r).length, 2, 'no third question');
+  assert.equal(answerChecks(r).length, 1, 'the answer to a follow-up is not checked');
+});
+
+test('answers: the follow-up never interrupts typing or talking; it waits for the next pause and is asked once', async () => {
+  const r = await askedRig({ answer_check: () => ok(VAGUE()) });
+  await r.send(turn('It is how we do it.'), { type: 'activity', state: 'typing' });
+  await r.advance(RULES.pauseMs + 10);
+  assert.equal(asksOf(r).length, 1, 'not while the person types');
+  await r.advance(RULES.askTtlMs);
+  assert.equal(asksOf(r).length, 1, 'nor later, while the typing goes on');
+  await r.send({ type: 'activity', state: 'pause' });
+  assert.equal(asksOf(r).length, 2, 'at the pause that follows');
+  // Said, and typed over before it was heard: cancelled like any question, and not asked again.
+  await r.send({ type: 'activity', state: 'typing' });
+  assert.equal(cueOf(r.cues, 'cancel').length, 1);
+  await r.send({ type: 'activity', state: 'pause' });
+  await r.advance(RULES.pauseMs + 10);
+  assert.equal(asksOf(r).length, 2, 'one follow-up per point');
+  // Talking holds it as well.
+  const t = await askedRig({ answer_check: () => ok(VAGUE()) });
+  await t.send(turn('Habit.'), { type: 'talking', by: 'person', active: true });
+  await t.advance(RULES.pauseMs + 10);
+  assert.equal(asksOf(t).length, 1, 'not while the person talks');
+  await t.send({ type: 'talking', by: 'person', active: false });
+  await t.advance(RULES.pauseMs + 10);
+  assert.equal(asksOf(t).length, 2);
+});
+
+test('answers: what the person adds before the follow-up is said is judged with the answer, as a whole', async () => {
+  const judge = (body: Record<string, unknown>) => ok(String(body.answer).includes('contract') ? ADEQUATE : VAGUE());
+  const r = await askedRig({ answer_check: judge });
+  await r.send(turn('Hmm, let me think.'));
+  await r.advance(500);
+  await r.send(turn('It is the contract, they audit it.'));
+  assert.equal(answerChecks(r).length, 2, 'checked again');
+  assert.equal(answerChecks(r)[1]!.body.answer, 'Hmm, let me think. It is the contract, they audit it.');
+  await r.advance(RULES.pauseMs + 10);
+  assert.equal(asksOf(r).length, 1, 'the whole answer has its reason: no follow-up');
+  // More said while the check is still running: that call is dropped, and the whole answer is checked.
+  const o = await askedRig({ answer_check: judge });
+  const say = (seq: number, text: string) => o.c.handle([{ seq, atMs: 0, event: turn(text) }], 'second-face');
+  say(1, 'Well, it depends.');
+  say(2, 'Because the contract says so.');
+  await o.advance(0);
+  assert.equal(answerChecks(o).length, 2);
+  assert.equal(answerChecks(o)[1]!.body.answer, 'Well, it depends. Because the contract says so.');
+  await o.advance(RULES.pauseMs + 10);
+  assert.equal(asksOf(o).length, 1, 'only the whole answer counts');
+});
+
+test('answers: a command is no answer, nor is talk after a question that was never said or long after it', async () => {
+  const r = await askedRig({ answer_check: () => ok(VAGUE()) });
+  await r.send(turn("That's it."));
+  assert.equal(answerChecks(r).length, 0, 'a done phrase is a command');
+  // The face skipped the question (the person was busy): it was never said, so nobody answered it.
+  const s = rig({ generic_question: () => ok(QUESTION), answer_check: () => ok(VAGUE()) });
+  await s.send(...SHOW(), obs('o1', null), obs('o2', 'The recipient changed.'));
+  await s.advance(RULES.pauseMs + 10);
+  await s.send({ type: 'cue_done', cueId: of(s.cues, 'ask')[0]!.cueId, outcome: 'skipped' });
+  await s.send(turn('I was only thinking aloud.'));
+  assert.equal(answerChecks(s).length, 0);
+  // Long after the question, talk is not an answer to it.
+  const late = await askedRig({ answer_check: () => ok(VAGUE()) });
+  await late.advance(RULES.answerWindowMs + 1_000);
+  await late.send(turn('Now the next thing.'));
+  assert.equal(answerChecks(late).length, 0);
+});
+
+test('answers: a failed or thrown check, and the switch off, take the answer as it is', async () => {
+  const failing: Answers[] = [{}, { answer_check: () => ({ ok: false as const, error: 'invalid_output' as const }) }, { answer_check: (): TaskResult => { throw new Error('runner down'); } }];
+  for (const answers of failing) {
+    const r = await askedRig(answers);
+    await r.send(turn('Just because.'));
+    await r.advance(RULES.pauseMs + 10);
+    await r.advance(RULES.learnMinGapMs);
+    assert.equal(answerChecks(r).length, 1, 'asked once, not again');
+    assert.equal(asksOf(r).length, 1);
+  }
+  await withRules({ answerCheck: false }, async () => {
+    const r = await askedRig({ answer_check: () => ok(VAGUE()) });
+    await r.send(turn('Just because.'));
+    await r.advance(RULES.pauseMs + 10);
+    assert.equal(answerChecks(r).length, 0, 'the switch turns the check off');
+    assert.equal(asksOf(r).length, 1);
+  });
+});
+
+test('answers: the follow-up spends from the question budget and is dropped when its moment has passed or the person has moved on', async () => {
+  await withRules({ learnMaxQuestions: 1 }, async () => {
+    const r = await askedRig({ answer_check: () => ok(VAGUE()) });
+    await r.send(turn('Just because.'));
+    await r.advance(RULES.pauseMs + 10);
+    assert.equal(asksOf(r).length, 1, 'the question itself used the budget up');
+    assert.ok(cueOf(r.cues, 'quiet').some((q) => q.reason === 'question budget used up for now'));
+  });
+  // Typing for longer than a follow-up lives: its moment has passed.
+  const t = await askedRig({ answer_check: () => ok(VAGUE()) });
+  await t.send(turn('Habit.'), { type: 'activity', state: 'typing' });
+  await t.advance(RULES.followUpTtlMs + 1_000);
+  await t.send({ type: 'activity', state: 'pause' });
+  await t.advance(RULES.pauseMs + 10);
+  assert.equal(asksOf(t).length, 1, 'too late to follow up');
+  // Another app: the last place is left behind.
+  const m = await askedRig({ answer_check: () => ok(VAGUE()) });
+  await m.send(turn('Habit.'), { type: 'activity', state: 'typing' });
+  await m.send(obs('o9', 'A sheet opened.', { app: 'Sheets', surface: 'budget sheet' }));
+  await m.send({ type: 'activity', state: 'pause' });
+  await m.advance(RULES.pauseMs + RULES.settleMs + 10);
+  assert.equal(asksOf(m).filter((a) => a.questionId.endsWith('-f')).length, 0, 'no follow-up about the old screen');
+  // Off the record: nothing waits any more.
+  const q = await askedRig({ answer_check: () => ok(VAGUE()) });
+  await q.send(turn('Habit.'), { type: 'activity', state: 'typing' });
+  await q.send({ type: 'off_record', on: true }, { type: 'off_record', on: false }, { type: 'activity', state: 'pause' });
+  await q.advance(RULES.pauseMs + 10);
+  assert.equal(asksOf(q).length, 1, 'nothing survives the off-the-record switch');
+});
+
+test('answers: the demo workspace\'s alternating frames and a new screen do not swallow the follow-up or stop the check', async () => {
+  const r = rig({ generic_question: () => ok(QUESTION), answer_check: () => ok(VAGUE()) });
+  const body = 'Delivery at 12 Sample Street';
+  await r.send(...SHOW(), turn(EXPERT_WORDS));
+  await r.advance(8_000);
+  await r.send(orderFrame('w1'), emailFrame('w2', 'Hello'), orderFrame('w3'), emailFrame('w4', body), orderFrame('w5'));
+  await r.advance(RULES.settleMs + 10);
+  await r.send(emailFrame('w6', body), orderFrame('w7'), emailFrame('w8', body));
+  await r.advance(RULES.pauseMs + 10);
+  assert.equal(asksOf(r).length, 1);
+  await r.send({ type: 'cue_done', cueId: of(r.cues, 'ask')[0]!.cueId, outcome: 'spoken' });
+  await r.send(turn('Just because.'));
+  // The frames go on alternating while the pause builds: neither a change nor a reason to drop the follow-up.
+  for (let i = 0; i < 2; i++) { await r.advance(800); await r.send(orderFrame(`w${9 + 2 * i}`), emailFrame(`w${10 + 2 * i}`, body)); }
+  await r.advance(RULES.pauseMs);
+  assert.equal(asksOf(r).length, 2, 'the follow-up was asked');
+  assert.equal(of(r.cues, 'cancel').length, 0);
+  // A new screen that arrives while the check is still running leaves the check alone.
+  const o = await askedRig({ answer_check: () => ok(VAGUE()) });
+  const frame = obs('o3', 'The subject changed.', { surface: 'inbox' });
+  assert.equal(frame.type, 'observation');
+  o.c.handle([{ seq: 1, atMs: 0, event: turn('Just because.') }], 'second-face');
+  if (frame.type === 'observation') o.c.onObservation(frame.observation);
+  await o.advance(0);
+  assert.equal(answerChecks(o).length, 1, 'one call, not dropped and not repeated');
+  await o.advance(RULES.pauseMs + RULES.settleMs + 10);
+  assert.deepEqual(asksOf(o).map((a) => a.questionId.endsWith('-f')), [false, true], 'the follow-up goes first');
+});
+
+const GAPS = ['Who is the lead?', 'Is 300 a hard limit?', 'Who decides above it?'].map((question) => ({ question, targetId: null, evidenceIds: [], regionIds: [] }));
+/** Reflect with three open points, its voice edits answering "nothing to change". */
+async function reflectRig(answers: Answers): Promise<Rig> {
+  const r = rig({ map_synthesis: () => ok({ ...MAP, gaps: GAPS }), map_edit: () => ok(NO_EDIT), ...answers });
+  await r.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', 'Changed.'));
+  await r.send({ type: 'session', mode: 'learn', live: false, reason: 'user' }, { type: 'session', mode: 'review', live: true, reason: null });
+  return r;
+}
+/** The next point (or follow-up) is asked at a pause; the person answers it. */
+async function reflectStep(r: Rig, answer: string): Promise<void> {
+  await r.advance(RULES.pauseMs + RULES.gapAfterAnswerMs);
+  await r.send(turn(answer));
+}
+
+test('Reflect: a vague answer to an open point gets one follow-up before the next point, from the same three questions', async () => {
+  const r = await reflectRig({ answer_check: (body) => ok(String(body.answer).includes('dunno') ? VAGUE('Who would know?') : ADEQUATE) });
+  await reflectStep(r, 'I dunno.');
+  await reflectStep(r, 'Dana, the team lead.'); // the follow-up is asked first; this answers it
+  await reflectStep(r, 'Yes, it is hard.');
+  await r.advance(RULES.pauseMs + RULES.gapAfterAnswerMs);
+  assert.deepEqual(asksOf(r).map((a) => a.text), ['Who is the lead?', 'Who would know?', 'Is 300 a hard limit?'], 'the budget is three questions, follow-ups included');
+  assert.deepEqual(asksOf(r).map((a) => a.questionId), ['gap-1', 'gap-1-f', 'gap-2']);
+  assert.equal(answerChecks(r).length, 2, 'the answer to the follow-up is not checked');
+  assert.equal(of(r.cues, 'teachback').length, 1, 'then the teach-back');
+  const body = answerChecks(r)[0]!.body;
+  assert.deepEqual([body.question, body.topic, body.answer], ['Who is the lead?', 'gap', 'I dunno.']);
+  assert.ok(LLM_TASKS.answer_check!.prepare(body).ok, 'the body is one the task accepts');
+});
+
+test('Reflect: an adequate answer moves on to the next point, as before; a failed check does too', async () => {
+  for (const answers of [{ answer_check: () => ok(ADEQUATE) }, {}] as Answers[]) {
+    const r = await reflectRig(answers);
+    await reflectStep(r, 'The team lead.');
+    await reflectStep(r, 'Yes, hard.');
+    await reflectStep(r, 'The finance director.');
+    await r.advance(RULES.pauseMs + RULES.gapAfterAnswerMs);
+    assert.deepEqual(asksOf(r).map((a) => a.text), GAPS.map((g) => g.question), 'all three points, in order, and no follow-up');
+    assert.equal(of(r.cues, 'teachback').length, 1);
+  }
+});
+
+test('Reflect: the follow-up waits for the voice edits of the answer, and the next point waits for the follow-up', async () => {
+  let edits = 0;
+  const r = await reflectRig({ map_edit: () => { edits++; return ok(NO_EDIT); }, answer_check: () => ok(VAGUE('What would go wrong without it?')) });
+  await r.advance(RULES.pauseMs + RULES.gapAfterAnswerMs);
+  await r.send(turn('Habit.'));
+  assert.equal(edits, 1, 'the answer goes into the map by voice editing first');
+  assert.deepEqual(r.calls.slice(-1).map((c) => c.task), ['map_edit']);
+  await r.advance(RULES.pauseMs + RULES.gapAfterAnswerMs);
+  assert.deepEqual(r.calls.slice(-2).map((c) => c.task), ['map_edit', 'answer_check']);
+  assert.deepEqual(asksOf(r).map((a) => a.questionId), ['gap-1', 'gap-1-f'], 'the follow-up, not the second point');
 });

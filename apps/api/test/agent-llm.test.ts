@@ -406,6 +406,8 @@ const TURNS = [
 const QUESTION_INPUT = { observations: OBS, transcript: TURNS, asked: ['Why this title?'], language: 'de' };
 const MAP_INPUT = { observations: OBS, transcript: TURNS, correction: null, previousTeachBack: null };
 const CHECK_INPUT = { guardrails: [{ id: 'g1', condition: 'budget above 300', requiredAction: 'ask the lead first', reason: 'needs sign-off', quote: null }], observations: OBS, transcript: [], language: null };
+const NOTHING_GIVEN = { reason: null, scope: null, exception: null };
+const ANSWER_CHECK_INPUT = { question: 'Why keep it at three hundred?', topic: 'reason', answer: 'Just because.', observations: OBS, transcript: TURNS, asked: ['Why this title?'], language: null };
 
 test('generic_question: ids only from the input, repeats become null, the newest observation is the default', async (t) => {
   let reply: unknown = { question: 'You lowered the budget to 300. Is there a limit?', topic: 'limit', observationIds: ['obs-2', 'obs-9', 'obs-2'], regionIds: ['r2', 'zz'] };
@@ -596,8 +598,136 @@ test('map_edit: operations are checked against the map; a reason keeps the exper
   });
 });
 
+// ---- answer_check: one spoken answer, judged; one short follow-up when it is wanting --------------------------------------
+const inputOf = (call: RunnerCall): Record<string, unknown> => JSON.parse(call.body.prompt.slice('<input>\n'.length, -'\n</input>'.length)) as Record<string, unknown>;
+interface Judged { gives: { reason: string | null; scope: string | null; exception: string | null }; adequate: boolean; followUp: string | null }
+const wanting = (followUp: string | null): Judged => ({ gives: NOTHING_GIVEN, adequate: false, followUp });
+const given = (reason: string | null, scope: string | null = null, exception: string | null = null): Judged => ({ gives: { reason, scope, exception }, adequate: true, followUp: null });
+
+test('answer_check: typed input becomes a server-side prompt and schema; the judged output is returned', async (t) => {
+  const reply = wanting('What would go wrong without it?');
+  const s = await setup(t, () => ok(reply), HIGH);
+  const r = await post(s.base, 'answer_check', s.token, ANSWER_CHECK_INPUT);
+  assert.equal(r.status, 200);
+  assert.deepEqual((await bodyOf(r)).output, reply);
+  assert.equal(s.calls.length, 1);
+  const call = s.calls[0]!;
+  assert.equal(call.url, '/v1/complete');
+  assert.match(call.body.system, /untrusted data/);
+  assert.match(call.body.prompt, /^<input>\n\{.*\}\n<\/input>$/s);
+  const input = inputOf(call) as { answer: string; observations: Array<Record<string, unknown>> };
+  assert.deepEqual(Object.keys(input).sort(), ['answer', 'asked', 'language', 'observations', 'question', 'topic', 'transcript']);
+  assert.equal(input.answer, 'Just because.');
+  assert.ok(input.observations.length === 2 && input.observations.every((o) => !('regions' in o)), 'regions are for pointing, not for the model');
+  const schema = call.body.schema as { required: string[]; additionalProperties: boolean; properties: Record<string, { properties?: Record<string, unknown> }> };
+  assert.deepEqual(schema.required, ['gives', 'adequate', 'followUp']);
+  assert.equal(schema.additionalProperties, false);
+  assert.deepEqual(Object.keys(schema.properties.gives?.properties ?? {}), ['reason', 'scope', 'exception']);
+  assert.deepEqual(schema.properties.adequate, { type: 'boolean' });
+  assert.ok(!JSON.stringify(call).includes(s.token), 'the session token never reaches the runner');
+});
+
+test('answer_check: answers of every kind come back as judged: adequate reasons, vague answers, "I don\'t know", a long ramble with a reason', async (t) => {
+  const ramble = 'So, um, let me think... well, it is a long story, you know how Mondays are, the coffee machine broke again, anyway, where was I, right, the main thing is that the contract with this client says thirty days at most, and then there is the thing with the printer, but that is another story.';
+  const judged: Array<[string, string, Judged]> = [
+    ['a constraint of a client', 'Their system blocks files from outside, so I paste the figures straight into the message.', given('Their system blocks files from outside')],
+    ['a contract', 'The supplier contract caps it at thirty days, so I never go past that.', given('The supplier contract caps it at thirty days', 'I never go past that')],
+    ['a policy with its limit and an exception', 'Policy says anything over five thousand needs a second approver, except for renewals.', given('Policy says anything over five thousand needs a second approver', 'anything over five thousand', 'except for renewals')],
+    ['a risk from the past', 'Last spring a wrong figure went out and it took a week to fix, so I double check.', given('Last spring a wrong figure went out and it took a week to fix')],
+    ['a preference that comes with its reason', 'I like the summary at the top because the lead only reads the first lines.', given('the lead only reads the first lines')],
+    ['a hedged reason', 'I think it is because they audit it every quarter.', given('they audit it every quarter')],
+    ['a long ramble that holds a reason in the middle', ramble, given('the contract with this client says thirty days at most')],
+    ['no reason at all', 'Just because.', wanting('What would go wrong without it?')],
+    ['a habit', 'We always do it like this.', wanting('Who asked for it to be done this way?')],
+    ['a restatement of what was done', 'I moved it to the other folder.', wanting('What happens if you leave it where it was?')],
+    ['an honest "I don\'t know"', 'I don\'t know.', wanting('Who would know why?')],
+    ['talk about something else', 'Oh, the printer is jammed again.', wanting(null)],
+  ];
+  const s = await setup(t, (call) => ok(judged.find(([, answer]) => answer === inputOf(call).answer)?.[2]), HIGH);
+  for (const [kind, answer, expected] of judged) {
+    const r = await post(s.base, 'answer_check', s.token, { ...ANSWER_CHECK_INPUT, answer });
+    assert.equal(r.status, 200, kind);
+    assert.deepEqual((await bodyOf(r)).output, expected, kind);
+  }
+  assert.equal(inputOf(s.calls[6]!).answer, ramble, 'the whole answer reaches the model');
+  // Only an answer that is not adequate can come with a follow-up, and "I don't know" asks who would know.
+  assert.ok(judged.every(([, , out]) => !out.adequate || out.followUp === null));
+});
+
+test('answer_check: the output is made safe to act on: spans are the expert\'s words, a follow-up is one short new question, and only for a wanting answer', async (t) => {
+  const answer = 'Because the client didn’t want it, and the lead said so.';
+  const input = { ...ANSWER_CHECK_INPUT, answer };
+  const base = wanting('What would go wrong without it?');
+  const long = 'word '.repeat(70).trim();
+  const cases: Array<[string, unknown, Judged, Record<string, unknown>?]> = [
+    ['an adequate answer has no follow-up, whatever the model added', { ...base, adequate: true }, { ...base, adequate: true, followUp: null }],
+    ['a follow-up of exactly 12 words is kept', { ...base, followUp: 'What would go wrong if you did not do it this way?' }, { ...base, followUp: 'What would go wrong if you did not do it this way?' }],
+    ['a follow-up of 15 words is none', { ...base, followUp: 'What would go wrong if you did not do it this way at any time?' }, wanting(null)],
+    ['two questions are none', { ...base, followUp: 'Why is that? And who decides?' }, wanting(null)],
+    ['talk after the question mark is none', { ...base, followUp: 'Why? Please explain.' }, wanting(null)],
+    ['a repeat of the question is none', { ...base, followUp: 'why keep it at three hundred' }, wanting(null)],
+    ['a repeat of an earlier question is none', { ...base, followUp: 'Why this title?' }, wanting(null)],
+    ['a blank follow-up is none', { ...base, followUp: '  ' }, wanting(null)],
+    ['whitespace is made plain', { ...base, followUp: ' What would\n go wrong? ' }, wanting('What would go wrong?')],
+    ['a reason the expert never said is dropped', { ...base, gives: { reason: 'because the budget is tight', scope: null, exception: null } }, base],
+    ['a span in another quote style is returned as the expert said it', { ...base, gives: { reason: 'the client didn\'t want it', scope: null, exception: 'AND THE LEAD SAID SO' } }, { ...base, gives: { reason: 'the client didn’t want it', scope: null, exception: 'and the lead said so' } }],
+    ['the expert\'s earlier words count', { ...base, gives: { reason: 'needs the lead to sign off', scope: null, exception: null } }, { ...base, gives: { reason: 'needs the lead to sign off', scope: null, exception: null } }],
+    ['a span is cut at 300 characters', { ...base, gives: { reason: long, scope: null, exception: null } }, { ...base, gives: { reason: long.slice(0, 300), scope: null, exception: null } }, { answer: long }],
+  ];
+  const queue = cases.map(([, reply]) => reply);
+  const s = await setup(t, () => ok(queue.shift()), HIGH);
+  for (const [name, , expected, patch] of cases) {
+    const r = await post(s.base, 'answer_check', s.token, { ...input, ...patch });
+    assert.equal(r.status, 200, name);
+    assert.deepEqual((await bodyOf(r)).output, expected, name);
+  }
+  const broken: Array<[string, unknown]> = [
+    ['a key missing', { gives: NOTHING_GIVEN, adequate: true }],
+    ['an extra key', { ...base, extra: 1 }],
+    ['adequate as text', { ...base, adequate: 'yes' }],
+    ['a follow-up that is not text', { ...base, followUp: 5 }],
+    ['gives without a key', { ...base, gives: { reason: null, scope: null } }],
+    ['gives with an extra key', { ...base, gives: { ...NOTHING_GIVEN, who: null } }],
+    ['a given reason that is not text', { ...base, gives: { ...NOTHING_GIVEN, reason: 3 } }],
+    ['not an object', 'text'],
+    ['null', null],
+  ];
+  const queue2 = broken.map(([, reply]) => reply);
+  const s2 = await setup(t, () => ok(queue2.shift()), HIGH);
+  for (const [name] of broken) {
+    const r = await post(s2.base, 'answer_check', s2.token, input);
+    assert.equal(r.status, 502, name);
+    assert.deepEqual(await r.json(), { ok: false, error: 'invalid_output' }, name);
+  }
+});
+
+test('answer_check: the input is typed; a summary point can come without a screen', async (t) => {
+  const s = await setup(t, () => ok(wanting(null)), HIGH);
+  const bad = async (body: unknown): Promise<unknown> => {
+    const r = await post(s.base, 'answer_check', s.token, body);
+    assert.equal(r.status, 400);
+    return (await bodyOf(r)).field;
+  };
+  assert.equal(await bad({ ...ANSWER_CHECK_INPUT, extra: 1 }), 'body');
+  assert.equal(await bad({ ...ANSWER_CHECK_INPUT, topic: 'gossip' }), 'topic');
+  assert.equal(await bad({ ...ANSWER_CHECK_INPUT, question: '' }), 'question');
+  assert.equal(await bad({ ...ANSWER_CHECK_INPUT, answer: '' }), 'answer');
+  assert.equal(await bad({ ...ANSWER_CHECK_INPUT, answer: 'a'.repeat(4001) }), 'answer');
+  assert.equal(await bad({ ...ANSWER_CHECK_INPUT, observations: [{ ...OBS[0], id: 'has space' }] }), 'observations.0.id');
+  assert.equal(await bad({ ...ANSWER_CHECK_INPUT, transcript: [{ role: 'system', text: 'x', atMs: 0 }] }), 'transcript.0.role');
+  assert.equal(await bad({ ...ANSWER_CHECK_INPUT, asked: [1] }), 'asked.0');
+  assert.equal(await bad({ ...ANSWER_CHECK_INPUT, language: 'Deutsch bitte' }), 'language');
+  assert.equal(s.calls.length, 0, 'nothing reached the runner');
+  const { observations: _screen, ...noScreen } = ANSWER_CHECK_INPUT;
+  for (const body of [{ ...noScreen, topic: 'gap' }, { ...ANSWER_CHECK_INPUT, observations: [], transcript: [], asked: [] }]) {
+    assert.equal((await post(s.base, 'answer_check', s.token, body)).status, 200);
+  }
+  assert.equal(s.calls.length, 2);
+});
+
 // ---- honesty: what the runner actually receives must be generic -----------------------------------------------------
 const PINNED_PROMPT_SHA256: Record<string, string> = {
+  'answer-check.ts': '492414ca678872a7f911cf0cd64acad637d9b8960b15985bd4910e2abad83449',
   'answer-extraction.ts': '28c542eb5bf30514aed951b611649de202107cfa2cde6504e664b76c947e373d',
   'reply-classification.ts': 'd702dcfb366d9879bc0a1c5e3b3c647e06961c71dfdcaadc07ddb27f0c06f7e4',
   'entity-resolution.ts': '711256123da833fb9e95f440d16da7829ce88fc17b08d1ea10d3c560cf2687be',
@@ -615,6 +745,7 @@ test('what the runner receives is generic: system prompts and schemas carry no s
   const s = await setup(t, (call) => {
     if (call.body.prompt.includes('"teachBack"')) return ok({ verdict: 'confirm', correction: null });
     if (call.body.prompt.includes('"knownRefs"')) return ok({ ref: null });
+    if (call.body.prompt.includes('"answer":')) return ok({ gives: NOTHING_GIVEN, adequate: false, followUp: null });
     if (call.body.prompt.includes('"asked"')) return ok({ question: null, topic: 'reason', observationIds: [], regionIds: [] });
     if (call.body.prompt.includes('"previousTeachBack"')) return ok({ processes: [], steps: [], guardrails: [], gaps: [], teachBack: 'Is this right?' });
     if (call.body.prompt.includes('"processes"')) return ok({ processId: null, confidence: 0 });
@@ -630,7 +761,8 @@ test('what the runner receives is generic: system prompts and schemas carry no s
   await post(s.base, 'guardrail_check', s.token, CHECK_INPUT);
   await post(s.base, 'map_edit', s.token, { map: { steps: [], guardrails: [], gaps: [], teachBack: '' }, utterance: 'one', recent: [], language: null });
   await post(s.base, 'process_match', s.token, MATCH_INPUT);
-  assert.equal(s.calls.length, 8);
+  await post(s.base, 'answer_check', s.token, ANSWER_CHECK_INPUT);
+  assert.equal(s.calls.length, 9);
   for (const call of s.calls) {
     for (const [what, value] of [['system prompt', call.body.system], ['schema', JSON.stringify(call.body.schema)]] as const) {
       const hit = SCENARIO_TERMS.exec(value);
@@ -646,6 +778,7 @@ test('prompt sources are self-contained and pinned: any change to a system promp
   const names = (await readdir(dir)).filter((n) => n.endsWith('.ts')).sort();
   assert.deepEqual(names, Object.keys(PINNED_PROMPT_SHA256).sort());
   const modules: Record<string, { system: string }> = {
+    'answer-check.ts': await import('../agent/prompts/answer-check.ts') as { system: string },
     'answer-extraction.ts': await import('../agent/prompts/answer-extraction.ts') as { system: string },
     'reply-classification.ts': await import('../agent/prompts/reply-classification.ts') as { system: string },
     'entity-resolution.ts': await import('../agent/prompts/entity-resolution.ts') as { system: string },

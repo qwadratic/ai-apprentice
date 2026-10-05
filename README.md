@@ -31,6 +31,7 @@ The expert works as usual. Clipa stays quiet while they type or talk, and asks o
 
 - No questions while the expert types, talks or is away, and none while Clipa is speaking. At most 4 per 10 minutes.
 - One short question (at most 10 words) about a reason, a limit or an exception behind something visible. Never about what the screen already shows.
+- Any adequate reason counts, of any kind: a constraint, a contract, a policy, a risk, a preference with its reason. An answer with no reason ("just because", "we always do it", "I don't know") gets one short follow-up (at most 12 words) at the next pause, from another angle. It counts toward the 4 questions, and a vague answer to it ends the point: never a second follow-up for the same point.
 
 ### Reflect
 
@@ -40,6 +41,7 @@ When Show ends, the Work Map is already being built. Reflect opens on one rule c
 <sub>Clipa's teach-back: "...Their request requires the address and delivery time window in the email text, and applies only to them..." The banner reads "Here is what I understood. Confirm it or correct it." After Confirm it changes to "The map is confirmed. A new hire can start Pass it on now." The badge turns from "Map v3 · draft" to "Map v3 · confirmed".</sub></p>
 
 - The answer becomes a rule for this customer only, with its exception: the details go in the email text, and an image is fine when the details are also in text.
+- A vague answer to an open point gets one follow-up before the next point. It spends one of the three questions, so the debrief stays short.
 - The teach-back is short (at most 35 words) and covers only the rules: for whom, what to do, the reason in the expert's words, the exception. The expert corrects a detail by voice, for example "it is the delivery time window, not only the date", then confirms by voice or with the Confirm button.
 - Every step and rule links to its screen moment (evidence id and time range, no video replay yet) and to the expert's own words.
 

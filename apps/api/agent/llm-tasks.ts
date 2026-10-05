@@ -4,6 +4,7 @@ import type { BaselineAppId, BaselineProfileId, BaselinePromptContext } from '..
 import { parseBaselinePromptContext } from '../../../packages/screen/baseline/profiles.ts';
 import type { Json } from './config.ts';
 import { isRecord } from './config.ts';
+import { system as answerCheckSystem } from './prompts/answer-check.ts';
 import { system as answerExtractionSystem } from './prompts/answer-extraction.ts';
 import { system as entityResolutionSystem } from './prompts/entity-resolution.ts';
 import { system as genericQuestionSystem } from './prompts/generic-question.ts';
@@ -59,7 +60,7 @@ const stringArray: Json = { type: 'array', items: STRING };
 const isStr = (v: unknown, max: number, min = 0): v is string => typeof v === 'string' && v.length >= min && v.length <= max;
 const strList = (v: unknown, maxItems: number, maxLen: number): v is string[] => Array.isArray(v) && v.length <= maxItems && v.every((x) => isStr(x, maxLen, 1));
 // Structured outputs do not enforce maxLength, so the free-text caps are enforced here and stated in the prompts.
-export const CAPS = { rationale: 300, correction: 300, condition: 200, requiredAction: 200, listItems: 5, listItemLength: 200, question: 240, goal: 160, escalateTo: 120, teachBack: 1500 } as const;
+export const CAPS = { rationale: 300, correction: 300, condition: 200, requiredAction: 200, listItems: 5, listItemLength: 200, question: 240, goal: 160, escalateTo: 120, teachBack: 1500, followUpWords: 12, followUpLength: 120, given: 300 } as const;
 
 // ---- quote matching ---------------------------------------------------------
 // The model's quote and the answer are compared after folding: NFKC, curly to straight quotes, dashes, collapsed
@@ -375,6 +376,78 @@ const genericQuestion: LlmTask = {
         if (asked.value.some((a) => sameText(a, question))) return { question: null, topic: topic as GenericQuestionOutput['topic'], observationIds: [], regionIds: [] };
         const newest = obsIds[obsIds.length - 1];
         return { question: question.trim(), topic: topic as GenericQuestionOutput['topic'], observationIds: observationIds.length ? observationIds : (newest ? [newest] : []), regionIds: regions };
+      },
+    };
+  },
+};
+
+// ---- answer_check -----------------------------------------------------------
+// The expert answered one of Clipa's questions: is it an answer (a specific reason, or what the question asked for), or does one
+// short follow-up make sense? The model judges; this code only makes what it says safe to act on.
+const ANSWER_TOPICS = [...GENERIC_TOPICS, 'gap'] as const;
+const GIVES_KEYS = ['reason', 'scope', 'exception'] as const;
+const ANSWER_CHECK_KEYS = ['gives', 'adequate', 'followUp'] as const;
+export interface AnswerCheckOutput { adequate: boolean; gives: { reason: string | null; scope: string | null; exception: string | null }; followUp: string | null }
+
+const plainQuestion = (s: string): string => s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim();
+
+/** One short question: at most 12 words, a single question mark and only at the end, and not a repeat of a question already asked. */
+function usableFollowUp(value: string, repeats: readonly string[]): string | null {
+  const line = value.replace(/\s+/g, ' ').trim();
+  if (line === '' || line.length > CAPS.followUpLength || line.split(' ').length > CAPS.followUpWords) return null;
+  if ((line.match(/[?？]/g) ?? []).length > 1 || /[?？]\s*\S/.test(line)) return null;
+  const plain = plainQuestion(line);
+  return plain === '' || repeats.some((r) => plainQuestion(r) === plain) ? null : line;
+}
+
+const answerCheck: LlmTask = {
+  maxInputBytes: 32 * 1024,
+  fast: true,
+  prepare(body) {
+    if (!isRecord(body) || !onlyKeys(body, ['question', 'topic', 'answer', 'observations', 'transcript', 'asked', 'language'])) return fail('body');
+    const question = text(body.question, 'question', 1000); if (!question.ok) return question;
+    const topic = body.topic;
+    if (typeof topic !== 'string' || !(ANSWER_TOPICS as readonly string[]).includes(topic)) return fail('topic');
+    const answer = text(body.answer, 'answer', 4000); if (!answer.ok) return answer;
+    // An open point of a summary can have no screen of its own: no observations is fine here (the other tasks insist on one).
+    const rawObservations = body.observations ?? [];
+    const observations: Parsed<GenericObservation[]> = Array.isArray(rawObservations) && rawObservations.length === 0
+      ? { ok: true, value: [] } : parseObservations(rawObservations, 'observations', 6);
+    if (!observations.ok) return observations;
+    const transcript = parseTranscript(body.transcript ?? [], 'transcript', 8); if (!transcript.ok) return transcript;
+    const asked = textList(body.asked ?? [], 'asked', 20, 300); if (!asked.ok) return asked;
+    const lang = language(body.language ?? null, 'language'); if (!lang.ok) return lang;
+    // The regions only matter for pointing; the model judges words.
+    const input = {
+      question: question.value, topic, answer: answer.value, observations: observations.value.map(({ regions: _regions, ...o }) => o),
+      transcript: transcript.value, asked: asked.value, language: lang.value,
+    };
+    const repeats = [question.value, ...asked.value];
+    const schema: Json = {
+      type: 'object', additionalProperties: false, required: [...ANSWER_CHECK_KEYS],
+      properties: {
+        gives: { type: 'object', additionalProperties: false, required: [...GIVES_KEYS], properties: { reason: nullable(STRING), scope: nullable(STRING), exception: nullable(STRING) } },
+        adequate: { type: 'boolean' },
+        followUp: nullable(STRING),
+      },
+    };
+    return {
+      ok: true, request: { system: answerCheckSystem, prompt: prompt(input), schema },
+      check(raw): AnswerCheckOutput | null {
+        if (!isRecord(raw) || !exactKeys(raw, ANSWER_CHECK_KEYS)) return null;
+        const { gives, adequate, followUp } = raw;
+        if (typeof adequate !== 'boolean' || !isRecord(gives) || !exactKeys(gives, GIVES_KEYS)) return null;
+        if (followUp !== null && typeof followUp !== 'string') return null;
+        const given: AnswerCheckOutput['gives'] = { reason: null, scope: null, exception: null };
+        for (const key of GIVES_KEYS) {
+          const value = gives[key];
+          if (value !== null && typeof value !== 'string') return null;
+          // What the expert is said to have given must be a span of what they said (or said just before): the reason is theirs.
+          const span = value === null ? null : findQuoteSpan(answer.value, value) ?? expertQuote(transcript.value, value)?.quote ?? null;
+          given[key] = span === null ? null : span.slice(0, CAPS.given);
+        }
+        // A follow-up exists only for an answer that is not adequate, and only as one short question that is new.
+        return { adequate, gives: given, followUp: adequate || followUp === null ? null : usableFollowUp(followUp, repeats) };
       },
     };
   },
@@ -734,6 +807,7 @@ const processMatch: LlmTask = {
 
 export const LLM_TASKS: Readonly<Record<string, LlmTask>> = Object.freeze({
   answer_extraction: answerExtraction,
+  answer_check: answerCheck,
   reply_classification: replyClassification,
   entity_resolution: entityResolution,
   generic_question: genericQuestion,
