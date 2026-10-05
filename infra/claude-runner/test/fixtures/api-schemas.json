@@ -666,5 +666,324 @@
     "type": "number"
    }
   }
+ },
+ "llm_map_enrich": {
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+   "map",
+   "context",
+   "predictions"
+  ],
+  "properties": {
+   "map": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+     "steps",
+     "guardrails",
+     "related"
+    ],
+    "properties": {
+     "steps": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "additionalProperties": false,
+       "required": [
+        "id",
+        "goal",
+        "action",
+        "decision",
+        "evidenceIds"
+       ],
+       "properties": {
+        "id": {
+         "type": "string",
+         "enum": [
+          "s1"
+         ]
+        },
+        "goal": {
+         "anyOf": [
+          {
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "action": {
+         "anyOf": [
+          {
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "decision": {
+         "anyOf": [
+          {
+           "type": "object",
+           "additionalProperties": false,
+           "required": [
+            "summary",
+            "reason",
+            "quote",
+            "sessionId"
+           ],
+           "properties": {
+            "summary": {
+             "type": "string"
+            },
+            "reason": {
+             "type": "string"
+            },
+            "quote": {
+             "type": "string"
+            },
+            "sessionId": {
+             "type": "string",
+             "enum": [
+              "cur00000-aaaa",
+              "old00001-bbbb"
+             ]
+            }
+           }
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "evidenceIds": {
+         "type": "array",
+         "items": {
+          "type": "string",
+          "enum": [
+           "o1"
+          ]
+         }
+        }
+       }
+      }
+     },
+     "guardrails": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "additionalProperties": false,
+       "required": [
+        "id",
+        "condition",
+        "requiredAction",
+        "reason",
+        "quote",
+        "sessionId",
+        "escalateTo",
+        "exceptions",
+        "evidenceIds"
+       ],
+       "properties": {
+        "id": {
+         "type": "string",
+         "enum": [
+          "g1"
+         ]
+        },
+        "condition": {
+         "anyOf": [
+          {
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "requiredAction": {
+         "anyOf": [
+          {
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "reason": {
+         "anyOf": [
+          {
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "quote": {
+         "anyOf": [
+          {
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "sessionId": {
+         "anyOf": [
+          {
+           "type": "string",
+           "enum": [
+            "cur00000-aaaa",
+            "old00001-bbbb"
+           ]
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "escalateTo": {
+         "anyOf": [
+          {
+           "type": "string"
+          },
+          {
+           "type": "null"
+          }
+         ]
+        },
+        "exceptions": {
+         "type": "array",
+         "items": {
+          "type": "string"
+         }
+        },
+        "evidenceIds": {
+         "type": "array",
+         "items": {
+          "type": "string",
+          "enum": [
+           "o1"
+          ]
+         }
+        }
+       }
+      }
+     },
+     "related": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "additionalProperties": false,
+       "required": [
+        "title",
+        "summary",
+        "sessionId"
+       ],
+       "properties": {
+        "title": {
+         "type": "string"
+        },
+        "summary": {
+         "type": "string"
+        },
+        "sessionId": {
+         "type": "string",
+         "enum": [
+          "cur00000-aaaa",
+          "old00001-bbbb"
+         ]
+        }
+       }
+      }
+     }
+    }
+   },
+   "context": {
+    "type": "array",
+    "items": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "fact",
+      "quote",
+      "sessionId"
+     ],
+     "properties": {
+      "fact": {
+       "type": "string"
+      },
+      "quote": {
+       "type": "string"
+      },
+      "sessionId": {
+       "type": "string",
+       "enum": [
+        "cur00000-aaaa",
+        "old00001-bbbb"
+       ]
+      }
+     }
+    }
+   },
+   "predictions": {
+    "type": "array",
+    "items": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "gapId",
+      "likelyAnswer",
+      "quote",
+      "sessionId",
+      "confidence"
+     ],
+     "properties": {
+      "gapId": {
+       "type": "string",
+       "enum": [
+        "gap-1"
+       ]
+      },
+      "likelyAnswer": {
+       "type": "string"
+      },
+      "quote": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "sessionId": {
+       "anyOf": [
+        {
+         "type": "string",
+         "enum": [
+          "cur00000-aaaa",
+          "old00001-bbbb"
+         ]
+        },
+        {
+         "type": "null"
+        }
+       ]
+      },
+      "confidence": {
+       "type": "number"
+      }
+     }
+    }
+   }
+  }
  }
 }
