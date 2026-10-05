@@ -99,7 +99,8 @@ export function registerAgentRoutes(app: Express, rt: AgentRuntime): void {
       return;
     }
     if (signedUrlLimited(clientIp(req))) { limited(res); return; }
-    // A token is optional unless configured, but one that is sent must be valid.
+    // A session token is required by default (SIGNED_URL_REQUIRE_SESSION=0 opts out); even when opted out, a token
+    // that is sent must still be valid.
     const header = req.get('Authorization');
     if (config.signedUrlRequiresSession || header !== undefined) {
       const auth = store.check(header, null);

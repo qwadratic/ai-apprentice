@@ -47,40 +47,57 @@ test('session creation is rate limited per IP', async (t) => {
   assert.equal((await fetch(`${base}/api/agent/sessions`, { method: 'POST', headers: { Origin: ORIGIN, 'X-Forwarded-For': '203.0.113.7' } })).status, 201, 'another client IP has its own window');
 });
 
-test('signed-url: server key, no-store, optional/required token, rate limit, nothing sensitive logged', async (t) => {
+test('signed-url: server key, no-store, token required by default, rate limit, nothing sensitive logged', async (t) => {
   const stub = elevenStub();
   const logs: unknown[] = [];
   const { base } = await start(t, { fetch: stub.fetch, log: (f) => { logs.push(f); }, limits: { signedUrlPerMinute: 3 } });
   const s = await issue(base);
   const get = (headers: Record<string, string>) => fetch(`${base}/api/agent/elevenlabs/signed-url`, { headers: { Origin: ORIGIN, ...headers } });
-  const ok = await get({});
+  assert.equal((await get({})).status, 401, 'no token is refused by default');
+  assert.equal((await get({ Authorization: 'Bearer ' + 'C'.repeat(43) })).status, 401, 'a token that is sent must be valid');
+  const ok = await get(bearer(s.token));
   assert.equal(ok.status, 200);
   assert.equal(ok.headers.get('cache-control'), 'no-store');
   assert.deepEqual(await ok.json(), { signed_url: SIGNED });
   assert.equal(stub.calls[0]?.key, EL_KEY);
   assert.ok(stub.calls[0]?.url.includes(`agent_id=${EL_AGENT}`));
-  assert.equal((await get({ Authorization: 'Bearer ' + 'C'.repeat(43) })).status, 401, 'a token that is sent must be valid');
-  assert.equal((await get(bearer(s.token))).status, 200);
-  assert.equal((await get({})).status, 429);
+  assert.equal((await get(bearer(s.token))).status, 429, 'the fourth call in the window is rate limited');
   const text = JSON.stringify(logs);
   for (const secret of [SIGNED, 'sig-secret', EL_KEY, s.token]) assert.ok(!text.includes(secret));
 });
 
-test('signed-url can require a session token, and reports missing configuration', async (t) => {
+test('signed-url requires a session token by default and when forced on; only an explicit opt-out allows an anonymous caller', async (t) => {
   const strict = await start(t, { fetch: elevenStub().fetch, signedUrlRequiresSession: true });
   const s = await issue(strict.base);
   const url = `${strict.base}/api/agent/elevenlabs/signed-url`;
-  assert.equal((await fetch(url, { headers: { Origin: ORIGIN } })).status, 401);
+  assert.equal((await fetch(url, { headers: { Origin: ORIGIN } })).status, 401, 'forced on: no token is refused');
   assert.equal((await fetch(url, { headers: { Origin: ORIGIN, ...bearer(s.token) } })).status, 200);
+
+  const optOut = await start(t, { fetch: elevenStub().fetch, signedUrlRequiresSession: false });
+  const optOutUrl = `${optOut.base}/api/agent/elevenlabs/signed-url`;
+  assert.equal((await fetch(optOutUrl, { headers: { Origin: ORIGIN } })).status, 200, 'opted out: no token is allowed');
+  assert.equal((await fetch(optOutUrl, { headers: { Origin: ORIGIN, Authorization: 'Bearer ' + 'C'.repeat(43) } })).status, 401, 'opted out, but a token that is sent must still be valid');
+
   const bare = await start(t, { elevenLabsApiKey: '', elevenLabsAgentIdInterviewer: '' });
   const r = await fetch(`${bare.base}/api/agent/elevenlabs/signed-url`, { headers: { Origin: ORIGIN } });
   assert.equal(r.status, 503);
   assert.deepEqual(await r.json(), { ok: false, error: 'elevenlabs_not_configured', missing: ['ELEVENLABS_AGENT_ID_INTERVIEWER', 'ELEVENLABS_API_KEY'] });
 });
 
+test('signedUrlRequiresSession defaults to true; only env SIGNED_URL_REQUIRE_SESSION=0 turns it off', () => {
+  const log = (): void => {};
+  assert.equal(resolveConfig({ log }, {}).signedUrlRequiresSession, true, 'unset env: required');
+  assert.equal(resolveConfig({ log }, { SIGNED_URL_REQUIRE_SESSION: '0' }).signedUrlRequiresSession, false);
+  assert.equal(resolveConfig({ log }, { SIGNED_URL_REQUIRE_SESSION: '1' }).signedUrlRequiresSession, true);
+  assert.equal(resolveConfig({ log }, { SIGNED_URL_REQUIRE_SESSION: 'false' }).signedUrlRequiresSession, true, 'anything but "0" still requires a session');
+  assert.equal(resolveConfig({ log, signedUrlRequiresSession: false }, { SIGNED_URL_REQUIRE_SESSION: '1' }).signedUrlRequiresSession, false, 'an explicit option still wins over the environment');
+});
+
 test('signed-url: role picks the interviewer or the tutor agent; unknown roles and a missing tutor are refused', async (t) => {
   const stub = elevenStub();
-  const { base } = await start(t, { fetch: stub.fetch, elevenLabsAgentIdTutor: 'agent_tutor_test' });
+  // Role selection, not auth: this test covers which agent each role resolves to, so it opts out of the session
+  // requirement and never sends a token.
+  const { base } = await start(t, { fetch: stub.fetch, elevenLabsAgentIdTutor: 'agent_tutor_test', signedUrlRequiresSession: false });
   const get = (query: string) => fetch(`${base}/api/agent/elevenlabs/signed-url${query}`, { headers: { Origin: ORIGIN } });
   assert.equal((await get('')).status, 200);
   assert.equal((await get('?role=interviewer')).status, 200);

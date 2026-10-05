@@ -36,6 +36,7 @@ test('maps are written atomically with mode 0600 and read back at start, so a re
   maps.recordBuilt('sess-a', { ...MAP, comments: [{ targetId: 's1', text: 'only in December', atMs: 7 }] } as never, 1000);
   maps.confirm('sess-a', MAP, 2000);
   maps.confirm('sess-b', { ...MAP, processes: [{ id: 'p1', title: 'Supplier check', summary: '' }] }, 3000);
+  await store.idle(); // the three saves above are fire-and-forget from the registry; wait for the queue to drain
 
   assert.equal(statSync(file).mode & 0o777, 0o600);
   assert.deepEqual(readdirSync(join(dir, 'state')), ['maps.json'], 'no temp file is left behind');
@@ -81,6 +82,7 @@ test('an unusable path keeps maps in memory only and logs once; an empty path is
   const maps = new MapRegistry(store);
   maps.confirm('sess-a', MAP, 1);
   maps.recordBuilt('sess-a', MAP, 2);
+  await store.idle();
   assert.equal(store.memoryOnly(), true);
   assert.equal(lines.length, 1, 'logged once');
   assert.equal(lines[0]?.level, 'warn');
@@ -103,9 +105,29 @@ test('a damaged file starts empty and is replaced by the next write; entries tha
   assert.deepEqual(store.loaded, { confirmed: [], lastBuilt: null });
   assert.equal(lines.length, 1);
   new MapRegistry(store).confirm('sess-a', MAP, 1);
+  await store.idle();
   assert.equal(createMapStore({ file, log }).loaded.confirmed[0]?.sessionId, 'sess-a');
 
   writeFileSync(file, JSON.stringify({ version: 1, lastBuilt: { sessionId: 'x', atMs: 1, title: 't', map: { steps: 'no' } }, confirmed: [{ sessionId: 'ok', atMs: 2, title: 'Fine', map: MAP }, null] }));
   const mixed = createMapStore({ file, log }).loaded;
   assert.deepEqual([mixed.confirmed.map((e) => e.sessionId), mixed.lastBuilt], [['ok'], null]);
+});
+
+test('saves started close together do not interleave: they land in call order, the last one wins, no temp file is left', async (t) => {
+  const dir = await tempDir(t);
+  const file = join(dir, 'maps.json');
+  const { log } = logs();
+  const store = createMapStore({ file, log });
+  const entry = (n: number): StoredMap => ({ sessionId: `sess-${n}`, atMs: n, title: `Map ${n}`, map: demoMap() });
+
+  // All 20 saves are fired before any of them has had a chance to touch the filesystem. If they ran in parallel,
+  // the open/write/rename of one could land between another's, and the file could end up with an earlier state,
+  // a half-written body, or a stray temp file. Serialized, the queue drains in order and the last call wins.
+  const pending = Array.from({ length: 20 }, (_, n) => store.save({ confirmed: [entry(n)], lastBuilt: null }));
+  await Promise.all(pending);
+  await store.idle();
+
+  assert.deepEqual(readdirSync(dir), ['maps.json'], 'every temp file was renamed or cleaned up, none left behind');
+  const raw = JSON.parse(readFileSync(file, 'utf8')) as { confirmed: StoredMap[] };
+  assert.equal(raw.confirmed[0]?.sessionId, 'sess-19', 'the file holds the state of the last save() call, not an earlier or mixed one');
 });

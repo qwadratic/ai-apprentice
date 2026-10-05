@@ -12,7 +12,7 @@ export interface AgentOptions {
   allowedOrigins?: string[];
   sessionsDir?: string;
   sessionTtlMs?: number;
-  /** The signed-url route insists on a valid session token. Default: env SIGNED_URL_REQUIRE_SESSION=1. */
+  /** The signed-url route insists on a valid session token. Default: true; set env SIGNED_URL_REQUIRE_SESSION=0 to allow an anonymous caller. */
   signedUrlRequiresSession?: boolean;
   /** Bearer token for the admin routes (list, read, delete stored sessions). Default: env API_TOKEN; under 32 chars disables them. */
   apiToken?: string;
@@ -172,7 +172,8 @@ export function resolveConfig(options: AgentOptions = {}, env: NodeJS.ProcessEnv
     allowedOrigins: new Set(origins),
     sessionsDir: options.sessionsDir ?? env.SESSIONS_DIR ?? '/var/lib/apprentice/sessions',
     sessionTtlMs: options.sessionTtlMs ?? 12 * 3_600_000,
-    signedUrlRequiresSession: options.signedUrlRequiresSession ?? env.SIGNED_URL_REQUIRE_SESSION === '1',
+    // Secure by default: only an explicit "0" opts out, so an unset or misspelled env value still requires a session.
+    signedUrlRequiresSession: options.signedUrlRequiresSession ?? env.SIGNED_URL_REQUIRE_SESSION !== '0',
     apiToken: options.apiToken ?? env.API_TOKEN ?? '',
     runnerUrl: options.runnerUrl ?? (env.RUNNER_URL || 'http://127.0.0.1:8787'),
     runnerToken: options.runnerToken ?? env.RUNNER_TOKEN ?? '',

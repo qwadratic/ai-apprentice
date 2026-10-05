@@ -2,7 +2,11 @@
 // One small JSON file (AGENT_MAPS_FILE): the confirmed maps of the MapRegistry plus the last map built in any session.
 // Written whole on every change, atomically (a temp file, then rename), mode 0600: maps hold the expert's words. Never raw
 // frames or audio: only the map JSON. When the file cannot be read or written, the store logs once and keeps maps in memory.
-import { accessSync, closeSync, constants, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeSync } from 'node:fs';
+// save() does the write off the main thread (fs/promises) and queues one write at a time per store, so two saves started
+// close together still land on disk in call order, each one finished (write, fsync, close, rename) before the next starts.
+import { accessSync, constants, existsSync, promises as fsp, readFileSync } from 'node:fs';
+import type { FileHandle } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { dirname } from 'node:path';
 import { isRecord } from '../config.ts';
 import type { Logger } from '../config.ts';
@@ -26,8 +30,10 @@ export const MAP_FILE_MAX_CONFIRMED = 50;
 export interface MapStore {
   /** What the file held at start: empty when there was none, it could not be read, or the store is memory-only. */
   readonly loaded: MapStoreState;
-  /** Writes the whole state; a no-op once the store is memory-only. */
-  save(state: MapStoreState): void;
+  /** Queues writing the whole state; a no-op once the store is memory-only. Saves run one at a time, in call order. */
+  save(state: MapStoreState): Promise<void>;
+  /** Resolves once every save() requested so far has finished (or the store gave up writing); for tests and shutdown. */
+  idle(): Promise<void>;
   /** True when maps are not written to disk (no path, or the path could not be read or written). */
   memoryOnly(): boolean;
 }
@@ -130,28 +136,43 @@ export function createMapStore(options: MapStoreOptions): MapStore {
     const dir = dirname(file);
     try { if (existsSync(dir)) accessSync(dir, constants.W_OK); } catch (err) { giveUp('maps folder is not writable; Work Maps stay in memory only', err); }
   }
+  // One chain per store: each save() appends its write to it, so saves that start close together still run one at a
+  // time, in the order they were called, exactly like the old blocking writes did. run() never throws (it reports a
+  // failure through giveUp instead), so the chain itself never breaks.
+  let queue: Promise<void> = Promise.resolve();
+  const save = (state: MapStoreState): Promise<void> => {
+    if (memoryOnly) return Promise.resolve();
+    const text = serializeMapFile(state, maxBytes);
+    if (text === null) {
+      giveUp('maps do not fit the size cap; Work Maps stay in memory only', new Error('too_large'));
+      return Promise.resolve();
+    }
+    const run = async (): Promise<void> => {
+      if (memoryOnly) return; // an earlier queued save already gave up writing
+      const tmp = `${file}.${process.pid}.${randomUUID()}.tmp`;
+      let handle: FileHandle | null = null;
+      try {
+        await fsp.mkdir(dirname(file), { recursive: true, mode: 0o750 });
+        handle = await fsp.open(tmp, 'w', 0o600);
+        await handle.write(text);
+        await handle.sync();
+        await handle.close();
+        handle = null;
+        await fsp.rename(tmp, file);
+      } catch (err) {
+        if (handle !== null) await handle.close().catch(() => { /* already closed */ });
+        await fsp.unlink(tmp).catch(() => { /* never created */ });
+        giveUp('maps file is not writable; Work Maps stay in memory only', err);
+      }
+    };
+    const next = queue.then(run);
+    queue = next;
+    return next;
+  };
   return {
     loaded,
     memoryOnly: () => memoryOnly,
-    save(state) {
-      if (memoryOnly) return;
-      const text = serializeMapFile(state, maxBytes);
-      if (text === null) { giveUp('maps do not fit the size cap; Work Maps stay in memory only', new Error('too_large')); return; }
-      const tmp = `${file}.${process.pid}.${Date.now().toString(36)}.tmp`;
-      let fd: number | null = null;
-      try {
-        mkdirSync(dirname(file), { recursive: true, mode: 0o750 });
-        fd = openSync(tmp, 'w', 0o600);
-        writeSync(fd, text);
-        fsyncSync(fd);
-        closeSync(fd);
-        fd = null;
-        renameSync(tmp, file);
-      } catch (err) {
-        if (fd !== null) { try { closeSync(fd); } catch { /* already closed */ } }
-        try { unlinkSync(tmp); } catch { /* never created */ }
-        giveUp('maps file is not writable; Work Maps stay in memory only', err);
-      }
-    },
+    save,
+    idle: () => queue,
   };
 }

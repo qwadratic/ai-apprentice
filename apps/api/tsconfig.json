@@ -8,6 +8,7 @@
   "include": [
     "src/**/*.ts",
     "test/**/*.ts",
+    "scripts/**/*.ts",
     "screen/**/*.ts",
     "agent/**/*.ts",
     "screen/**/*.mjs",
