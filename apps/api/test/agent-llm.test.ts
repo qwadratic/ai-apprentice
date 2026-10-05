@@ -8,6 +8,9 @@ import http from 'node:http';
 import type { AgentOptions } from '../agent/index.ts';
 import { ORIGIN, bearer, issue, start } from './agent-helpers.ts';
 import type { MapSynthesisOutput } from '../agent/llm-tasks.ts';
+import { callRunnerWithRetry } from '../agent/llm.ts';
+import { resolveConfig } from '../agent/config.ts';
+import type { FetchFn } from '../agent/config.ts';
 
 const RUNNER_TOKEN = 'runner-' + 'r'.repeat(40);
 
@@ -664,4 +667,70 @@ test('prompt sources are self-contained and pinned: any change to a system promp
   }
   const tasks = await readFile(new URL('../agent/llm-tasks.ts', import.meta.url), 'utf8');
   assert.ok(!SCENARIO_TERMS.test(tasks.replace(/customerRefs/g, 'refs').replace(/orderFields/g, 'fields')), 'llm-tasks.ts mentions scenario content');
+});
+
+// ---- fast tasks retry once on a transient runner failure ------------------------------------------------------------
+test('a fast task retries once after a transient failure (5xx) and succeeds, with a short backoff', async (t) => {
+  const replies: Reply[] = [{ status: 500, json: { ok: false, error: 'boom' } }, ok({ status: 'clear', guardrailId: null, message: null, regionIds: [] })];
+  const s = await setup(t, () => replies.shift() ?? {}, HIGH);
+  const started = Date.now();
+  const r = await post(s.base, 'guardrail_check', s.token, CHECK_INPUT);
+  assert.equal(r.status, 200);
+  assert.deepEqual(await bodyOf(r), { ok: true, output: { status: 'clear', guardrailId: null, message: null, regionIds: [] } });
+  assert.equal(s.calls.length, 2, 'the failed first attempt and the retry both reached the runner');
+  assert.ok(Date.now() - started >= 100, 'the retry waited for a short backoff first');
+});
+
+test('a fast task retries only once: a second transient failure is the final answer', async (t) => {
+  const s = await setup(t, () => ({ status: 503, json: { ok: false, error: 'down' } }), HIGH);
+  const r = await post(s.base, 'guardrail_check', s.token, CHECK_INPUT);
+  assert.equal(r.status, 502);
+  assert.deepEqual(await r.json(), { ok: false, error: 'runner_error' });
+  assert.equal(s.calls.length, 2, 'exactly one retry, not a loop');
+});
+
+test('a fast task does not retry a failure a retry cannot fix (bad auth, or told to back off itself)', async (t) => {
+  const auth = await setup(t, () => ({ status: 401, json: {} }), HIGH);
+  const r1 = await post(auth.base, 'guardrail_check', auth.token, CHECK_INPUT);
+  assert.equal(r1.status, 503);
+  assert.deepEqual(await r1.json(), { ok: false, error: 'runner_auth' });
+  assert.equal(auth.calls.length, 1, 'bad auth will not fix itself on a retry');
+
+  const busy = await setup(t, () => ({ status: 429, json: {} }), HIGH);
+  const r2 = await post(busy.base, 'guardrail_check', busy.token, CHECK_INPUT);
+  assert.equal(r2.status, 503);
+  assert.deepEqual(await r2.json(), { ok: false, error: 'runner_busy' });
+  assert.equal(r2.headers.get('retry-after'), '5');
+  assert.equal(busy.calls.length, 1, 'the client is already told to retry later; not retried again here');
+});
+
+test('a non-fast task never retries, even on the same transient failure that a fast task would retry', async (t) => {
+  const s = await setup(t, () => ({ status: 500, json: {} }), HIGH);
+  const r = await post(s.base, 'entity_resolution', s.token, { spoken: 'x', knownRefs: ['a'] });
+  assert.equal(r.status, 502);
+  assert.equal(s.calls.length, 1, 'entity_resolution has fast: undefined, so callRunnerWithRetry does not retry it');
+});
+
+test('callRunnerWithRetry: never retries once the caller\'s signal is already aborted', async () => {
+  let calls = 0;
+  const fetchStub: FetchFn = async () => { calls++; return new Response('boom', { status: 500 }); };
+  const config = resolveConfig({ fetch: fetchStub, runnerUrl: 'http://runner.invalid', runnerToken: 'tok', log: () => {} }, {});
+  const controller = new AbortController();
+  controller.abort();
+  const result = await callRunnerWithRetry(config, { system: 's', prompt: 'p', schema: {} }, controller.signal, 5000, null, true);
+  assert.equal(calls, 1, 'no retry once the signal was already aborted');
+  assert.equal(result.ok, false);
+});
+
+test('callRunnerWithRetry: no retry once too little of the time budget would be left', async () => {
+  let fetchCalls = 0;
+  const fetchStub: FetchFn = async () => { fetchCalls++; return new Response('boom', { status: 500 }); };
+  let nowCalls = 0;
+  // The first call() computes the deadline (now = 0); by the time the budget is checked after the first attempt,
+  // 900 of the 1000ms budget is already gone, well under FAST_RETRY_MIN_BUDGET_MS.
+  const now = (): number => { nowCalls++; return nowCalls === 1 ? 0 : 900; };
+  const config = resolveConfig({ fetch: fetchStub, runnerUrl: 'http://runner.invalid', runnerToken: 'tok', log: () => {}, now }, {});
+  const result = await callRunnerWithRetry(config, { system: 's', prompt: 'p', schema: {} }, new AbortController().signal, 1000, null, true);
+  assert.equal(fetchCalls, 1, 'no retry: too little of the budget would be left for it to plausibly finish');
+  assert.equal(result.ok, false);
 });
