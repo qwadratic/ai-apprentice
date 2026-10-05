@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@qwadratic'
 created_date: '2026-10-03 21:11'
-updated_date: '2026-10-04 06:07'
+updated_date: '2026-10-05 08:58'
 labels:
   - stream-b
   - workmap
@@ -54,6 +54,8 @@ Estimate: about 1.5 h of agent time. Card key: B-workmap-ui.
 5. Voice: 'Answer this' and 'Ask Clipa about this' need a public controller method for [ASK] and for the contextual send; today sendContext is private.
 6. Layout: no CSS needed, because ReviewView already gets the wide 3fr column in Review.
 Next steps: workmap/generic-map.ts (fromGenericMap with a test), then the screen_activity keyframes with region boxes and a synthetic fixture, then mount in ReviewView, then the controller hooks.
+
+Docs-cleanup audit (2026-10-05): AC2 (clicking a card seeks the replay to the evidence moment) is contradicted by the shipped product's own honesty section (README: a video replay of that screen moment is not wired into the Work Map yet). AC1, AC3 and AC4 need a live browser session or a test run to verify properly and were not exercised in this pass; left unchecked.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

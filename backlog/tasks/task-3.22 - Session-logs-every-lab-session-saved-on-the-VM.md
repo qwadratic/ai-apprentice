@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@qwadratic'
 created_date: '2026-10-03 22:29'
-updated_date: '2026-10-04 00:51'
+updated_date: '2026-10-05 08:58'
 labels:
   - stream-b
   - session
@@ -43,6 +43,8 @@ Every voice session must leave a log we can read afterwards: our own event strea
 
 <!-- SECTION:NOTES:BEGIN -->
 Page side merged in PR #4 (uploads, finish, off-record closes voice first, timeouts). Server routes deployed on the VM by the TASK-4 agent (events 200 verified from outside; finish needs a conversationId). Open: one real run from the deployed page with transcript stored = yes, then read it back with the VM token.
+
+Docs-cleanup audit (2026-10-05): AC2 stays unchecked per this task's own final summary (the ElevenLabs transcript/audio fetch at finish was verified only once, and the planned recheck in TASK-3.16 never happened - TASK-3.16 is still To Do).
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@qwadratic'
 created_date: '2026-10-03 21:10'
-updated_date: '2026-10-04 06:06'
+updated_date: '2026-10-05 08:58'
 labels:
   - stream-b
   - voice
@@ -47,6 +47,8 @@ Estimate: about 2 h of agent time. Card key: B-elevenlabs-spike.
 
 <!-- SECTION:NOTES:BEGIN -->
 PR #2 merged. Live voice check by Ivan on the deployed lab page (conversations conv_0001m41xyk8rec8tpdy03gc9rrhy and conv_2901m41y0v8pe86sw6z6z7xt83wm, 3 Oct ~22:26 UTC): two spoken Russian utterances got skip_turn and silence; Ask now was spoken verbatim about 2 s after the click; speech after the question got no reply. Real-voice silence: passed (small sample). Open: agent-minute balance and Creator code (postponed by Ivan); Expressive Mode voice choice. Tutor agent moved to TASK-3.13.
+
+Docs-cleanup audit (2026-10-05), per the finalization guide's evidence rule (no AC checked from code presence or grep alone): AC1 was escalated/postponed by Ivan per the existing implementation notes, never resolved. AC2 and AC7 describe the provisioning script and the signed-URL route, both plausible from the architecture docs but not re-verified here by a scripted test. AC3 (a pure textOnly silence run) is not separately recorded; only the real-voice variant (AC4) has a recorded result. AC5's verbatim-speaking claim has one recorded data point (about 2 s) but not the 5 tries the AC asks for. AC6's yes/no answers are not written down in packages/agent/README.md, which has since become the brain-architecture doc; the MCP answer (disabled) surfaces instead in TASK-3.13's comments. Leaving all six unchecked.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

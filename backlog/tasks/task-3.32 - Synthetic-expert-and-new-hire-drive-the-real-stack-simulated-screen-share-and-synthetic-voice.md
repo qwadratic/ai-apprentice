@@ -7,7 +7,7 @@ status: Done
 assignee:
   - '@qwadratic'
 created_date: '2026-10-04 02:23'
-updated_date: '2026-10-04 06:07'
+updated_date: '2026-10-05 08:58'
 labels:
   - stream-b
   - demo
@@ -38,6 +38,12 @@ Ivan, 4 Oct 02:20 UTC: two synthetic people, one per side: an expert for Learn a
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Docs-cleanup audit (2026-10-05): this task's own final summary says agent browser runs are paused by Ivan's rule (4 Oct), so the sim-mode behaviours in AC1-AC4 are not being regularly exercised even though the harness exists in apps/web/features/agent/clipa/scripts/e2e.ts. Left unchecked.
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 

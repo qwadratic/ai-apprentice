@@ -5,7 +5,7 @@ status: Done
 assignee:
   - '@qwadratic'
 created_date: '2026-10-04 01:12'
-updated_date: '2026-10-04 01:45'
+updated_date: '2026-10-05 08:58'
 labels:
   - shared
   - infra
@@ -33,6 +33,12 @@ The VM's port 8000 switches from infra/placeholder-api to A's apps/api with B's 
 - [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
 - [ ] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
+
+## Implementation Notes
+
+<!-- SECTION:NOTES:BEGIN -->
+Docs-cleanup audit (2026-10-05): AC2 stays unchecked per this task's own final summary (the updated check.sh run on the VM is with the devops agent, no pass recorded here).
+<!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
