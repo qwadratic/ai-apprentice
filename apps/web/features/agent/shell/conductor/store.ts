@@ -23,6 +23,19 @@ export interface SaidItem {
   outcome: 'pending' | 'spoken' | 'shown' | 'skipped' | 'interrupted';
 }
 
+/** A process Clipa recognised on the shared screen (the conductor's `recognised` cue): shown in the live feed, never spoken. */
+export interface RecognisedItem {
+  cueId: string;
+  /** The learned process's title. */
+  title: string;
+  /** Session time of the cue (ms since the conductor's epoch). */
+  atMs: number;
+  steps: number;
+  rules: number;
+  /** The earlier session it was learned in is a seeded, invented one. */
+  synthetic: boolean;
+}
+
 export interface ConductorMapSnapshot {
   version: number;
   /** The conductor's generic map (steps, guardrails, gaps, teachBack, comments) as sent; read it with fromGenericMap. */
@@ -59,9 +72,12 @@ export interface ConductorState {
   said: readonly SaidItem[];
   /** The latest thought bubble, or null. Visual only: it is never spoken. */
   thought: ConductorThought | null;
+  /** The processes Clipa recognised on screen in this page (newest last, capped). */
+  recognised: readonly RecognisedItem[];
 }
 
 export const MAX_SAID = 40;
+export const MAX_RECOGNISED = 20;
 
 /** Clipa's current thought bubble (the conductor's `thought` cue): shown beside her, faded out by CSS after a few seconds. */
 export interface ConductorThought { cueId: string; text: string }
@@ -69,7 +85,7 @@ export interface ConductorThought { cueId: string; text: string }
 export function initialConductorState(): ConductorState {
   return {
     enabled: false, status: 'idle', statusDetail: null, linked: false, pose: null, line: null, target: null,
-    regions: [], regionsCueId: null, map: null, teachBack: null, paused: false, quiet: null, observations: [], said: [], thought: null,
+    regions: [], regionsCueId: null, map: null, teachBack: null, paused: false, quiet: null, observations: [], said: [], thought: null, recognised: [],
   };
 }
 

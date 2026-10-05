@@ -1,5 +1,6 @@
 import { useShell, useShellState } from '../hooks.ts';
 import { MODE_LABELS } from '../state/types.ts';
+import { TWIN_MAIL_URL } from '../twin.ts';
 
 const START_HINT = {
   learn: 'Do the task and talk as you work. Clipa asks at natural pauses.',
@@ -83,6 +84,10 @@ export function SessionControls() {
             </span>
           </span>
         </label>
+        <p className="as-note" data-testid="twin-note">
+          <a className="as-twin-link" data-testid="twin-link" href={TWIN_MAIL_URL} target="_blank" rel="noopener noreferrer">Open the email twin in a new tab</a>
+          {' '}A mail client in its own tab (synthetic data; Send is simulated). Share that tab like any real app and Clipa reads it from the screen.
+        </p>
         <p className="as-note">
           A session ends by itself after 10 minutes, or after 2 minutes with this tab hidden. Screen masks hide pixels, not speech: do not
           say anything you want to keep private.

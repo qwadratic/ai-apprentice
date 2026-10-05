@@ -58,7 +58,12 @@ export type Cue =
   /** The page opens a stage like a click on the rail; with `start` it also starts it like Start (ending the running stage). */
   | { type: 'stage'; mode: ConductorMode; start?: boolean }
   /** The page ends the running session like End: the person said stop, or Pass it on is done. */
-  | { type: 'end'; reason: string };
+  | { type: 'end'; reason: string }
+  /**
+   * Additive (v1.5): Clipa recognised a process she learned in an earlier session on the shared screen. Visual only, never spoken: the
+   * page shows it in the live feed. `synthetic`: the earlier session is a seeded, invented one.
+   */
+  | { type: 'recognised'; title: string; text: string; steps: number; rules: number; synthetic: boolean };
 
 export interface CueEnvelope {
   seq: number;
@@ -187,6 +192,15 @@ export function parseCue(v: unknown): Cue | null {
       return v.start === true ? { type: 'stage', mode: v.mode, start: true } : { type: 'stage', mode: v.mode };
     case 'end':
       return { type: 'end', reason: text(v.reason, 40) ?? '' };
+    case 'recognised': {
+      const title = text(v.title, 120)?.trim() ?? '';
+      if (title === '') return null;
+      const count = (n: unknown): number => (isNum(n) && n >= 0 ? Math.min(Math.floor(n), 99) : 0);
+      return {
+        type: 'recognised', title, text: text(v.text, 300)?.trim() || `Recognised: ${title}`,
+        steps: count(v.steps), rules: count(v.rules), synthetic: v.synthetic === true,
+      };
+    }
     default:
       return null;
   }
