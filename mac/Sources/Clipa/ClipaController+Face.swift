@@ -209,15 +209,17 @@ extension ClipaController {
 
     // MARK: - Text for the voice agent
 
-    /// "[ASK] text": the live agents say what follows [ASK] verbatim. Bracketed audio tags are removed so none is performed.
-    static func askMessage(_ text: String, maxChars: Int) -> String {
+    /// "[ASK] text": the live agents say what follows [ASK] verbatim. Bracketed audio tags are removed so none is
+    /// performed. Pure string functions (no `self`): `nonisolated` so a unit test can call them without the main
+    /// actor.
+    nonisolated static func askMessage(_ text: String, maxChars: Int) -> String {
         var clean = withoutAudioTags(text)
         if clean.uppercased().hasPrefix("[ASK]") { clean = String(clean.dropFirst(5)) }
         clean = clean.trimmingCharacters(in: .whitespacesAndNewlines)
         return "[ASK] " + String(clean.prefix(max(1, maxChars)))
     }
 
-    static func withoutAudioTags(_ text: String) -> String {
+    nonisolated static func withoutAudioTags(_ text: String) -> String {
         let stripped = text.replacingOccurrences(of: "\\[[^\\]]+\\]", with: " ", options: .regularExpression)
         return stripped.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)

@@ -26,7 +26,8 @@ final class PointerTracker: @unchecked Sendable {
         private static func rounded(_ value: Double) -> Double { (value * 1000).rounded() / 1000 }
     }
 
-    private struct Sample {
+    /// Internal, not private: `dwell` below takes `[Sample]`, and a unit test builds samples directly.
+    struct Sample {
         let x: Double
         let y: Double
         let onDisplay: Bool
@@ -124,7 +125,8 @@ final class PointerTracker: @unchecked Sendable {
     }
 
     /// How long the newest sample's spot has held the pointer, in ms; 0 below `dwellMs` or off the display.
-    private static func dwell(_ samples: [Sample], aspect: Double, at time: TimeInterval) -> Int {
+    /// Internal, not private, so a unit test can call it directly with hand-built samples.
+    static func dwell(_ samples: [Sample], aspect: Double, at time: TimeInterval) -> Int {
         guard let last = samples.last, last.onDisplay else { return 0 }
         var since = last.t
         for sample in samples.reversed() {

@@ -56,6 +56,7 @@ final class ClipaController {
     var screenState = "off"
     var voiceRetries = 0
     var voiceProblemShown = false
+    var microphoneDeniedShown = false
     var endTimeout: Task<Void, Never>?
     var screenChain: Task<Void, Never>?
     /// Incremented on every start and end, so a slow start of an earlier stage cannot take over a later one.
@@ -69,6 +70,10 @@ final class ClipaController {
     var pendingContext: [String] = []
 
     private var cancellables = Set<AnyCancellable>()
+    // Display changes and sleep/wake (see restartScreen/pauseScreenBeforeSleep below).
+    private var screenParamsObserver: NSObjectProtocol?
+    private var willSleepObserver: NSObjectProtocol?
+    private var didWakeObserver: NSObjectProtocol?
 
     init() {
         api = ServerAPI(config: config)
@@ -136,7 +141,26 @@ final class ClipaController {
         streamer.onStopped = Self.stoppedHandler(self)
 
         menuBar = MenuBarController(app: self)
+        // First run: ask for both permissions Clipa needs to see and to type-detect, not only Screen Recording.
+        // Input Monitoring was previously requested only from the "Grant permissions..." menu item.
         if !Permissions.screenRecordingGranted { Permissions.requestScreenRecording() }
+        if !Permissions.inputMonitoringGranted && !Permissions.accessibilityTrusted { Permissions.requestInputMonitoring() }
+
+        screenParamsObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.restartScreen(reason: "display_changed") }
+        }
+        willSleepObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.willSleepNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.pauseScreenBeforeSleep() }
+        }
+        didWakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.restartScreen(reason: "woke") }
+        }
     }
 
     func terminate() {
@@ -145,6 +169,9 @@ final class ClipaController {
         conductor?.close()
         idle.stop()
         overlay.stop()
+        if let screenParamsObserver { NotificationCenter.default.removeObserver(screenParamsObserver) }
+        if let willSleepObserver { NSWorkspace.shared.notificationCenter.removeObserver(willSleepObserver) }
+        if let didWakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(didWakeObserver) }
     }
 
     /// Frames come from the capture queue: hop to the main actor.
@@ -170,6 +197,7 @@ final class ClipaController {
         offTheRecord = false
         voiceRetries = 0
         voiceProblemShown = false
+        microphoneDeniedShown = false
         resetFace()
         overlay.setDimmed(false)
         overlay.setPresence(.peek)
@@ -404,11 +432,50 @@ final class ClipaController {
         }
     }
 
+    // MARK: - Display changes and sleep/wake
+
+    /// The display's geometry changed under us (resolution, an external display connected or disconnected, a Space
+    /// rearrangement): `ScreenStreamer.displayFrame`/`outputSize` and the pointer tracker's frame would stay stale
+    /// otherwise, and a stream after sleep likely stays dead until an SCStream error. Stop then start again through
+    /// the existing serialized `screenStep`, so the server generation and the uploader stay in step; `startScreen`
+    /// recomputes the display's current frame and size, and restarts the pointer tracker against it.
+    private func restartScreen(reason: String) {
+        guard isLive, !offTheRecord else { return }
+        log.write("screen_restart", ["reason": reason])
+        screenState = "restarting (\(reason))"
+        menuBar?.refresh()
+        // Taken now, like queueScreenStop above: a slow step ahead of this one in the chain could let the stage end
+        // (and maybe a new one start) before this step runs, and stopScreen must still stop the session this
+        // restart was meant for. startScreen (right after) always re-reads current state on its own.
+        let session = self.session
+        let uploader = self.uploader
+        screenStep { controller in
+            await controller.stopScreen(command: "pause", reason: reason, session: session, uploader: uploader)
+            await controller.startScreen()
+        }
+    }
+
+    /// The Mac is about to sleep: stop cleanly rather than let ScreenCaptureKit die mid-sleep with a stream error.
+    /// `didWake` (above, wired in `launch()`) restarts through `restartScreen`, which also covers a display that
+    /// changed while asleep.
+    private func pauseScreenBeforeSleep() {
+        guard isLive, !offTheRecord else { return }
+        log.write("screen_restart", ["reason": "will_sleep"])
+        queueScreenStop(command: "pause", reason: "will_sleep")
+    }
+
     // MARK: - Voice
 
     func startVoice() async {
         guard config.voice, let session, let persona, isLive, !offTheRecord, !voice.isLive else { return }
         let microphone = await Permissions.requestMicrophone()
+        // Unlike a denied screen (which stops the whole screen step), a denied microphone still lets Clipa speak:
+        // say so once per stage, the same way the screen case does.
+        if !microphone && !microphoneDeniedShown {
+            microphoneDeniedShown = true
+            overlay.say("I don't have Microphone permission, so I can't hear you: System Settings, Privacy & Security, then restart Clipa. I'll still speak and show my lines.", warning: true)
+            overlay.clearLine(after: 10)
+        }
         do {
             let url = try await api.signedVoiceURL(role: persona.voiceRole, token: session.token)
             guard isLive, !offTheRecord else { return }

@@ -67,7 +67,9 @@ final class IdleMonitor: ObservableObject {
         onTick?()
     }
 
-    static func classify(sinceInput: Double, sinceKey: Double) -> ActivityState {
+    /// Pure and stateless (no `self`): `nonisolated` so it is also callable from a unit test without hopping onto
+    /// the main actor.
+    nonisolated static func classify(sinceInput: Double, sinceKey: Double) -> ActivityState {
         if sinceInput > 300 { return .away }
         if sinceInput > 60 { return .idle }
         if sinceKey < 1.5 { return .typing }

@@ -11,6 +11,11 @@ let package = Package(
         .executableTarget(
             name: "Clipa",
             path: "Sources/Clipa"
+        ),
+        .testTarget(
+            name: "ClipaTests",
+            dependencies: ["Clipa"],
+            path: "Tests/ClipaTests"
         )
     ]
 )
