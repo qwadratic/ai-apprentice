@@ -25,16 +25,20 @@ async function boundedText(r: globalThis.Response, max: number): Promise<string 
   return Buffer.concat(chunks).toString('utf8');
 }
 
+/**
+ * One runner call. A request with `files` goes to the runner's job route (/v1/job: the model may read those files in a
+ * read-only folder, with its own longer limit on the runner), any other to /v1/complete.
+ */
 export async function callRunner(config: AgentConfig, request: RunnerRequest, signal: AbortSignal, timeoutMs: number, model: string | null = null): Promise<RunnerResult> {
   if (!config.runnerToken || !config.runnerUrl) return { ok: false, status: 503, error: 'llm_not_configured' };
   let url: URL;
-  try { url = new URL('/v1/complete', config.runnerUrl); } catch { return { ok: false, status: 503, error: 'llm_not_configured' }; }
+  try { url = new URL(request.files ? '/v1/job' : '/v1/complete', config.runnerUrl); } catch { return { ok: false, status: 503, error: 'llm_not_configured' }; }
   const timeout = AbortSignal.timeout(timeoutMs);
   try {
     const r = await config.fetch(url, {
       method: 'POST',
       headers: { Authorization: `Bearer ${config.runnerToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(model ? { system: request.system, prompt: request.prompt, schema: request.schema, model } : { system: request.system, prompt: request.prompt, schema: request.schema }),
+      body: JSON.stringify({ system: request.system, prompt: request.prompt, schema: request.schema, ...(request.files ? { files: request.files } : {}), ...(model ? { model } : {}) }),
       signal: AbortSignal.any([timeout, signal]),
     });
     if (r.status === 401 || r.status === 403) { await r.arrayBuffer().catch(() => {}); return { ok: false, status: 503, error: 'runner_auth' }; }

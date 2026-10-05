@@ -33,6 +33,8 @@ export interface AgentOptions {
    * memory only, when no confirmed map exists. Default: env AGENT_SEED_MAPS=1; off otherwise (production never sets it).
    */
   seedMaps?: boolean;
+  /** How many earlier sessions of the same persona the map_enrich job reads besides the current one. Default: env AGENT_ENRICH_SESSIONS, else 5. */
+  enrichSessions?: number;
   /** Voice-over cache (GET /api/agent/voiceover/:id). Default: {env MEDIA_DIR, else /var/lib/apprentice}/voiceover. */
   voiceoverDir?: string;
   /** The whitelist of voice-over lines. Default: agent/voiceover/lines.json next to this file. */
@@ -84,6 +86,8 @@ export interface Timing {
   backgroundWaitMs: number;
   backgroundPollMs: number;
   llmTimeoutMs: number;
+  /** How long the API waits for the runner's job route (map_enrich); the runner's own limit, RUNNER_JOB_TIMEOUT_MS (180 s), is shorter. */
+  enrichTimeoutMs: number;
 }
 export interface AgentConfig {
   allowedOrigins: ReadonlySet<string>;
@@ -104,6 +108,8 @@ export interface AgentConfig {
   mapsFile: string;
   /** Seed the invented earlier sessions of the email twin as confirmed maps when none exist (AGENT_SEED_MAPS=1). */
   seedMaps: boolean;
+  /** Earlier sessions the map_enrich job reads (0 reads only the current session). */
+  enrichSessions: number;
   voiceoverDir: string;
   voiceoverLinesFile: string;
   /** Overrides only; roles without one use the voice-over defaults. */
@@ -174,7 +180,7 @@ export function resolveConfig(options: AgentOptions = {}, env: NodeJS.ProcessEnv
     llmInputBytes: 16 * 1024,
     ...options.limits,
   };
-  const timing: Timing = { finishWaitMs: 18_000, finishRetryMs: 3000, backgroundWaitMs: 5 * 60_000, backgroundPollMs: 5000, llmTimeoutMs: int('AGENT_LLM_TIMEOUT_MS', 25_000), ...options.timing };
+  const timing: Timing = { finishWaitMs: 18_000, finishRetryMs: 3000, backgroundWaitMs: 5 * 60_000, backgroundPollMs: 5000, llmTimeoutMs: int('AGENT_LLM_TIMEOUT_MS', 25_000), enrichTimeoutMs: int('AGENT_ENRICH_TIMEOUT_MS', 200_000), ...options.timing };
   return {
     allowedOrigins: new Set(origins),
     sessionsDir: options.sessionsDir ?? env.SESSIONS_DIR ?? '/var/lib/apprentice/sessions',
@@ -191,6 +197,7 @@ export function resolveConfig(options: AgentOptions = {}, env: NodeJS.ProcessEnv
     publicWebUrl: options.publicWebUrl ?? (env.PUBLIC_WEB_URL || 'https://qwadratic.github.io/clipa/'),
     mapsFile: (options.mapsFile ?? env.AGENT_MAPS_FILE ?? '/var/lib/apprentice/maps.json').trim(),
     seedMaps: options.seedMaps ?? env.AGENT_SEED_MAPS === '1',
+    enrichSessions: options.enrichSessions ?? int('AGENT_ENRICH_SESSIONS', 5),
     voiceoverDir: options.voiceoverDir ?? join(env.MEDIA_DIR || '/var/lib/apprentice', 'voiceover'),
     voiceoverLinesFile: options.voiceoverLinesFile ?? fileURLToPath(new URL('./voiceover/lines.json', import.meta.url)),
     voiceoverVoices: options.voiceoverVoices ?? parseVoices(env.ELEVENLABS_VOICEOVER_VOICES, log),

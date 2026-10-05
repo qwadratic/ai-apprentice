@@ -6,8 +6,10 @@ import { BaselineProfileSelector, baselinePromptContext } from '../../../../pack
 import { isRecord } from '../config.ts';
 import type { AnswerCheckOutput, GenericQuestionOutput, GuardrailCheckOutput, MapEditOutput, MapSynthesisOutput, ProcessMatchOutput, ReplyOutput } from '../llm-tasks.ts';
 import type { TaskResult } from '../llm.ts';
+import { gapIdAt, mergeEnrichment } from '../map-enrich.ts';
+import type { EnrichInput, EnrichOutput, EnrichResult, MaterialObservation, Prediction } from '../map-enrich.ts';
 import { demoMap } from './demo-map.ts';
-import { GUIDE, MAC_DONE_LINE, NUDGES, OFF_LINE, OPEN_WEB, PROPOSE, RESOLVED, SHOW_LOOKS_DONE, STAGE_ABOUT, STAGE_CONFIRM, STAGE_NAMES, STAGE_START, detectLanguage, donePhraseOnly, doneSaid, offSaid, recognisedLine, stageAsked, stageCommand, yesSaid } from './lines.ts';
+import { GUIDE, MAC_DONE_LINE, NUDGES, OFF_LINE, OPEN_WEB, PROPOSE, RESOLVED, SHOW_LOOKS_DONE, STAGE_ABOUT, STAGE_CONFIRM, STAGE_NAMES, STAGE_START, affirmSaid, confirmPrior, detectLanguage, donePhraseOnly, doneSaid, offSaid, recognisedLine, stageAsked, stageCommand, yesSaid } from './lines.ts';
 import { applyEdits } from './map-edits.ts';
 import type { ConductorMap, MapComment } from './map-edits.ts';
 import { mapTitle, storableMap } from './map-store.ts';
@@ -51,6 +53,18 @@ export const RULES = {
   followUpTtlMs: 30_000,
   /** Build the map in the background as soon as Show ends; false: Reflect builds it when it opens, as before. */
   mapAfterShow: true,
+  /**
+   * Once the session's own map is built, deepen it in the background from everything the expert said and showed in this and in
+   * earlier sessions (map_enrich, a job on the runner that reads the sessions as files). It never holds up Reflect, is not started
+   * off the record, and its result is dropped when the session moved on or the map is already confirmed. false: nothing is
+   * started and nothing changes.
+   */
+  enrichMap: true,
+  /**
+   * Reflect: an open point whose predicted answer has at least this confidence, and the expert's own earlier words to show for
+   * it, is asked as a confirmation ("Last time you said ...") instead of the open question.
+   */
+  predictConfidence: 0.75,
   /** The voice agent hears a new screen at once, and the same screen again at most this often. */
   screenContextMs: 8_000,
   /** When the person moves to another app, the turns said from this long before its first frame are kept for questions. */
@@ -200,6 +214,13 @@ export class MapRegistry {
       lastBuilt: this.built,
     });
   }
+  /**
+   * Confirmed maps of real sessions other than `exclude`, newest first, at most `limit` (map_enrich reads them as the expert's
+   * earlier words). The invented seeded sessions are never among them: nobody said what they hold.
+   */
+  recent(exclude: string, limit: number): ConfirmedMap[] {
+    return [...this.bySession.values()].filter((e) => e.sessionId !== exclude && e.seeded !== true).sort((a, b) => b.confirmedAt - a.confirmedAt).slice(0, Math.max(0, limit));
+  }
   /** The map of `from` when named and confirmed, else the most recently confirmed one. */
   find(from: string | null): ConfirmedMap | null {
     return (from !== null ? this.bySession.get(from) : undefined) ?? this.latest;
@@ -245,6 +266,11 @@ export interface ConductorDeps {
   maps: MapRegistry;
   /** A link that opens the web app on `page`, joined to this session through a short-lived code; null when unavailable. */
   webLink?(page: 'review' | 'teach' | 'summary'): string | null;
+  /**
+   * map_enrich, the background job (RULES.enrichMap): it takes minutes, so it is not `llm` (that one is a queue of short calls the
+   * live stages wait on). Absent: no enrichment. It must not throw; a failure is `{ok: false}` and changes nothing.
+   */
+  enrich?(input: EnrichInput, signal: AbortSignal): Promise<EnrichResult>;
 }
 
 interface Turn { role: 'expert' | 'agent'; text: string; atMs: number }
@@ -355,6 +381,17 @@ export class Conductor {
   /** The map being built in the background as soon as Show ends, so Reflect opens with it ready. */
   private mapPrefetch: Promise<void> | null = null;
   private freshMap = false;
+  /**
+   * The background enrichment of the map (RULES.enrichMap): its own abort handle, never `inflight`, so it never holds up a
+   * question or a warning. `base` is the map it started from, which a result is merged against.
+   */
+  private enrichment: { controller: AbortController; epoch: number; base: ConductorMap } | null = null;
+  /** Counts the maps this session built: a result for an older map than the current one is dropped. */
+  private mapEpoch = 0;
+  /** What the enrichment predicts for the open points, by the point's question; an open point with a strong one is asked as a confirmation. */
+  private readonly predictions = new Map<string, Prediction>();
+  /** The confirmation just asked: its open point and the expert's earlier words, so a bare "yes" carries them into the edit. */
+  private confirming: { question: string; quote: string } | null = null;
 
   /** `origin`: the map is this session's own, a copy of an earlier session's, or the demo map (Reflect's fallbacks). */
   private review: { phase: ReviewPhase; map: ConductorMap | null; version: number; asked: Set<string>; awaiting: 'gap' | 'teachback' | null; answeredAt: number; unclearAsked: boolean; editFailed: boolean; origin: MapOrigin } =
@@ -597,6 +634,7 @@ export class Conductor {
           this.inflight = null;
           this.prefetch = null;
           this.voiceQueue.length = 0;
+          this.dropEnrichment();
           this.cancelActive();
           this.pose('hidden');
         } else {
@@ -842,6 +880,8 @@ export class Conductor {
       this.pendingSay = null;
       // A new Show supersedes the map still being built from the last one (its end builds a map of everything again).
       if (mode === 'learn' && this.mapPrefetch) this.inflight?.abort();
+      // ... and the enrichment of the map it replaces: the session moved on.
+      if (mode === 'learn') this.dropEnrichment();
       // On the web the screen is shared after Start: until it is, the next step is to share it.
       if ((mode === 'learn' || mode === 'teach') && !this.sharing && this.has('web')) this.guide('share_now', 'web');
       if (mode === 'learn') { this.pose('listen'); this.presence('dot'); if (this.sharing || !this.has('web')) this.guideOnce('work'); }
@@ -916,12 +956,18 @@ export class Conductor {
     this.hear(turn);
     if (this.liveMode !== 'review' || !this.review.map) return;
     if (this.review.awaiting === 'teachback') { void this.classifyReply(text); return; }
+    let utterance = text;
     if (this.review.awaiting === 'gap') {
       this.review.awaiting = null;
       this.review.answeredAt = this.deps.now();
+      // A "yes" to "Last time you said ..." confirms those words: the edit reads them as part of the answer, so it can keep them as the
+      // expert's reason. Any other answer (a correction, a new rule) goes in as it was said.
+      const confirming = this.confirming;
+      this.confirming = null;
+      if (confirming && affirmSaid(text)) utterance = `${text.trim()} "${confirming.quote}"`;
     }
     // Everything the expert says in Review can change the map: Clipa makes the edit, the expert only talks.
-    this.voiceQueue.push(text);
+    this.voiceQueue.push(utterance);
     void this.drainVoice();
   }
 
@@ -1471,9 +1517,11 @@ export class Conductor {
       const map = await this.run<MapSynthesisOutput>('map_synthesis', { observations, transcript: this.transcript(60, 600), correction: null, previousTeachBack: null });
       if (map && !this.offRecord && !this.ownConfirmed()) {
         const built: ConductorMap = { ...map, baselineProvenance: provenance, comments: [] };
+        this.newMapLineage();
         this.review = { phase: 'idle', map: built, version: this.review.version, asked: new Set(), awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false, origin: 'session' };
         this.freshMap = true;
         this.deps.maps.recordBuilt(this.sessionId, built, this.deps.now());
+        this.startEnrichment();
       }
     })().catch(() => undefined).finally(() => { this.mapPrefetch = null; });
   }
@@ -1503,6 +1551,7 @@ export class Conductor {
     const fallback = this.review.map !== null && this.review.origin !== 'session';
     if (this.review.map && !(fallback && observations.length > 0)) { this.publishMap(this.review.map, this.review.phase === 'confirmed', false); this.guide('talk_to_edit', 'web'); return; }
     if (observations.length === 0) { this.openFallbackMap(); return; }
+    this.newMapLineage();
     this.review = { phase: 'building', map: null, version: this.review.version, asked: new Set(), awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false, origin: 'session' };
     this.pose('think');
     this.guide('building', 'web');
@@ -1513,6 +1562,7 @@ export class Conductor {
     // labelled, and the next Review tries this session's own map again.
     if (!map) { this.quiet('could not build this session\'s map; showing an earlier one'); this.openFallbackMap(); return; }
     this.publishMap({ ...map, baselineProvenance: provenance, comments: [] }, false);
+    this.startEnrichment();
     this.pose('listen');
     if (map.gaps.length > 0) { this.review.phase = 'gaps'; this.guide('gaps', 'web'); }
     else this.readTeachBack();
@@ -1530,6 +1580,7 @@ export class Conductor {
     const origin: MapOrigin = stored === null ? 'demo' : stored.sessionId === this.sessionId ? 'session' : 'earlier';
     const source = stored === null ? demoMap() : structuredClone(stored.map);
     this.freshMap = false;
+    this.newMapLineage();
     this.review = { phase: 'gaps', map: null, version: this.review.version, asked: new Set(), awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false, origin };
     this.publishMap({ ...source, processes: source.processes ?? [], comments: commentsOf(source), baselineProvenance: this.provenanceSnapshot() }, false);
     this.pose('listen');
@@ -1543,6 +1594,79 @@ export class Conductor {
 
   private provenanceSnapshot(): NonNullable<MapSynthesisOutput['baselineProvenance']> {
     return structuredClone(this.baselineProvenance);
+  }
+
+  // ---- map enrichment (map_enrich) --------------------------------------------------
+  /** The session's map is replaced by a newly built one (or by none yet): what was started or predicted for the old one no longer holds. */
+  private newMapLineage(): void {
+    this.mapEpoch++;
+    this.dropEnrichment();
+  }
+
+  /** Stops the enrichment and forgets what it predicted. */
+  private dropEnrichment(): void {
+    this.enrichment?.controller.abort();
+    this.enrichment = null;
+    this.predictions.clear();
+    this.confirming = null;
+  }
+
+  private materialObservations(): MaterialObservation[] {
+    return this.observations.filter((o) => o.kind !== 'input_activity').map((o) => ({ id: o.id, atMs: o.atMs, app: o.app, surface: o.surface, summary: o.summary, change: o.change }));
+  }
+
+  /**
+   * In the background, once the session's own map is built (RULES.enrichMap): map_enrich deepens it from this session and from
+   * earlier ones. Never awaited, never in the way of Reflect; not started off the record, for an earlier or demo map, or twice.
+   */
+  private startEnrichment(): void {
+    const enrich = this.deps.enrich;
+    const base = this.review.map;
+    if (!RULES.enrichMap || !enrich || this.offRecord || !base || this.review.origin !== 'session' || this.enrichment !== null) return;
+    const controller = new AbortController();
+    const epoch = this.mapEpoch;
+    this.enrichment = { controller, epoch, base };
+    const input: EnrichInput = {
+      sessionId: this.sessionId, persona: this.persona, map: base,
+      observations: this.materialObservations(), transcript: this.transcript(RULES.keepTurns, 1000),
+    };
+    void (async () => {
+      let result: EnrichResult | null = null;
+      try { result = await enrich(input, controller.signal); } catch { result = null; }
+      // Dropped meanwhile (off the record, a new Show, a newly built map): nothing of it is used.
+      if (this.enrichment?.controller !== controller) return;
+      this.enrichment = null;
+      if (controller.signal.aborted || epoch !== this.mapEpoch || this.offRecord || !result || !result.ok) return;
+      this.applyEnrichment(result.output, base);
+    })();
+  }
+
+  /**
+   * The checked result of map_enrich. Its details are merged into the map as it stands now, unless the expert confirmed it (a
+   * confirmed map is theirs), and the version is published with the origin unchanged; before Reflect has opened the map is only
+   * updated, and Reflect publishes it. Its predictions wait for the open points they answer.
+   */
+  private applyEnrichment(out: EnrichOutput, base: ConductorMap): void {
+    const map = this.review.map;
+    if (!map || this.review.phase === 'confirmed' || this.review.phase === 'building') return;
+    for (const p of out.predictions) {
+      const n = /^gap-(\d+)$/.exec(p.gapId)?.[1];
+      const gap = n === undefined ? undefined : base.gaps[Number(n) - 1];
+      if (gap && p.gapId === gapIdAt(Number(n) - 1)) this.predictions.set(gap.question, p);
+    }
+    const { map: merged, changed } = mergeEnrichment(map, base, out);
+    if (changed === 0) return;
+    if (this.review.phase === 'idle') {
+      this.review.map = merged;
+      this.deps.maps.recordBuilt(this.sessionId, merged, this.deps.now());
+    } else this.publishMap(merged, false);
+  }
+
+  /** The expert's own earlier words for an open point, when map_enrich is confident that they answer it; else null (it is asked as it is). */
+  private confirmable(question: string): string | null {
+    const p = this.predictions.get(question);
+    if (!p || p.quote === null || p.sessionId === null || p.sessionId === this.sessionId || p.confidence < RULES.predictConfidence) return null;
+    return p.quote;
   }
 
   private publishMap(map: ConductorMap, confirmed: boolean, bump = true): void {
@@ -1561,17 +1685,22 @@ export class Conductor {
     if (!map || !gap) return;
     this.review.asked.add(gap.question);
     this.review.awaiting = 'gap';
+    // An open point the expert already answered in an earlier session is asked as a confirmation of those words.
+    const earlier = this.confirmable(gap.question);
+    this.confirming = earlier === null ? null : { question: gap.question, quote: earlier };
     const regions = this.regionsFor(gap.evidenceIds, gap.regionIds);
     if (regions[0]) {
       this.emit({ type: 'point', target: { kind: 'region', ...regions[0] } });
       this.attention({ kind: 'region', ...regions[0] });
     } else this.emit({ type: 'point', target: { kind: 'ui', name: 'board_gap' } });
     const questionId = `gap-${index + 1}`;
+    const text = earlier === null ? gap.question : confirmPrior(earlier);
     const evidenceIds = this.evidenceFor(gap.evidenceIds);
-    const env = this.emit({ type: 'ask', questionId, text: gap.question, topic: 'gap', regions, evidenceIds });
+    const env = this.emit({ type: 'ask', questionId, text, topic: 'gap', regions, evidenceIds });
     this.answer = null;
     this.followUp = null;
-    this.asked = { stage: 'review', cueId: env.cueId, questionId, text: gap.question, topic: 'gap', regions, evidenceIds, context: null, followUp: false, at: this.deps.now() };
+    // What was said is what the answer is checked against: the confirmation line when Clipa read the earlier words back.
+    this.asked = { stage: 'review', cueId: env.cueId, questionId, text, topic: 'gap', regions, evidenceIds, context: null, followUp: false, at: this.deps.now() };
   }
 
   /** After the gaps: rebuild the map when an answer could not be applied by voice, then read the teach-back. */
@@ -1585,6 +1714,9 @@ export class Conductor {
     const previous = this.review.map?.teachBack ?? null;
     const provenance = this.provenanceSnapshot();
     const comments = this.review.map?.comments ?? [];
+    // What the enrichment found about the work around the map is not tied to its steps: it survives a rebuild.
+    const { context, related } = this.review.map ?? {};
+    this.newMapLineage();
     this.review.phase = 'building';
     this.review.awaiting = null;
     this.pose('think');
@@ -1594,7 +1726,7 @@ export class Conductor {
     });
     if (this.offRecord || this.liveMode !== 'review') return;
     this.review.editFailed = false;
-    if (map) this.publishMap({ ...map, baselineProvenance: provenance, comments }, false);
+    if (map) this.publishMap({ ...map, baselineProvenance: provenance, comments, ...(context ? { context } : {}), ...(related ? { related } : {}) }, false);
     this.pose('listen');
     if (!this.review.map) { this.review.phase = 'idle'; return; }
     this.readTeachBack();
@@ -1662,6 +1794,8 @@ export class Conductor {
     if (!map) return;
     this.review.phase = 'confirmed';
     this.review.awaiting = null;
+    // A confirmed map is the expert's: a job still deepening it could not be used any more, so it stops.
+    this.dropEnrichment();
     this.deps.maps.confirm(this.sessionId, map, this.deps.now());
     this.emit({ type: 'map', version: this.review.version, map, confirmed: true, origin: this.review.origin });
     this.pose('celebrate');
@@ -1729,6 +1863,7 @@ export class Conductor {
       persona: this.persona, clients: this.kinds(), language: this.language, selectedMode: this.selectedMode, liveMode: this.liveMode, offRecord: this.offRecord,
       auto: this.auto, sharing: this.sharing, observations: this.observations.length, turns: this.turns.length, asked: this.askTimes.length, review: this.review.phase,
       mapVersion: this.review.version, cues: this.seq, busy: this.inflight !== null, baseline: this.baseline.current(),
+      enrichment: this.enrichment !== null ? 'running' : 'idle', predictions: this.predictions.size,
     };
   }
 }

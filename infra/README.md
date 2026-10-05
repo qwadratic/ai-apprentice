@@ -140,6 +140,11 @@ Other sources, for manual use: `sudo systemctl start apprentice-deploy.service` 
 | `RUNNER_MODELS` | runner | optional allowlist for a request's `model` (default sonnet-5-5, opus-5-5, haiku-4-5); others get 400 `model_not_allowed` |
 | `RUNNER_CONCURRENCY` | runner | default 2 (about 1 GiB RAM per SDK subprocess) |
 | `RUNNER_ENGINE`, `RUNNER_CODEX_MODEL`, `RUNNER_CODEX_REASONING`, `RUNNER_CODEX_EPHEMERAL`, `RUNNER_CODEX_BIN` | runner | `RUNNER_ENGINE=codex` runs requests through the Codex CLI; see "Codex engine" |
+| `RUNNER_JOB_TIMEOUT_MS` | runner | run limit of `POST /v1/job`, default 180000; `/health` reports it as `job_timeout_ms` |
+| `RUNNER_JOB_MAX_TURNS`, `RUNNER_JOB_MAX_BUDGET_USD` | runner (Claude engine) | tool turns (default 24) and spend ceiling (default 1) of one job |
+| `RUNNER_JOB_CODEX_REASONING` | runner (Codex engine) | `model_reasoning_effort` for jobs; default: `RUNNER_CODEX_REASONING` (`low`) |
+| `AGENT_ENRICH_SESSIONS` | agent module | earlier sessions of the same persona the `map_enrich` job reads besides the current one, default 5 (it reads the `{sessionId}.jsonl` logs in `SESSIONS_DIR`) |
+| `AGENT_ENRICH_TIMEOUT_MS` | agent module | how long the API waits for the job, default 200000 (above the runner's 180000) |
 | `DEPLOY_WEBHOOK_SECRET` | ops | HMAC key for `POST /ops/deploy`; the same value is the Actions secret `DEPLOY_WEBHOOK_SECRET` |
 | `DEPLOY_SOURCE` | deploy | `pages` (default): the sha in `deploy.json`; `ref`: `origin/$DEPLOY_REF` |
 | `DEPLOY_REF` | deploy | default `main`; used with `DEPLOY_SOURCE=ref` |
@@ -164,7 +169,7 @@ A module that needs the raw request bytes (a signature over the body, like the o
 
 ## Runner API (`RUNNER_URL`, bearer `RUNNER_TOKEN`)
 
-`GET /health` (no auth) → `{ok, mode: "oauth"|"apikey"|"codex", model, git_sha, active, queued}`
+`GET /health` (no auth) → `{ok, mode: "oauth"|"apikey"|"codex", model, git_sha, active, queued, job_timeout_ms}` (`job_timeout_ms` exists only on a runner that has `POST /v1/job`: a quick way to see which runner is live)
 
 `POST /v1/complete`
 ```json
@@ -175,6 +180,16 @@ A module that needs the raw request bytes (a signature over the body, like the o
 { "images": [{ "media_type": "image/png|image/jpeg|image/gif|image/webp", "data": "<base64>" }], "prompt": "string", "system": "...", "schema": {}, "model": "..." }
 ```
 1–4 images, sent to the SDK as streaming input (one `SDKUserMessage` with base64 image blocks then the text).
+
+`POST /v1/job` — a model call that can **read files** (used by the API's `map_enrich` background job, see `docs/map-enrichment.md`)
+```json
+{ "files": [{ "path": "sessions/<id>/transcript.tsv", "content": "..." }], "prompt": "string", "system": "optional string", "schema": { "JSON Schema": true }, "model": "optional" }
+```
+`files`, `prompt` and `schema` are required; a field the route does not know is refused. The answer is the same as `/v1/complete` with a schema: `200 {ok: true, json, ms}`, the same error table below, `504 timeout` after `RUNNER_JOB_TIMEOUT_MS` (default 180000, its own limit; `/v1/complete` keeps `RUNNER_TIMEOUT_MS`).
+- **Validation** (a `400`; only field paths or fixed reason codes come back, never a path or a value): 1 to 60 files; each `path` relative and safe: `/`-separated segments of `[A-Za-z0-9][A-Za-z0-9._-]*`, at most 6 deep and 160 characters, so no leading `/`, `.` or `..`, empty segment, backslash, space or hidden file; no duplicate (case-insensitive) and no path that is another file's folder; `content` a string without NUL, at most 1 MiB, and at most 2 MiB over all files. A rejected set answers `400 {ok: false, error: "invalid_files", reason: "path_invalid"|"path_duplicate"|"path_conflict"|"too_many_files"|"content_invalid"|"file_too_large"|"files_too_large"}`; a malformed body `400 invalid_body` with `fields`.
+- **What runs.** The files are written into a fresh directory `job-XXXXXX` under `RUNNER_CWD` (mode 0700, files 0600) and the engine runs with that directory as its working directory, **read-only**: Codex gets the usual command (`--sandbox read-only`, prompt on stdin; its schema and answer file live in a sibling `codex-XXXX` directory, not in the one it starts in); the Claude Agent SDK gets only `Read`, `Glob` and `Grep`, with a permission callback that denies every other tool and any path or glob that leaves the job directory (the files are untrusted text, so this does not rely on the model behaving), up to `RUNNER_JOB_MAX_TURNS` turns (24) and `RUNNER_JOB_MAX_BUDGET_USD` (1). The directory is removed in every case: success, error, timeout and a client that went away.
+- Same bearer token, queue and `RUNNER_CONCURRENCY` slots as the other routes: a job holds **one slot for as long as it reads** (up to the job timeout), so with the default 2 slots a live vision loop keeps the other one. The API runs at most one job at a time.
+- Logs carry the usual metadata plus `files` and `job_chars` (counts), never a path, content, prompt or answer; a rejected set logs `error: invalid_files:<reason>`.
 
 Success: `200 {ok: true, json, ms}` when `schema` was given (the SDK's `structured_output`), else `200 {ok: true, text, ms}`.
 
@@ -194,6 +209,22 @@ Structured output takes one object schema at the root: a schema whose root is a 
 Every call: `tools: []`, `permissionMode: "dontAsk"`, `settingSources: []`, `persistSession: false`, `cwd: /var/lib/apprentice/runner-cwd`, `maxTurns: 3`, `maxBudgetUsd: 0.5`, a short custom system prompt (the request's `system` is appended), `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`. The subprocess environment excludes `RUNNER_TOKEN`, `API_TOKEN` and `ELEVENLABS_API_KEY`. The runner refuses to start unless exactly one Claude credential is set and logs its mode at start. At boot it spawns and discards one warm subprocess (`startup()`), because per-request options differ. A queued request whose client disconnected is dropped before it runs (logged as 499). `x-request-id` is used for logs only if it matches `[A-Za-z0-9._-]{1,64}`. The unit runs with `ProtectSystem=strict` (writable: the runner cwd and `/home/apprentice`) and `MemoryMax=2560M`.
 
 The placeholder used to expose the runner publicly as `POST /runner/v1/*` for testing; apps/api does not. On the VM: `curl -s localhost:8787/health`, and `curl -s -X POST localhost:8787/v1/complete -H "Authorization: Bearer $RUNNER_TOKEN" -H "Content-Type: application/json" -d '{"prompt":"ping"}'` (take the token from `/etc/apprentice/env` without printing it).
+
+### Rolling out `POST /v1/job`
+
+The route lives in `infra/claude-runner`, so it reaches the VM only when the runner is rebuilt and restarted: `deploy.sh` does that by itself when `infra/claude-runner` (or `start-runner.sh`) changed between the deployed sha and the new one (`npm ci --include=optional` + `tsc`, then `systemctl restart apprentice-runner`), so a merge to `main` that contains this change is enough. No unit or env change is needed (`ReadWritePaths` already covers the runner cwd, where the job directories are made; the new variables have defaults).
+Until the VM runs the new runner, `POST /v1/job` answers `404 not_found`: the API reports that as a failed `map_enrich` job (`map enrich failed` with `error: runner_error` in the API log) and Reflect simply goes on with the map as it was synthesised. Check on the VM:
+```
+curl -s localhost:8787/health | jq .job_timeout_ms      # a number: the new runner is live; null: the old one
+```
+then a probe that needs no model call (a refused path answers `400 invalid_files`, which proves the route, the auth and the validation), and one real job (token from the env file, never printed):
+```
+curl -s -X POST localhost:8787/v1/job -H "Authorization: Bearer $RUNNER_TOKEN" -H "Content-Type: application/json" \
+  -d '{"files":[{"path":"../x","content":"c"}],"prompt":"p","schema":{"type":"object"}}'     # {"ok":false,"error":"invalid_files","reason":"path_invalid",...}
+curl -s -X POST localhost:8787/v1/job -H "Authorization: Bearer $RUNNER_TOKEN" -H "Content-Type: application/json" \
+  -d '{"files":[{"path":"a.txt","content":"the sky is blue"}],"prompt":"Read a.txt and answer with its colour.","schema":{"type":"object","required":["colour"],"additionalProperties":false,"properties":{"colour":{"type":"string"}}}}'
+ls /var/lib/apprentice/runner-cwd                     # empty again: the job directory is gone
+```
 
 ## Codex engine (`RUNNER_ENGINE=codex`)
 
@@ -231,6 +262,8 @@ curl -s localhost:8787/health          # → "mode":"codex"
 
 **Switch back:** remove the `RUNNER_ENGINE` line (or set `claude`), `sudo systemctl restart apprentice-runner`, check that `mode` is `oauth` or `apikey`.
 
+**Jobs (`POST /v1/job`).** Run the same way, with the job directory as the CLI's working directory (so the model can list, read and search the request's files with its own read-only tools) and `RUNNER_JOB_CODEX_REASONING`. A job that reads several files takes far longer than a plain call (minutes, not seconds), hence its own `RUNNER_JOB_TIMEOUT_MS`.
+
 **Limits.** Latency: one trivial structured call took about 9 s on the VM (codex-cli 0.159.0, ~14k tokens of reasoning before the effort override), several times the Agent SDK's ~2.8 s, so the vision loop gets far fewer frames per minute, and `RUNNER_TIMEOUT_MS` (60 s) may need raising for big map synthesis prompts. Images use `-i`; a CLI version without it fails every vision call with `sdk_error / codex_exit`. Spend counts against the ChatGPT account's Codex limits.
 
 **Flags and their sources.** From the `codex exec` reference (https://learn.chatgpt.com/docs/developer-commands?surface=cli#cli-codex-exec, formerly developers.openai.com/codex/cli/reference) and the non-interactive guide (https://learn.chatgpt.com/docs/non-interactive-mode): `exec`, `--skip-git-repo-check`, `--sandbox read-only`, `--ephemeral`, `-m/--model`, `-c/--config key=value`, `--output-schema`, `-o/--output-last-message`, `-i/--image` (repeatable), and the prompt read from stdin when no prompt argument is given. Checked on the VM with codex-cli 0.159.0: `exec --skip-git-repo-check --sandbox read-only --output-schema … -o …` with the prompt as an argument. **Not verified:** the config key `model_reasoning_effort` and its value `low` on 0.159.0, `-i` on 0.159.0, `--ephemeral` on 0.159.0 (off by default for that reason), the stdin prompt on 0.159.0, and which strict-mode keywords the ChatGPT backend accepts (the converter drops all doubtful ones).
@@ -243,6 +276,7 @@ The routes, their status codes and rate limits are in `apps/api/agent` (`routes.
 - **Disk:** checked after a write and every 10 minutes. Orphaned `*.tmp` files older than 10 min are removed; above 1 GiB the API logs `sessions dir over warn threshold` and the admin listing shows `warn: true`; above 2 GiB it deletes the oldest sessions down to 1.5 GiB (`sessions rotated`), never sessions newer than 24 h. Check usage with `sudo du -sh /var/lib/apprentice/sessions` or `sudo journalctl -u apprentice-api | grep -E 'warn threshold|rotated|over cap'`.
 - **Admin routes** (`Authorization: Bearer $API_TOKEN`, else 401): `GET /agent/sessions` (`{ok, total_bytes, warn, sessions: [{id, size, mtime, hasEvents, hasTranscript, hasAudio}]}`, newest first), `GET /agent/sessions/{id}` (events, transcript, audio info), `DELETE /agent/sessions/{id}`; the same under `/api/agent/sessions`.
 - **Browser routes need a session token:** `POST /api/agent/sessions` (an allowed `Origin`) issues `{sessionId, token, ...}`; `/api/agent/sessions/{id}/events` and `/finish` take `Authorization: Bearer <token>` for that session. The placeholder's tokenless lab routes (`/agent/elevenlabs/signed-url`, `/agent/sessions/{id}/events`, `/agent/sessions/{id}/finish`) no longer exist.
+- **The `map_enrich` job** (docs/map-enrichment.md) reads these same `{sessionId}.jsonl` logs of earlier sessions (the `USER`/`AGENT` lines and the `[screen]`/`[stage]` context lines the web app posts) and the confirmed maps, and hands them to the runner as files; it writes nothing to disk itself (the merged details go into the map, which `AGENT_MAPS_FILE` already keeps). Deleting a session (admin `DELETE`) or rotating it away removes it from what the job can read.
 - Logs never contain bodies, transcripts, audio, tokens, keys or signed URLs.
 
 ## Measurements
