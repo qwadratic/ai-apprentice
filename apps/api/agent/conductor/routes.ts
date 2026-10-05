@@ -6,6 +6,8 @@ import { randomInt, randomUUID } from 'node:crypto';
 import type { Express, Request, Response } from 'express';
 import { clientIp, isRecord, makeLimiter } from '../config.ts';
 import { runLlmTask } from '../llm.ts';
+import { runMapEnrich } from '../map-enrich.ts';
+import type { EnrichInput, EnrichResult } from '../map-enrich.ts';
 import { originAllowed, readBody, reply } from '../routes.ts';
 import type { AgentRuntime } from '../routes.ts';
 import { SESSION_ID } from '../sessions.ts';
@@ -56,6 +58,23 @@ export function createConductorHub(rt: AgentRuntime): ConductorHub {
     busy = run.catch(() => undefined);
     return run;
   };
+  // map_enrich takes minutes, so it has a lane of its own (one job at a time across all sessions) and never waits in the queue of
+  // short calls above. The runner keeps its slots for vision: a job holds one of them while it reads. Metadata only is logged.
+  let enrichBusy: Promise<unknown> = Promise.resolve();
+  const enrich = (input: EnrichInput, signal: AbortSignal): Promise<EnrichResult> => {
+    const run = enrichBusy.then(async (): Promise<EnrichResult> => {
+      if (signal.aborted) return { ok: false, error: 'aborted' };
+      const started = config.now();
+      const r = await runMapEnrich({ config, files: rt.files, confirmed: (exclude, limit) => maps.recent(exclude, limit) }, input, signal);
+      if (!signal.aborted) {
+        if (r.ok) config.log({ level: 'info', msg: 'map enrich done', ms: config.now() - started, files: r.files, sessions: r.sessions, steps: r.output.map.steps.length, rules: r.output.map.guardrails.length, context: r.output.context.length, predictions: r.output.predictions.length });
+        else config.log({ level: 'warn', msg: 'map enrich failed', error: r.error, ms: config.now() - started });
+      }
+      return r;
+    });
+    enrichBusy = run.catch(() => undefined);
+    return run;
+  };
   const hub: ConductorHub = {
     maps,
     forSession(sessionId) {
@@ -63,7 +82,7 @@ export function createConductorHub(rt: AgentRuntime): ConductorHub {
       let c = conductors.get(id);
       if (!c) {
         c = new Conductor(id, {
-          now: config.now, llm, newId: randomUUID, maps,
+          now: config.now, llm, enrich, newId: randomUUID, maps,
           webLink: (page) => {
             const url = new URL(config.publicWebUrl);
             url.searchParams.set('join', hub.joinCode(id));

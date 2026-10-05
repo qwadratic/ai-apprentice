@@ -233,6 +233,43 @@ export function offSaid(text: string): boolean { return command(text, OFF_PHRASE
 /** The person says yes to what Clipa proposed: a whole short turn ("yes", "let's go", "давай", "gerne"). */
 export function yesSaid(text: string): boolean { return command(text, YES_PHRASES); }
 
+// ---- Reflect: an open point the expert already answered in an earlier session --------------------------------------------
+/** The longest stretch of the expert's earlier words Clipa reads back: the line is spoken, so it stays short. */
+const CONFIRM_QUOTE_MAX = 160;
+
+/**
+ * The open point asked as a confirmation of the expert's own earlier words (map_enrich found them): `quote` is a passage of an
+ * earlier session, word for word, cut at CONFIRM_QUOTE_MAX characters. Generic: it names no rule and no process.
+ */
+export function confirmPrior(quote: string): string {
+  const flat = quote.replace(/\s+/g, ' ').trim();
+  const cut = flat.length > CONFIRM_QUOTE_MAX;
+  // The quote's own closing punctuation would double up with the line's ("... it". Still true?); a cut keeps its ellipsis.
+  const body = (cut ? flat.slice(0, CONFIRM_QUOTE_MAX - 1).trimEnd() : flat).replace(/[.!?…,;:]+$/u, '');
+  return `Last time you said: "${cut ? `${body}…` : body}". Still true?`;
+}
+
+const AGREE = new Set([
+  'yes', 'yeah', 'yep', 'yup', 'sure', 'right', 'correct', 'exactly', 'true', 'absolutely', 'definitely', 'indeed', 'ok', 'okay',
+  'да', 'верно', 'точно', 'именно', 'конечно', 'ага', 'ja', 'genau', 'stimmt', 'richtig', 'klar', 'natürlich',
+]);
+/** A word that turns an agreement into a change ("yes, but only ...", "not any more"): such a reply is not a bare confirmation. */
+const CONTRAST = new Set([
+  'no', 'nope', 'not', 'never', 'but', 'only', 'except', 'unless', 'if', 'however', 'although', "isn't", "doesn't", "don't", "wasn't", "won't", "can't", "didn't", "aren't",
+  'нет', 'не', 'никогда', 'но', 'только', 'кроме', 'если', 'nein', 'nicht', 'nie', 'aber', 'nur', 'außer',
+]);
+const AFFIRM_MAX_WORDS = 6;
+
+/**
+ * The expert agrees with what Clipa read back ("Yes, still true.", "Exactly."): a short reply with an agreeing word and no
+ * "but" or "not". The edit then reads the quote they confirmed as part of their answer.
+ */
+export function affirmSaid(text: string): boolean {
+  if (/\?\s*$/.test(text)) return false;
+  const ws = words(text).map((x) => x.w);
+  return ws.length > 0 && ws.length <= AFFIRM_MAX_WORDS && ws.some((w) => AGREE.has(w)) && !ws.some((w) => CONTRAST.has(w));
+}
+
 /** Words that may stand around a stage phrase in a short command ("okay, let's review now", "ну, научи меня"). */
 const STAGE_NEUTRAL = new Set([...POLITE, 'so', 'then', 'well', 'alright', 'and', 'так', 'ладно', 'меня', 'also', 'dann', 'und']);
 const STAGE_COMMAND_WORDS = 6;

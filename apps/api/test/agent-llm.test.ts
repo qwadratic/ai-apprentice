@@ -605,6 +605,7 @@ const PINNED_PROMPT_SHA256: Record<string, string> = {
   'guardrail-check.ts': '8ace038475b50ba9a14c2924fbdac755efcbc46cebd90e7c08d5f7ee8b985940',
   'map-synthesis.ts': '47a21163c19ba8f9854fb163733f900696f897c622f40e8e2e23013f6a9e1d81',
   'map-edit.ts': '4893d3c9ab30358b6422665f8c47545c27434f7de835271472b69a80ab233d53',
+  'map-enrich.ts': '9a771fe8b86c9a4406db4c62439f0bd5c63bc0ccd33dbf8b17e965cf3f6bcf23',
   'process-match.ts': '8b55b19924632678bb5b59e1c652b29dd398ed1dbe012ea92eb0be2b6af71189',
 };
 const sha256 = (v: string): string => createHash('sha256').update(v).digest('hex');
@@ -653,6 +654,7 @@ test('prompt sources are self-contained and pinned: any change to a system promp
     'guardrail-check.ts': await import('../agent/prompts/guardrail-check.ts') as { system: string },
     'map-synthesis.ts': await import('../agent/prompts/map-synthesis.ts') as { system: string },
     'map-edit.ts': await import('../agent/prompts/map-edit.ts') as { system: string },
+    'map-enrich.ts': await import('../agent/prompts/map-enrich.ts') as { system: string },
     'process-match.ts': await import('../agent/prompts/process-match.ts') as { system: string },
   };
   for (const name of names) {
@@ -664,4 +666,7 @@ test('prompt sources are self-contained and pinned: any change to a system promp
   }
   const tasks = await readFile(new URL('../agent/llm-tasks.ts', import.meta.url), 'utf8');
   assert.ok(!SCENARIO_TERMS.test(tasks.replace(/customerRefs/g, 'refs').replace(/orderFields/g, 'fields')), 'llm-tasks.ts mentions scenario content');
+  // The map_enrich task builds its own schema and files: its source is as generic as the prompts.
+  const enrich = await readFile(new URL('../agent/map-enrich.ts', import.meta.url), 'utf8');
+  assert.ok(!SCENARIO_TERMS.test(enrich), 'map-enrich.ts mentions scenario content');
 });

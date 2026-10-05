@@ -13,7 +13,8 @@ import { system as mapSynthesisSystem } from './prompts/map-synthesis.ts';
 import { system as processMatchSystem } from './prompts/process-match.ts';
 import { system as replyClassificationSystem } from './prompts/reply-classification.ts';
 
-export interface RunnerRequest { system: string; prompt: string; schema: Json }
+/** `files`: the job route (map_enrich); the runner writes them into a read-only folder the model can read. */
+export interface RunnerRequest { system: string; prompt: string; schema: Json; files?: ReadonlyArray<{ path: string; content: string }> }
 export type Prepared =
   | { ok: true; request: RunnerRequest; check(raw: unknown): unknown } // check: the validated output, or null if the runner's JSON breaks the schema
   | { ok: false; field: string };
@@ -381,17 +382,28 @@ const genericQuestion: LlmTask = {
 };
 
 // ---- map_synthesis ----------------------------------------------------------
-export interface GenericDecision { summary: string; reason: string | null; quote: string | null; quoteAtMs: number | null }
+/** `quoteSessionId`: set when the quote comes from another session than the map's own (map_enrich); absent for the map's own words. */
+export interface GenericDecision { summary: string; reason: string | null; quote: string | null; quoteAtMs: number | null; quoteSessionId?: string | null }
 export interface GenericProcess { id: string; title: string; summary: string }
 export interface GenericStep { id: string; processId: string | null; kind: 'action' | 'judgment'; goal: string; action: string; decision: GenericDecision | null; evidenceIds: string[] }
-export interface GenericGuardrail { id: string; processId: string | null; condition: string; requiredAction: string; reason: string | null; quote: string | null; quoteAtMs: number | null; escalateTo: string | null; exceptions: string[]; evidenceIds: string[] }
+export interface GenericGuardrail { id: string; processId: string | null; condition: string; requiredAction: string; reason: string | null; quote: string | null; quoteAtMs: number | null; quoteSessionId?: string | null; escalateTo: string | null; exceptions: string[]; evidenceIds: string[] }
 export interface GenericGap { question: string; targetId: string | null; evidenceIds: string[]; regionIds: string[] }
 /** Server-generated provenance, separate from the model's learned process and rule output. */
 export interface BaselineProvenance {
   observations: Array<{ observationId: string; appId: BaselineAppId | null; profileId: BaselineProfileId | null; evidenceIds: string[] }>;
   turns: Array<{ atMs: number; appId: BaselineAppId | null; profileId: BaselineProfileId | null; observationIds: string[]; evidenceIds: string[]; questionId: string | null }>;
 }
-export interface MapSynthesisOutput { processes: GenericProcess[]; steps: GenericStep[]; guardrails: GenericGuardrail[]; gaps: GenericGap[]; teachBack: string; baselineProvenance?: BaselineProvenance }
+/** A fact around the map that the expert stated in some session, with their words and the session they said them in (map_enrich). */
+export interface MapContextFact { fact: string; quote: string; sessionId: string }
+/** Another process the expert described in an earlier session that touches the same work (map_enrich). */
+export interface MapRelatedProcess { title: string; summary: string; sessionId: string }
+export interface MapSynthesisOutput {
+  processes: GenericProcess[]; steps: GenericStep[]; guardrails: GenericGuardrail[]; gaps: GenericGap[]; teachBack: string;
+  baselineProvenance?: BaselineProvenance;
+  /** Added in the background by map_enrich; absent until then, and kept by voice edits. */
+  context?: MapContextFact[];
+  related?: MapRelatedProcess[];
+}
 
 const PROCESS_KEYS = ['id', 'title', 'summary'] as const;
 const STEP_KEYS = ['id', 'processId', 'kind', 'goal', 'action', 'decision', 'evidenceIds'] as const;
