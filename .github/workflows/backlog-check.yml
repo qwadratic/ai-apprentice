@@ -1,8 +1,14 @@
 name: backlog-check
 
-# Off for the submission day (4 Oct): runs only by hand (workflow_dispatch) or when a workflow calls it.
-# Before: on pushes and PRs touching backlog/**.
+# Callable (workflow_call, used by release.yml on pushes to release), manual (workflow_dispatch),
+# and on pull_request into release for backlog/**. No push trigger here: a push to release runs
+# release.yml, which calls this workflow already, so a separate push trigger would just duplicate
+# that run.
 on:
+  pull_request:
+    branches: [release]
+    paths:
+      - "backlog/**"
   workflow_dispatch:
     inputs:
       ref:
