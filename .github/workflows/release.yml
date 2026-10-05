@@ -1,40 +1,40 @@
 name: release
 
-# Push to main: if not frozen, build the site and publish it to GitHub Pages together with
-# deploy.json (the checks are off for the submission day, see above pages-build):
+# Push to release: re-run every check on the merged result; if green and not frozen, build the
+# site and publish it to GitHub Pages together with deploy.json:
 #   {"sha": "<40-hex target commit>", "at": "<UTC ISO time>", "run": "<this run's url>"}
 # Site and pointer are one Pages artifact, so they always move together. The VM (TASK-6.2)
-# polls <pages-url>/deploy.json, checks the sha is an ancestor of origin/main and deploys it.
-# Nothing here pushes to git (no deploy branch) and nothing talks to the VM, so the workflow
-# needs no contents: write.
+# polls <pages-url>/deploy.json, checks the sha is an ancestor of its configured deploy branch
+# (DEPLOY_BRANCH, default origin/main; see infra/README.md) and deploys it. Nothing here pushes
+# to git (no deploy branch) and nothing talks to the VM, so the workflow needs no contents: write.
 #
 # Stale runs: prepare skips a non-manual run whose commit is no longer the newest releasable
-# state of main. If main moves while a run is already past prepare, its first attempt still
+# state of release. If release moves while a run is already past prepare, its first attempt still
 # finishes (Pages and the VM together); the newer run waits in the release concurrency group and
 # then moves both. A re-run (attempt > 1) of a superseded run fails in every publishing job
 # (RELEASE_GUARD), so re-running an old run never rolls the site or the API back.
 # "Newest" ignores backlog/**: those pushes do not start this workflow (paths-ignore), so
 # a code push followed at once by a backlog bookkeeping push still publishes the code push.
 #
-# Manual run (workflow_dispatch, must be started from main):
-#   sha      commit on main to release (default: head of main). Rollback = an older sha;
-#            it must be an ancestor of main. Skips the stale check.
+# Manual run (workflow_dispatch, must be started from release):
+#   sha      commit on release to release (default: head of release). Rollback = an older sha;
+#            it must be an ancestor of release. Skips the stale check.
 #   confirm  release even though the repository variable DEPLOY_FREEZE is 1.
 #
 # Freeze: DEPLOY_FREEZE=1 blocks publishing (site and deploy.json) for pushes, and for manual
 # runs unless confirm=true. A rollback should be combined with the freeze: set DEPLOY_FREEZE=1
-# first (so the next push to main does not publish a newer commit over the rollback), then run
+# first (so the next push to release does not publish a newer commit over the rollback), then run
 # the rollback manually with confirm=true. Unset the variable to resume.
 on:
   push:
-    branches: [main]
+    branches: [release]
     # Backlog-only pushes (task bookkeeping) must not publish.
     paths-ignore:
       - "backlog/**"
   workflow_dispatch:
     inputs:
       sha:
-        description: "Commit on main to release (empty = head of main). An older sha is a rollback."
+        description: "Commit on release to release (empty = head of release). An older sha is a rollback."
         type: string
         required: false
         default: ""
@@ -60,19 +60,19 @@ env:
       exit 1
     fi
     if [ "$EVENT" = "workflow_dispatch" ]; then exit 0; fi
-    git fetch --quiet origin main
-    head=$(git rev-parse origin/main)
+    git fetch --quiet origin release
+    head=$(git rev-parse origin/release)
     if [ "$SHA" = "$head" ]; then exit 0; fi
     if ! git merge-base --is-ancestor "$SHA" "$head"; then
-      echo "::error::$SHA is no longer on main ($head); refusing to release it."
+      echo "::error::$SHA is no longer on release ($head); refusing to release it."
       exit 1
     fi
     if git diff --quiet "$SHA" "$head" -- . ':(exclude)backlog'; then exit 0; fi
     if [ "$ATTEMPT" = "1" ]; then
-      echo "::notice::main moved to $head during this run; releasing $SHA now, and the newer run releases over it."
+      echo "::notice::release moved to $head during this run; releasing $SHA now, and the newer run releases over it."
       exit 0
     fi
-    echo "::error::$SHA is no longer the head of main ($head); a re-run must not release an older commit. Use a manual run for a rollback."
+    echo "::error::$SHA is no longer the head of release ($head); a re-run must not release an older commit. Use a manual run for a rollback."
     exit 1
 
 jobs:
@@ -92,8 +92,8 @@ jobs:
           EVENT: ${{ github.event_name }}
         run: |
           set -euo pipefail
-          if [ "$EVENT" = "workflow_dispatch" ] && [ "$GITHUB_REF" != "refs/heads/main" ]; then
-            echo "::error::Run this workflow from main (selected: $GITHUB_REF). Only commits on main can be released."
+          if [ "$EVENT" = "workflow_dispatch" ] && [ "$GITHUB_REF" != "refs/heads/release" ]; then
+            echo "::error::Run this workflow from release (selected: $GITHUB_REF). Only commits on release can be released."
             exit 1
           fi
           target="${INPUT_SHA:-$GITHUB_SHA}"
@@ -101,10 +101,10 @@ jobs:
             echo "::error::sha input must be 7-40 hex characters"
             exit 1
           fi
-          git fetch --quiet origin main
+          git fetch --quiet origin release
           sha=$(git rev-parse --verify "${target}^{commit}")
-          if ! git merge-base --is-ancestor "$sha" origin/main; then
-            echo "::error::$sha is not on main; refusing to release it"
+          if ! git merge-base --is-ancestor "$sha" origin/release; then
+            echo "::error::$sha is not on release; refusing to release it"
             exit 1
           fi
           if [ "$EVENT" = "workflow_dispatch" ] && ! git cat-file -e "$sha:infra/ops/server.ts" 2>/dev/null; then
@@ -113,10 +113,10 @@ jobs:
           fi
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
           if [ "$EVENT" != "workflow_dispatch" ]; then
-            head=$(git rev-parse origin/main)
-            # Stale = main has moved on with changes outside backlog/ (those start their own run).
+            head=$(git rev-parse origin/release)
+            # Stale = release has moved on with changes outside backlog/ (those start their own run).
             if [ "$sha" != "$head" ] && ! git diff --quiet "$sha" "$head" -- . ':(exclude)backlog'; then
-              echo "::notice::Skipping: $sha is no longer the head of main ($head); a newer run publishes that. Use a manual run to release an older commit."
+              echo "::notice::Skipping: $sha is no longer the head of release ($head); a newer run publishes that. Use a manual run to release an older commit."
               echo "publish=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
@@ -146,12 +146,31 @@ jobs:
           echo "::error::DEPLOY_FREEZE=1: deploy is frozen. Unset the variable, or run this workflow manually with confirm=true."
           exit 1
 
-  # Checks are off for the submission day (4 Oct): a release no longer waits for stream-b-checks, backlog-check and
-  # workspace-checks. They run by hand (workflow_dispatch). To turn them back on, restore the three checks-* jobs
-  # (`uses:` those workflows with `ref: ${{ needs.prepare.outputs.sha }}`) and list them in pages-build's needs.
+  checks-stream-b:
+    needs: prepare
+    if: needs.prepare.outputs.publish == 'true'
+    uses: ./.github/workflows/stream-b-checks.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+
+  checks-backlog:
+    needs: prepare
+    if: needs.prepare.outputs.publish == 'true'
+    uses: ./.github/workflows/backlog-check.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+
+  # Root workspace (stream A's web and API, stream B's packages): npm ci + npm run check on Node 22.22 and 24.
+  checks-workspace:
+    needs: prepare
+    if: needs.prepare.outputs.publish == 'true'
+    uses: ./.github/workflows/workspace-checks.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+
   pages-build:
     name: build site and deploy.json
-    needs: [prepare, gate]
+    needs: [prepare, gate, checks-stream-b, checks-backlog, checks-workspace]
     if: needs.prepare.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
@@ -283,9 +302,10 @@ jobs:
   deploy-vm:
     name: deploy API to the exe.dev VM
     # Runs after the site and deploy.json are published, so the web app and the API move together.
-    # The VM verifies the HMAC, the timestamp and that the sha is on main, then deploys it with its own
-    # build, health check and rollback (infra/deploy). This job waits for the result and fails if the
-    # VM rolled back, so every backend deploy is visible here.
+    # The VM verifies the HMAC, the timestamp and that the sha is on its configured deploy branch
+    # (DEPLOY_BRANCH, default main; see infra/README.md "Deploy from the release branch"), then deploys
+    # it with its own build, health check and rollback (infra/deploy). This job waits for the result and
+    # fails if the VM rolled back, so every backend deploy is visible here.
     needs: [prepare, pages-deploy]
     runs-on: ubuntu-latest
     permissions:
