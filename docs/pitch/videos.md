@@ -5,17 +5,16 @@ Two videos for the submission (TASK-3.19). The web app header links to both ("De
 | File | What it covers | Script |
 | --- | --- | --- |
 | `apps/web/public/videos/clipa-story.mp4` | The story in 52 s: the problem, Meet Clipa, Show → Reflect → Pass it on on the customer_07 case, the closing line. Illustrated, synthetic data, AI voice; made by the team outside this toolkit | — |
-| `apps/web/public/videos/clipa-demo.mp4` | The product: the problem, then the whole journey Show → Reflect → Pass it on in the live web app | [video-demo.md](video-demo.md) |
 | `apps/web/public/videos/clipa-tech.mp4` | How it is built, in about a minute: the architecture, the screen contract, the Conductor's when-to-speak rules, then live cuts of the product (Show asks at the pause; Reflect's Work Map and Confirm; Pass it on's warning before Send and the fix), honest limits and the closing line | [video-tech.md](video-tech.md) |
 
-Both are 1920x1080, H.264 with an AAC track, rendered with the Remotion toolkit in [`video/`](../../video/README.md). They have **captions and no voice-over**: the ElevenLabs key in the build environment was not valid, so the audio track is silent. A voice-over can be added later, recorded by Ivan or generated with ElevenLabs TTS on the VM, and muxed onto the same files (see "Add a voice-over" and "Replace a file").
+The tech video is 1920x1080, H.264 with an AAC track, rendered with the Remotion toolkit in [`video/`](../../video/README.md), with captions and a generated voice-over (narrator and Clipa's own voice, ElevenLabs TTS muxed through `capture/voiceover.mjs`; see "Add a voice-over"). An earlier product-journey cut (`apps/web/public/videos/clipa-demo.mp4`, built the same way from `scripts/demo.json`) never got a finished voice-over and was never linked from the app; it has been removed. The story video was made by the team outside this toolkit (see "Replace a file" for how a committed file is swapped).
 
 ## How they were made
 
 1. **Product capture.** `video/recorder/journey.ts` drives the live web app (https://qwadratic.github.io/clipa/) in headless Chromium against the live API (https://apprentice.exe.xyz) and films it through Chrome's screencast, in one take: Start Show, the expert's typing in the demo workspace, End Show, Reflect with its Work Map, the open point, the teach-back, a correction and Confirm, then Pass it on with a new case, the fix, the allow case and Off the record. The rail clip comes from `video/recorder/walkthroughs/ui-tour.json`, recorded earlier the same morning, before the header moved Off the record into its More menu.
 2. **Storyboards.** `video/capture/build-storyboards.mjs` writes `video/scripts/demo.json` from the take's markers (`assets/recordings/journey.json`), and `video/capture/build-tech.mjs` writes `video/scripts/tech.json` (the 63.5 s tech cut) and its voice-over script `video/scripts/tech-voiceover.json` (one line per id, with `atSec` and `maxSec`; Clipa's lines are her words from the take). Every Clipa line quoted in a caption is copied from the cues the API sent during the take (`journey.cues.json`).
-3. **Render.** `npm run render -- Sample --script scripts/demo.json --out out/clipa-demo.mp4`, the same for `tech.json`.
-4. **Web-ready file.** `bash capture/finalize.sh out/clipa-demo.mp4 ../apps/web/public/videos/clipa-demo.mp4` re-encodes to H.264 with faststart and adds a silent AAC track. The committed files went through `capture/splice-outro.sh` instead, which does the same and swaps in a re-rendered closing card (`npm run render -- ClipaOutro --script …`) without rendering the whole video again.
+3. **Render.** `npm run render -- Sample --script scripts/tech.json --out out/clipa-tech.mp4`.
+4. **Web-ready file.** `bash capture/finalize.sh out/clipa-tech.mp4 ../apps/web/public/videos/clipa-tech.mp4` re-encodes to H.264 with faststart and adds a silent AAC track, ready for `capture/voiceover.mjs` to mux in the voice-over. The committed file went through `capture/splice-outro.sh` instead, which does the same and swaps in a re-rendered closing card (`npm run render -- ClipaOutro --script …`) without rendering the whole video again.
 
 ## What is real and what is simulated
 
@@ -36,28 +35,28 @@ The takes confirmed synthetic customer_07 maps on the live API (the process libr
 
 ## Replace a file
 
-Drop a new MP4 at the same path (`apps/web/public/videos/clipa-demo.mp4` or `clipa-tech.mp4`); the header links stay the same. Keep it H.264 + AAC, ideally 1920x1080 and under 40 MB, with faststart so it plays before it has fully downloaded. For a Mac screen recording, for example:
+Drop a new MP4 at the same path (`apps/web/public/videos/clipa-story.mp4` or `clipa-tech.mp4`); the header links stay the same. Keep it H.264 + AAC, ideally 1920x1080 and under 40 MB, with faststart so it plays before it has fully downloaded. For a Mac screen recording, for example:
 
 ```sh
-ffmpeg -i recording.mov -vf "scale=1920:-2" -c:v libx264 -crf 23 -preset slow -c:a aac -b:a 128k -movflags +faststart apps/web/public/videos/clipa-demo.mp4
+ffmpeg -i recording.mov -vf "scale=1920:-2" -c:v libx264 -crf 23 -preset slow -c:a aac -b:a 128k -movflags +faststart apps/web/public/videos/clipa-tech.mp4
 ```
 
-To add a voice-over to the existing video, mux it in place of the silent track:
+To add a voice-over to a silent render, mux it in place of the silent track:
 
 ```sh
-ffmpeg -i clipa-demo.mp4 -i voiceover.m4a -map 0:v -map 1:a -c:v copy -c:a aac -shortest -movflags +faststart clipa-demo-vo.mp4
+ffmpeg -i clipa-tech.mp4 -i voiceover.m4a -map 0:v -map 1:a -c:v copy -c:a aac -shortest -movflags +faststart clipa-tech-vo.mp4
 ```
 
 To make a new take: `cd video && npm ci && NODE_USE_ENV_PROXY=1 npx tsx recorder/journey.ts` (it opens real sessions on the live API; `NODE_USE_ENV_PROXY` is only needed behind an HTTPS proxy), then `node capture/build-storyboards.mjs`, render and finalize as above.
 
 ## Add a voice-over
 
-The demo video's voice-over is generated, not recorded. The lines and their times are in `video/scripts/demo-voiceover.json`; the API server holds the same lines in `apps/api/agent/voiceover/lines.json` and voices only those, with ElevenLabs TTS, because the ElevenLabs key never leaves the server. Each line is generated once and served from the server's disk cache afterwards.
+The tech video's voice-over is generated, not recorded (already applied to the committed file). The lines and their times are in `video/scripts/tech-voiceover.json`; the API server holds the same lines in `apps/api/agent/voiceover/lines.json` and voices only those, with ElevenLabs TTS, because the ElevenLabs key never leaves the server. Each line is generated once and served from the server's disk cache afterwards.
 
 ```sh
-node video/capture/voiceover.mjs --base https://apprentice.exe.xyz
+node video/capture/voiceover.mjs --base https://apprentice.exe.xyz --script scripts/tech-voiceover.json
 ```
 
-It downloads every line (`GET /api/agent/voiceover/<id>`) to `video/assets/voiceover/` (git-ignored), places each one at its `atSec` (later if the previous line is still playing), prints a timing table with warnings for late or overlong lines, mixes one track at about -16 LUFS and replaces the silent track of `apps/web/public/videos/clipa-demo.mp4` in place. The picture is copied, not re-encoded. Add `--out <file>` to write elsewhere, and `--fake` to test the timing offline with tones. An HTTP 503 (`elevenlabs_not_configured`) means the server has no key; a 404 (`unknown_line`) means the id is not in the server's `lines.json`. Check the warnings, watch the result, then commit the MP4. Details: [video/README.md](../../video/README.md#voice-over).
+It downloads every line (`GET /api/agent/voiceover/<id>`) to `video/assets/voiceover/` (git-ignored), places each one at its `atSec` (later if the previous line is still playing), prints a timing table with warnings for late or overlong lines, mixes one track at about -16 LUFS and replaces the silent track of the script's `video` field in place (`apps/web/public/videos/clipa-tech.mp4`). The picture is copied, not re-encoded. Add `--out <file>` to write elsewhere, and `--fake` to test the timing offline with tones. An HTTP 503 (`elevenlabs_not_configured`) means the server has no key; a 404 (`unknown_line`) means the id is not in the server's `lines.json`. Check the warnings, watch the result, then commit the MP4. Details: [video/README.md](../../video/README.md#voice-over).
 
 The voice is synthetic (ElevenLabs TTS); say so wherever the video is described, as for the story video.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Makes a render ready for the web: H.264 (yuv420p, faststart) plus a silent AAC track, so every player treats it alike.
-#   bash capture/finalize.sh out/clipa-demo.mp4 ../apps/web/public/videos/clipa-demo.mp4 [crf]
+#   bash capture/finalize.sh out/clipa-tech.mp4 ../apps/web/public/videos/clipa-tech.mp4 [crf]
 # A voice-over replaces the silent track later: ffmpeg -i video.mp4 -i voice.m4a -map 0:v -map 1:a -c:v copy -c:a aac -shortest out.mp4
 set -euo pipefail
 in="$1"

@@ -100,16 +100,17 @@ How it works, and why:
 
 ## The submission videos
 
-`scripts/demo.json` and `scripts/tech.json` are the two submission videos (see `docs/pitch/videos.md`):
+`scripts/tech.json` builds the tech video, the one submission video made with this toolkit; `clipa-story.mp4` (the other video linked from the app) was made by the team outside it (see `docs/pitch/videos.md`):
 
 ```sh
 NODE_USE_ENV_PROXY=1 npx tsx recorder/journey.ts   # one take of Show -> Reflect -> Pass it on on the live app and API
-node capture/build-storyboards.mjs                 # scripts/demo.json, from the take
 node capture/build-tech.mjs                        # scripts/tech.json (about 60 s) and scripts/tech-voiceover.json, from the take
-npm run render -- Sample --script scripts/demo.json --out out/clipa-demo.mp4
 npm run render -- Sample --script scripts/tech.json --out out/clipa-tech.mp4
-bash capture/finalize.sh out/clipa-demo.mp4 ../apps/web/public/videos/clipa-demo.mp4
+bash capture/finalize.sh out/clipa-tech.mp4 ../apps/web/public/videos/clipa-tech.mp4
+node capture/voiceover.mjs --base https://apprentice.exe.xyz --script scripts/tech-voiceover.json   # mux in the voice-over
 ```
+
+`capture/build-storyboards.mjs` can still turn the same take into a `scripts/demo.json` storyboard for a full product-journey cut. An earlier one was built this way but never got a finished voice-over or a link from the app; that committed file (`apps/web/public/videos/clipa-demo.mp4`) has been removed (see `docs/pitch/videos.md`).
 
 ### Voice-over
 

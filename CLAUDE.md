@@ -1,6 +1,6 @@
 # CLAUDE.md — AI Apprentice (Hack-Nation 7, Challenge 01)
 
-This file is the handoff for a fresh session. Read "Current plan" first, then `AGENTS.md` (rules shared with the Codex teammate), `backlog/docs/doc-1 - Parallel-work-rules.md`, the plans in `backlog/docs/plans/` (doc-4 is our stream) and `backlog task list --plain`. The sections after "Current plan" are background: the brief, the hackathon rules, the frozen Mac app and the earlier brainstorm.
+This file is the handoff for a fresh session. Read "Current plan" first, then `AGENTS.md` (rules shared with the Codex teammate), `backlog/docs/doc-1 - Parallel-work-rules.md`, the plans in `backlog/docs/plans/` (doc-4 is our stream) and `backlog task list --plain`. Most sections after "Current plan" are historical background from the first hackathon night: the brief, the hackathon rules, the early decisions and the brainstorm. "What is in this repo now" is the exception — it is kept current, not historical.
 
 **First action in a new session:** read "Current plan", run `backlog task list -s "In Progress" --plain` and `backlog task list -l stream-b -s "To Do" --plain`, then ask Ivan what to take.
 
@@ -14,8 +14,8 @@ Where older sections disagree, this section and the plans in `backlog/docs/plans
 - **The only interface between streams: ScreenBridge v1** (TASK-1). Commands `start({sessionId, sessionEpochMs})`, `pause()`, `resume()`, `stop()`, `resolveEvidence(id)`; types `ScreenObservation`, `ScreenStatus`, `ScreenEvidence`, `ActionCheckpoint` with the reply `{checkpointId, status: clear|warn|unknown, message, evidenceIds}`; every timestamp counts from one `sessionEpochMs`.
 - **Backend:** a separate exe.dev VM (TASK-4): SQLite and media on disk, HTTPS, deploy from `main`, an internal claude-runner on the Claude Agent SDK. It uses the team's Claude subscription token while developing; an Anthropic API key replaces it by env for the public demo. The ElevenLabs key stays on the server; the browser gets a signed URL.
 - **Frontend deploy:** Vercel or GitHub Pages.
-- **Mascot: Clipa.** Teal paperclip, dot eyes, no eyebrows; not "Clippy", no Microsoft artwork, no yellow paper. A web component is in progress on branch `feat/clipa`; it is the agent's face in stream B's app shell.
-- **Mac app (`mac/`): frozen bonus.** The CI-built `.app` goes into a GitHub Release. Its accountant/programmer knowledge bases and the `sandbox/` pages belong to that bonus only.
+- **Mascot: Clipa.** Teal paperclip, dot eyes, no eyebrows; not "Clippy", no Microsoft artwork, no yellow paper. The web component shipped from branch `feat/clipa`; it is the agent's face in stream B's app shell (see "What is in this repo now" for where it stands today).
+- **Mac app (`mac/`): bonus.** The CI-built `.app` goes into a GitHub Release (now published automatically on every push to `main`, not gated on a draft). It evolved past this plan into a thin Conductor client (see "What is in this repo now"); its old accountant/programmer knowledge bases and the `sandbox/` pages are kept only for `sandbox/check_cues.py`, not for the shipped bonus.
 - **Tasks:** Backlog.md. TASK-1 contract (shared), TASK-2 stream A parent, TASK-3 stream B parent, TASK-4 VM backend. Rules in doc-1.
 - **Honesty rules from the plans:** the checkpoint works in our demo workspace; never claim to block clicks in arbitrary apps. Off-record stops both channels but does not recall data already sent. Screen masks do not clean speech. Mocks are replaced by real integrations before the demo and never presented as live.
 
@@ -26,7 +26,7 @@ Where older sections disagree, this section and the plans in `backlog/docs/plans
   - Sun 4 Oct, 10:00 — local pitch at the hub. The live demo must work.
   - Sun 4 Oct, 15:00 — submission (09:00 ET). Late entries are not judged for prizes.
   - 8 Oct — finalists notified. 10 Oct, 18:00 — virtual finals.
-- **Repo:** https://github.com/qwadratic/ai-apprentice (public, MIT). CI: `.github/workflows/macos-build.yml` on `macos-15`.
+- **Repo:** https://github.com/qwadratic/clipa (public, MIT; renamed from `ai-apprentice` after the submission). CI: `.github/workflows/macos-build.yml` on `macos-15`.
 
 ## Challenge 01 "The AI Apprentice" (ElevenLabs), in our words
 
@@ -118,33 +118,20 @@ Submit on **app.hack-nation.ai** (login is the Luma email) **and** on the backup
 
 ## What is in this repo now
 
-**`mac/` — native macOS app "Apprentice" (frozen bonus since 3 Oct night).** Swift Package, macOS 14+, 26 files, about 2,600 lines. **CI build is green on `macos-15`** (first run: https://github.com/qwadratic/ai-apprentice/actions/runs/37150081512, artifact `Apprentice-macos`). It has never been *run* on a Mac yet. What it does:
-- Menu bar item only, no Dock icon (`LSUIElement`). Menu: show/hide buddy, Off the record, scenario, Learn/Teach mode, open KB, open session log.
-- Click-through transparent overlay on every screen. A buddy follows the cursor with spring smoothing, fades in only to speak, then fades out.
-- ScreenCaptureKit snapshot every ~1.5 s, a difference hash for "meaningful change", and on-device Vision OCR. No network on the default path.
-- Idle states from `CGEventSource`: typing, working, pause (2.5–8 s), idle (>60 s), away (>5 min).
-- Intervention policy: never while typing, talking or speaking; only at a pause after a meaningful change matched a KB rule; at most 4 per 10 minutes; no repeats.
-- Learn mode speaks the rule's `question`. Teach mode speaks the rule's `warning` when the cursor nears an `action_words` button (Merge, Post, Refund…).
-- Push-to-talk on Control+Option with on-device `SFSpeechRecognizer`. Answers are appended to `kb/<id>/learned.jsonl`. Session events go to JSONL — raw material for the Work Map.
-- Voice: `SystemVoice` (AVSpeechSynthesizer) by default. `ElevenLabsVoice` (REST TTS, `eleven_v4_turbo`) activates when an API key and voice id are configured.
-- Optional `ClaudeBrain` (screenshot + profile + matched rule → one question), `ANTHROPIC_API_KEY`. Without any keys, everything still works through `RuleBrain`.
-- Configuration lives in `~/Library/Application Support/Apprentice/config.json`, or env vars (see `mac/README.md`).
-- Build on a Mac: `cd mac && swift build && scripts/build-app.sh && open build/Apprentice.app`.
-- Permissions to grant: Screen Recording, Microphone, Speech Recognition, Input Monitoring/Accessibility. The ad-hoc signature changes on every build, so reset with `tccutil reset ScreenCapture com.hacknation.apprentice`.
+This section describes the shipped product (post-submission); it replaces an earlier version of this section that described the native-macOS-only prototype from the first hackathon night, which the pivot in "Current plan" above superseded. Fuller repo map: README.md.
 
-**`mac/Resources/kb/` — three roles.** Each has `profile.md`, `rules.json` (6–9 rules, ≥2 guardrails) and `demo.md` (3-minute script: three expert cases, then one novice case):
-- `programmer` — a maintainer who merges a PR with a red check (known-flaky e2e) and rejects an all-green PR (adds a dependency with `postinstall`). Novice case: a green PR with `test.skip(` and a loosened assertion, stopped before Merge.
-- `accountant` — the brief's running example (4471: 4711 → 0400, the December double-biller held, the Czech subsidiary sent for approval). Novice case: €7,200 equipment on 4711. Supplier names, other invoice numbers and amounts are invented and marked as such.
-- `support` — refunds and exceptions. Example policy values: 30 days, 250 EUR. **Ivan dropped support in the ChatGPT brainstorm (see below) — probably replace it.**
-
-**`sandbox/` — static demo pages** the buddy reads with OCR: `programmer.html`, `accountant.html`, `support.html`. 20 px text, case switcher (keys 1–9 or `#id`). `python3 sandbox/check_cues.py` checks that every rule cue really appears on its page and that the expected rules fire per case. It currently passes.
-
-**Not built yet:**
-- Map: debrief, teach-back, Work Map UI.
-- Teach extras: predict-the-next-decision, replay of the expert's moment, mastery summary.
-- A real ElevenAgents conversation (today it is TTS only).
-- Presidio-grade redaction (today: regex masking of emails, IBANs, cards, phones).
-- The deployed clickable demo, the videos, the moonshot slide.
+- **`packages/contracts`** — ScreenBridge v1: the `schemaVersion`, the shared types (`ScreenObservation`, `ScreenStatus`, `ScreenEvidence`, `ActionCheckpoint`, the `{checkpointId, status, message, evidenceIds}` reply) and fixtures. The one import both streams and the API share; no private copies.
+- **`packages/screen`** — stream A's package: browser capture, masks painted before encoding, the vision queue (one call in flight, newest frame wins), evidence storage and processed recording.
+- **`packages/agent`** — the in-browser brain: `ConversationPolicy` (when to ask: ASK_NOW/DEFER/SKIP, plus WARN/PREDICT in Teach), the Work Map reducer and its confirmation gate, the tutor's checkpoint logic, and the T1–T6 tutor tests against `fixtures/agent/expected/`. Model-backed parts call the API's LLM route with a heuristic fallback; see `packages/agent/README.md`. This is a fallback path today (`?conductor=off`); the live product runs on the server-side Conductor below.
+- **`apps/web`** — the React app: the shell (journey rail, mode switcher, DebugDrawer, the Clipa presenter), the `agent/conductor` client (SSE cues in, events out), the Work Map board, the demo workspace, and `features/screen` (stream A's capture UI). Deployed to GitHub Pages at the repo root; a launch/status page is published under `/status/`.
+- **`apps/api`** — Node/Express: the `agent` module (sessions, ElevenLabs signed URLs, the Conductor's SSE cue stream, and the LLM tasks `generic_question`, `map_synthesis`, `guardrail_check`, `map_edit`), the `screen` module (vision, evidence), `recording`, and the infra-owned `ops` module that forwards the signed deploy webhook.
+- **The Conductor** (`apps/api/agent/conductor`) — one server-side loop: screen and voice events in, cues out over SSE, the same for the web app and for `mac/`. It replaced the earlier per-client brain design; `packages/agent`'s in-browser brain is now the fallback only.
+- **`mac/` — Clipa for macOS (bonus).** A Swift menu-bar app and click-through overlay that streams the screen to the same API and Conductor as the web app (`ConductorClient.swift`, `ServerAPI.swift`) and hands Reflect over to the web app by link. It no longer carries its own rule engine: the `RuleBrain`/`ClaudeBrain` classes and the per-role `kb/*/rules.json` knowledge bases from the first hackathon night are gone from the app. `mac/Resources/kb/` still exists on disk but only for `sandbox/check_cues.py`; see `mac/README.md`.
+- **`infra/`** — the exe.dev VM backend: the Claude runner (Agent SDK), the placeholder API, the deploy webhook (`ops`), systemd units and `deploy.sh`. See `infra/README.md` (TASK-4; a separate PR keeps its repo-name references in sync).
+- **`video/`** — the Remotion toolkit and Playwright journey recorder behind the tech video; see `video/README.md` and `docs/pitch/videos.md`.
+- **`docs/`** — pitch docs (`docs/pitch/`), integration notes and the README's clips (`docs/media/`).
+- **`backlog/`** — Backlog.md tasks, plans and decisions.
+- **`sandbox/`** — the static demo pages from the first macOS prototype (`programmer.html`, `accountant.html`, `support.html`), kept only so `sandbox/check_cues.py` still has something to check.
 
 ## Decisions already taken, and why
 
@@ -231,7 +218,7 @@ The chat's tool and data claims were not verified, except where this file says c
 ## How to work here
 
 - Before changing rules or sandbox pages, run `python3 sandbox/check_cues.py`. It must stay at "ALL PASSED".
-- After any change under `mac/`, push and watch CI: `gh run watch -R qwadratic/ai-apprentice`. Green CI is the only proof that it compiles; a run on Ivan's Mac is the only proof that it works.
+- After any change under `mac/`, push and watch CI: `gh run watch -R qwadratic/clipa`. Green CI is the only proof that it compiles; a run on Ivan's Mac is the only proof that it works.
 - Keep the public repo professional: no secrets, no personal data, no internal chatter in commits.
 - Ask before anything irreversible or public: publishing posts, messaging people, submitting the entry.
 - Subagents that do the work (research, drafting, coding) run on Sonnet (`model: sonnet`), except builders on the critical path (the product shell and A↔B integration), which run on Opus (Ivan, 4 Oct 03:20 UTC: fewer review rounds). Critics, verifiers and judges run on Opus (`model: opus`). No agent browser runs for now (Ivan, 4 Oct 04:20 UTC: they slow the path to production; the team checks by hand). Runs of the vision classifier, which turns the screen stream into a stream of actions, stay allowed: feed it real recorded screen sessions as regression fixtures instead of spending tokens on generators and simulators. A ready, fixed change ships as soon as `npm run check` and CI are green: PR, merge, release. A single workflow run must fit in 30 minutes; estimate its length from the token rate of earlier runs.
