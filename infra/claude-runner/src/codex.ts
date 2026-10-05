@@ -134,6 +134,8 @@ export interface CodexRequest { prompt: string; schema?: JsonSchema; images?: re
 export interface CodexOptions {
   /** Parent of the per-request temp dir (the runner cwd). */
   baseDir: string;
+  /** The CLI's working directory; default: the per-request temp dir. A job passes the directory that holds its files. */
+  cwd?: string;
   env: Record<string, string | undefined>;
   timeoutMs: number;
   signal: AbortSignal;
@@ -182,7 +184,7 @@ export async function runCodex(req: CodexRequest, o: CodexOptions): Promise<Code
       imageFiles.push(file);
     }
     const args = codexArgs({ outFile, schemaFile, imageFiles, model: o.model, reasoning: o.reasoning, ephemeral: o.ephemeral });
-    const end = await spawnCodex(o.bin ?? 'codex', args, req.prompt, dir, o);
+    const end = await spawnCodex(o.bin ?? 'codex', args, req.prompt, o.cwd ?? dir, o);
     if (end.kind !== 'exit' || end.code !== 0) return end.kind === 'exit' ? { kind: 'exit', code: end.code } : end;
     let text: string;
     try {
