@@ -33,7 +33,11 @@ export interface AgentOptions {
    * memory only, when no confirmed map exists. Default: env AGENT_SEED_MAPS=1; off otherwise (production never sets it).
    */
   seedMaps?: boolean;
-  /** How many earlier sessions of the same persona the map_enrich job reads besides the current one. Default: env AGENT_ENRICH_SESSIONS, else 5. */
+  /**
+   * How many earlier sessions of the same persona the map_enrich job reads besides the current one. Default: env
+   * AGENT_ENRICH_SESSIONS, else 0: on a shared deployment every visitor is someone else, so another session's words are never
+   * read (or quoted back) unless the operator turns it on for a single expert's server. The dev rig sets 5.
+   */
   enrichSessions?: number;
   /** Voice-over cache (GET /api/agent/voiceover/:id). Default: {env MEDIA_DIR, else /var/lib/apprentice}/voiceover. */
   voiceoverDir?: string;
@@ -197,7 +201,7 @@ export function resolveConfig(options: AgentOptions = {}, env: NodeJS.ProcessEnv
     publicWebUrl: options.publicWebUrl ?? (env.PUBLIC_WEB_URL || 'https://qwadratic.github.io/clipa/'),
     mapsFile: (options.mapsFile ?? env.AGENT_MAPS_FILE ?? '/var/lib/apprentice/maps.json').trim(),
     seedMaps: options.seedMaps ?? env.AGENT_SEED_MAPS === '1',
-    enrichSessions: options.enrichSessions ?? int('AGENT_ENRICH_SESSIONS', 5),
+    enrichSessions: options.enrichSessions ?? int('AGENT_ENRICH_SESSIONS', 0),
     voiceoverDir: options.voiceoverDir ?? join(env.MEDIA_DIR || '/var/lib/apprentice', 'voiceover'),
     voiceoverLinesFile: options.voiceoverLinesFile ?? fileURLToPath(new URL('./voiceover/lines.json', import.meta.url)),
     voiceoverVoices: options.voiceoverVoices ?? parseVoices(env.ELEVENLABS_VOICEOVER_VOICES, log),

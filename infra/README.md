@@ -143,7 +143,7 @@ Other sources, for manual use: `sudo systemctl start apprentice-deploy.service` 
 | `RUNNER_JOB_TIMEOUT_MS` | runner | run limit of `POST /v1/job`, default 180000; `/health` reports it as `job_timeout_ms` |
 | `RUNNER_JOB_MAX_TURNS`, `RUNNER_JOB_MAX_BUDGET_USD` | runner (Claude engine) | tool turns (default 24) and spend ceiling (default 1) of one job |
 | `RUNNER_JOB_CODEX_REASONING` | runner (Codex engine) | `model_reasoning_effort` for jobs; default: `RUNNER_CODEX_REASONING` (`low`) |
-| `AGENT_ENRICH_SESSIONS` | agent module | earlier sessions of the same persona the `map_enrich` job reads besides the current one, default 5 (it reads the `{sessionId}.jsonl` logs in `SESSIONS_DIR`) |
+| `AGENT_ENRICH_SESSIONS` | agent module | earlier sessions of the same persona the `map_enrich` job reads besides the current one (it reads the `{sessionId}.jsonl` logs in `SESSIONS_DIR` and may quote them back: "Last time you said …"). **Default 0: leave it unset on a shared deployment**, where every visitor is someone else. Set it (e.g. `5`) only on a server one expert uses; `npm run dev` sets 5 |
 | `AGENT_ENRICH_TIMEOUT_MS` | agent module | how long the API waits for the job, default 200000 (above the runner's 180000) |
 | `DEPLOY_WEBHOOK_SECRET` | ops | HMAC key for `POST /ops/deploy`; the same value is the Actions secret `DEPLOY_WEBHOOK_SECRET` |
 | `DEPLOY_SOURCE` | deploy | `pages` (default): the sha in `deploy.json`; `ref`: `origin/$DEPLOY_REF` |

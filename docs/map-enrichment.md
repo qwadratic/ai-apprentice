@@ -32,7 +32,7 @@ The runner writes these files into a fresh read-only folder (`POST /v1/job`, see
 | `sessions/<id>/observations.tsv` | `time`, `observation id`, `app`, `surface`, `summary`, `change`: one screen line each |
 | `maps/<id>.json` | a map the expert confirmed in an earlier session |
 
-The current session comes first, then up to `AGENT_ENRICH_SESSIONS` (default 5) earlier sessions of the same persona, newest first. Total at most 1.5 MB (the newest lines of a long session are kept).
+The current session comes first, then up to `AGENT_ENRICH_SESSIONS` earlier sessions of the same persona, newest first. The default is 0: the server has no notion of who a visitor is, so on a shared deployment another session is someone else's, and its words must never be read or quoted back to a different person. Set it only on a server one expert uses (the dev rig sets 5). Total at most 1.5 MB (the newest lines of a long session are kept).
 
 Where it comes from, honestly:
 
@@ -75,7 +75,7 @@ Everything else stays: the same open point (`questionId` `gap-N`, topic `gap`), 
 |---|---|---|
 | `RULES.enrichMap` | `agent/conductor/engine.ts` | `true`; `false` starts nothing and changes nothing |
 | `RULES.predictConfidence` | same | `0.75` |
-| `AGENT_ENRICH_SESSIONS` | API env | `5` earlier sessions |
+| `AGENT_ENRICH_SESSIONS` | API env | `0` (current session only); `npm run dev` sets `5` |
 | `AGENT_ENRICH_TIMEOUT_MS` | API env | `200000` (the runner's own limit is `RUNNER_JOB_TIMEOUT_MS`, `180000`) |
 | `RUNNER_JOB_*` | runner env | see `infra/README.md` |
 

@@ -315,8 +315,9 @@ function fakeRunner(respond: (sent: Sent) => { status?: number; body?: unknown; 
     },
   };
 }
+// One expert's server: earlier sessions are read (a shared deployment reads none, the default; see the test below).
 const configFor = (dir: string, fetch: AgentConfig['fetch'], extra: Parameters<typeof resolveConfig>[0] = {}): AgentConfig =>
-  resolveConfig({ sessionsDir: dir, runnerUrl: 'http://runner.test', runnerToken: 'r'.repeat(40), mapsFile: '', fetch, log: () => {}, ...extra });
+  resolveConfig({ sessionsDir: dir, runnerUrl: 'http://runner.test', runnerToken: 'r'.repeat(40), mapsFile: '', enrichSessions: 5, fetch, log: () => {}, ...extra });
 const GOOD = answer({
   context: [{ fact: 'Big lines are signed off by the finance lead.', quote: GAP_QUOTE, sessionId: OLD1 }],
   predictions: [{ gapId: 'gap-1', likelyAnswer: 'The finance lead.', quote: GAP_QUOTE, sessionId: OLD1, confidence: 0.9 }],
@@ -344,6 +345,22 @@ test('runMapEnrich: the job goes to the runner\'s job route with its files, earl
   assert.ok(call.body.files[2]?.content.includes(`${GAP_QUOTE}, no exceptions.`));
   assert.ok(!call.body.files.some((f) => f.content.includes('A new hire talking')), 'a new hire\'s session is not the expert\'s material');
   assert.equal(call.body.system, enrichSystem);
+});
+
+test('runMapEnrich: by default no other session is read or quoted, whatever logs and confirmed maps exist (every visitor of a shared server is someone else)', async (t) => {
+  assert.equal(resolveConfig({ log: () => {} }, {}).enrichSessions, 0);
+  assert.equal(resolveConfig({ log: () => {} }, { AGENT_ENRICH_SESSIONS: '5' }).enrichSessions, 5);
+  const dir = await sessionsDir(t);
+  await writeSession(dir, OLD1, [stage('Show', 1000), said('USER', `${GAP_QUOTE}, no exceptions.`, 2000)], 10);
+  const runner = fakeRunner(() => ({ body: { ok: true, json: GOOD, ms: 5 } }));
+  const config = resolveConfig({ sessionsDir: dir, runnerUrl: 'http://runner.test', runnerToken: 'r'.repeat(40), mapsFile: '', fetch: runner.fetch, log: () => {} }, {});
+  const other = { sessionId: 'old00009-other', map: MAP };
+  const r = await runMapEnrich({ config, files: createSessionFiles(dir), confirmed: (exclude, limit) => [other].filter((m) => m.sessionId !== exclude).slice(0, limit) }, request, new AbortController().signal);
+  assert.ok(r.ok);
+  assert.equal(r.sessions, 0);
+  assert.deepEqual(runner.sent[0]?.body.files.map((f) => f.path), [`sessions/${CUR}/transcript.tsv`, `sessions/${CUR}/observations.tsv`]);
+  assert.ok(!runner.sent[0]?.body.files.some((f) => f.content.includes(GAP_QUOTE)), 'another session\'s words never reach the job');
+  assert.ok(r.output.predictions.every((p) => p.quote === null && p.confidence <= 0.5), 'a quote from a session that was not read is not found: nothing is read back as "last time"');
 });
 
 test('runMapEnrich: every failure is a quiet error code, an old runner without the route included; an aborted call does not reach the runner', async (t) => {
