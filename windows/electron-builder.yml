@@ -1,0 +1,14 @@
+# Packaging config for the Windows preview shell. No installer, no auto-update, no signing:
+# `npm run dist` makes one portable, unsigned Clipa-windows.exe. See ../windows/README.md.
+appId: com.hacknation.clipa
+productName: Clipa
+directories:
+  output: dist
+files:
+  - src/**/*
+  - package.json
+artifactName: "${productName}-windows.${ext}"
+win:
+  target:
+    - portable
+  icon: build/icon.ico
