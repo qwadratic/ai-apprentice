@@ -10,6 +10,7 @@ const PATHS: Record<FeedKind, string[]> = {
   warn: ['M8 2.2l6.2 11H1.8z', 'M8 6.4v3.2', 'M8 11.4v.1'],
   say: ['M3 2.5h10a1 1 0 0 1 1 1v6.5a1 1 0 0 1-1 1H8.5L5.5 14v-3H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1z', 'M5 5.6h6', 'M5 8h4'],
   check: ['M8 2a6 6 0 1 1 0 12A6 6 0 0 1 8 2z', 'M5.4 8.2l1.8 1.8 3.4-3.7'],
+  recognised: ['M1.6 8s2.3-4.6 6.4-4.6S14.4 8 14.4 8s-2.3 4.6-6.4 4.6S1.6 8 1.6 8z', 'M8 6a2 2 0 1 1 0 4 2 2 0 0 1 0-4z'],
 };
 
 export function FeedIcon({ kind }: { kind: FeedKind }) {

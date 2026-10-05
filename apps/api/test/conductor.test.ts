@@ -1,6 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { resolveConfig } from '../agent/config.ts';
 import { Conductor, MapRegistry, RULES } from '../agent/conductor/engine.ts';
+import { createMapStore, parseMapFile } from '../agent/conductor/map-store.ts';
+import { createConductorHub } from '../agent/conductor/routes.ts';
+import { TWIN_SEED_FILE, loadSeedMaps } from '../agent/conductor/seed.ts';
 import { GUIDE, MAC_DONE_LINE, NUDGES, OFF_LINE, OPEN_WEB, PROPOSE, RESOLVED, SHOW_LOOKS_DONE, STAGE_ABOUT, STAGE_CONFIRM, STAGE_START, detectLanguage, doneSaid, offSaid, stageAsked, stageCommand, yesSaid } from '../agent/conductor/lines.ts';
 import { demoMap } from '../agent/conductor/demo-map.ts';
 import { applyEdits } from '../agent/conductor/map-edits.ts';
@@ -1672,4 +1679,177 @@ test('Reflect: the follow-up waits for the voice edits of the answer, and the ne
   await r.advance(RULES.pauseMs + RULES.gapAfterAnswerMs);
   assert.deepEqual(r.calls.slice(-2).map((c) => c.task), ['map_edit', 'answer_check']);
   assert.deepEqual(asksOf(r).map((a) => a.questionId), ['gap-1', 'gap-1-f'], 'the follow-up, not the second point');
+});
+
+// ---- the email twin: invented earlier sessions, and a recognised process shown in the feed ----------------------------------
+const quietLog = (): void => {};
+const seeded = () => loadSeedMaps(quietLog);
+const TWIN_SCREEN = {
+  app: 'Northwind Mail', surface: 'Compose: Invoice INV-2231', regions: [],
+  summary: 'A draft to billing@lumen-bakery.example, subject "Invoice INV-2231". The last line of the message says "Payment terms: Net 14." An invoice PDF is attached.',
+};
+/** What the vision step reports for the twin's compose view (the generic screen_activity kind, an app it has never been told about). */
+const twinObs = (id: string, change: string | null = null, extra: Record<string, unknown> = {}): ClientEvent => obs(id, change, { ...TWIN_SCREEN, ...extra });
+const LEARN = { type: 'session', mode: 'learn', live: true, reason: null } as const;
+
+test('seed: the fixture holds one invented earlier session in the twin (the invoice process), confirmed and marked synthetic, with no screen moments', () => {
+  const raw = JSON.parse(readFileSync(TWIN_SEED_FILE, 'utf8')) as { origin: string; confirmed: Array<{ origin: string; title: string }> };
+  assert.equal(raw.origin, 'synthetic');
+  assert.deepEqual(raw.confirmed.map((e) => [e.title, e.origin]), [['Invoice email: payment terms', 'synthetic']]);
+  const maps = seeded();
+  assert.equal(maps.length, 1, 'the entry reads as a map');
+  const [invoice] = maps;
+  assert.deepEqual(invoice?.map.steps.map((x) => x.goal), ['Open the invoice draft', 'Check which customer the invoice is for', 'Set the payment terms the customer is entitled to', 'Send the invoice']);
+  assert.match(invoice?.map.guardrails[0]?.quote ?? '', /finance lead/);
+  assert.equal(invoice?.map.guardrails[0]?.escalateTo, 'the finance lead');
+  // The main demo's customer_07 rule is never seeded: it is learned live from the expert.
+  assert.ok(!JSON.stringify(maps).includes('customer_07'));
+  for (const entry of maps) {
+    assert.ok(entry.map.steps.every((x) => x.evidenceIds.length === 0) && entry.map.guardrails.every((g) => g.evidenceIds.length === 0), 'nothing was recorded, so no screen moment is claimed');
+    assert.ok(entry.map.steps.some((x) => x.decision?.quote), 'the judgment step carries the expert\'s words');
+  }
+  // A missing or damaged file seeds nothing and never throws.
+  assert.deepEqual(loadSeedMaps(quietLog, join(tmpdir(), 'no-such-seed-file.json')), []);
+});
+
+test('seed: AGENT_SEED_MAPS=1 seeds only an empty registry, in memory only, and never touches a real map', (t) => {
+  assert.equal(resolveConfig({ log: quietLog }, {}).seedMaps, false, 'off by default');
+  assert.equal(resolveConfig({ log: quietLog }, { AGENT_SEED_MAPS: '1' }).seedMaps, true);
+  for (const value of ['0', 'true', '', 'yes']) assert.equal(resolveConfig({ log: quietLog }, { AGENT_SEED_MAPS: value }).seedMaps, false, `"${value}" is not the switch`);
+  assert.equal(resolveConfig({ log: quietLog, seedMaps: true }, {}).seedMaps, true, 'the option wins over the environment');
+  const hub = (seedMaps: boolean, mapsFile: string) => {
+    const h = createConductorHub({ config: resolveConfig({ log: quietLog, seedMaps, mapsFile }, {}) } as never);
+    t.after(() => h.close());
+    return h;
+  };
+  // The flag off: Clipa knows nothing.
+  assert.deepEqual(hub(false, '').maps.library(), []);
+  // The flag on and nothing confirmed: the two earlier sessions, newest first, each marked synthetic.
+  assert.deepEqual(hub(true, '').maps.library().map((p) => [p.key, p.title, p.synthetic]), [['m1-p1', 'Invoice email: payment terms', true]]);
+  // A real confirmed map in the file: nothing is seeded, and the real map is as it was.
+  const dir = mkdtempSync(join(tmpdir(), 'seed-test-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = join(dir, 'maps.json');
+  createMapStore({ file, log: quietLog }).save({ confirmed: [{ sessionId: 'real-1', atMs: 5, title: 'Budget update', map: MAP as never }], lastBuilt: null });
+  const real = hub(true, file);
+  assert.deepEqual(real.maps.library().map((p) => [p.title, p.synthetic]), [['Budget update', undefined]]);
+  assert.equal(real.maps.seed(seeded()), 0, 'a registry with a confirmed map is never seeded');
+  // The seeds are loaded and a real map is confirmed after them: the file gets the real map only, and the real map comes first.
+  const fresh = join(dir, 'fresh', 'maps.json');
+  const mixed = hub(true, fresh);
+  mixed.maps.confirm('real-2', MAP as never, Date.now());
+  assert.deepEqual(parseMapFile(readFileSync(fresh, 'utf8')).confirmed.map((e) => e.sessionId), ['real-2'], 'the seeds never reach the disk');
+  assert.deepEqual(mixed.maps.library().map((p) => [p.title, p.synthetic]), [['Budget update', undefined], ['Invoice email: payment terms', true]]);
+});
+
+test('twin: a twin-like screen and a matching process_match show "Recognised: <process> (from an earlier session)", silently', async () => {
+  const maps = new MapRegistry();
+  maps.seed(seeded());
+  const r = rig({ process_match: () => ok({ processId: 'm1-p1', confidence: 0.9 }), generic_question: () => ok(QUESTION) }, maps, 'expert-twin');
+  await r.send(hello('web'), LEARN, twinObs('t1'), twinObs('t2', 'The payment terms changed from Net 14 to Net 30.'));
+  await r.advance(RULES.settleMs + 10);
+  // The match is asked over everything Clipa learned earlier, about an app she was never told about.
+  const match = r.calls.find((c) => c.task === 'process_match');
+  assert.deepEqual((match?.body.processes as Array<{ id: string; title: string }>).map((p) => [p.id, p.title]), [['m1-p1', 'Invoice email: payment terms']]);
+  assert.deepEqual([...new Set((match?.body.observations as Array<{ app: string }>).map((o) => o.app))], ['Northwind Mail']);
+  // The cue says what was recognised, for the web only, once.
+  assert.deepEqual(cueOf(r.cues, 'recognised'), [{
+    type: 'recognised', title: 'Invoice email: payment terms', text: 'Recognised: Invoice email: payment terms (from an earlier session)', steps: 4, rules: 1, synthetic: true,
+  }]);
+  assert.equal(of(r.cues, 'recognised')[0]?.for, 'web');
+  // Silent: nothing is said or asked because of it, and the existing thought still shows.
+  assert.equal(of(r.cues, 'say').length + of(r.cues, 'ask').length + of(r.cues, 'warn').length, 0);
+  await r.advance(RULES.thoughtGapMs);
+  assert.ok(cueOf(r.cues, 'thought').some((x) => x.text === 'This looks like Invoice email: payment terms'), 'recognition keeps its thought');
+  // Clipa asks only about what differs: the question task is told the known process first.
+  await r.advance(RULES.pauseMs);
+  await r.advance(RULES.settleMs + 10);
+  const transcript = r.calls.find((c) => c.task === 'generic_question')?.body.transcript as Array<{ text: string }>;
+  assert.match(transcript[0]?.text ?? '', /^\[known process from an earlier session\] Invoice email: payment terms\. Steps: .*Ask only about what is different from this\.$/);
+  // The same app and surface is not recognised (or announced) again.
+  await r.send(twinObs('t3', 'The message was scrolled.'));
+  await r.advance(RULES.pauseMs + RULES.settleMs + 10);
+  assert.equal(r.calls.filter((c) => c.task === 'process_match').length, 1);
+  assert.equal(of(r.cues, 'recognised').length, 1);
+});
+
+test('twin: a real earlier map is recognised the same way, but it is not marked synthetic', async () => {
+  const maps = new MapRegistry();
+  maps.confirm('expert-session', TWO as never, 1);
+  const r = rig({ process_match: () => ok({ processId: 'm1-p2', confidence: 0.9 }) }, maps, 'hire-twin');
+  await r.send(hello('web', 'new_hire', 'expert-session'), { type: 'session', mode: 'teach', live: true, reason: null }, twinObs('n1'));
+  await r.advance(RULES.settleMs + 10);
+  assert.deepEqual(cueOf(r.cues, 'recognised'), [{ type: 'recognised', title: 'Supplier check', text: 'Recognised: Supplier check (from an earlier session)', steps: 1, rules: 1, synthetic: false }]);
+  assert.equal(of(r.cues, 'say').length, 0, 'recognition stays silent in Pass it on too');
+});
+
+test('twin: no recognised line for an unsure match, off the record, or a face that is not the web', async () => {
+  const seededMaps = () => { const m = new MapRegistry(); m.seed(seeded()); return m; };
+  const unsure = rig({ process_match: () => ok({ processId: 'm1-p1', confidence: 0.4 }) }, seededMaps(), 'expert-a');
+  await unsure.send(hello('web'), LEARN, twinObs('u1'));
+  await unsure.advance(RULES.settleMs + 10);
+  assert.equal(unsure.calls.filter((c) => c.task === 'process_match').length, 1);
+  assert.equal(of(unsure.cues, 'recognised').length, 0, 'under the confidence: nothing is recognised');
+  const off = rig({ process_match: () => ok({ processId: 'm1-p1', confidence: 0.9 }) }, seededMaps(), 'expert-b');
+  await off.send(hello('web'), LEARN, { type: 'off_record', on: true }, twinObs('f1'));
+  await off.advance(RULES.settleMs + 10);
+  assert.equal(off.calls.length, 0, 'off the record nothing is looked at');
+  assert.equal(of(off.cues, 'recognised').length, 0);
+  const mac = rig({ process_match: () => ok({ processId: 'm1-p1', confidence: 0.9 }) }, seededMaps(), 'mac-twin');
+  await mac.send(hello('macos'), LEARN, twinObs('m1'));
+  await mac.advance(RULES.settleMs + 10);
+  assert.equal(mac.calls.filter((c) => c.task === 'process_match').length, 1, 'she does recognise it on a Mac');
+  assert.equal(of(mac.cues, 'recognised').length, 0, 'but the cue is for the web face only');
+});
+
+test('routes: with seedMaps the cue stream carries the recognised cue for a twin-like screen; without it nothing is matched or shown', async (t) => {
+  const runnerCalls: string[] = [];
+  const runner = async (input: string | URL, init?: RequestInit): Promise<Response> => {
+    const body = JSON.parse(String(init?.body ?? '{}')) as { system?: string };
+    if (!String(input).endsWith('/v1/complete')) return new Response('{}', { status: 404 });
+    runnerCalls.push(/recognise which known/.test(body.system ?? '') ? 'process_match' : 'other');
+    // Only the process match is answered; every other task fails, so nothing else can reach the stream.
+    return /recognise which known/.test(body.system ?? '')
+      ? new Response(JSON.stringify({ ok: true, json: { processId: 'm1-p1', confidence: 0.9 } }), { status: 200, headers: { 'content-type': 'application/json' } })
+      : new Response('{}', { status: 500 });
+  };
+  const twinEvents = [
+    { seq: 1, atMs: 0, event: { type: 'hello', client: 'web', version: '1', persona: 'expert' } },
+    { seq: 2, atMs: 10, event: { type: 'session', mode: 'learn', live: true } },
+    { seq: 3, atMs: 20, event: { type: 'observation', observation: { id: 'twin-1', kind: 'screen_activity', timestampMs: 20, evidenceIds: [], facts: { ...TWIN_SCREEN, change: null, pendingAction: null } } } },
+  ];
+  const open = async (seedMaps: boolean) => {
+    const h = await start(t, { seedMaps, runnerUrl: 'http://runner.test', runnerToken: 'runner-token', fetch: runner });
+    const s = await issue(h.base);
+    const url = `${h.base}/api/agent/conductor/${s.sessionId}`;
+    const ac = new AbortController();
+    t.after(() => ac.abort());
+    const stream = await fetch(`${url}/cues?after=-1&client=web`, { headers: { Origin: ORIGIN, ...bearer(s.token) }, signal: ac.signal });
+    const posted = await fetch(`${url}/events`, { method: 'POST', headers: { Origin: ORIGIN, 'Content-Type': 'application/json', ...bearer(s.token) }, body: JSON.stringify({ events: twinEvents }) });
+    assert.equal(posted.status, 200);
+    return stream.body!.getReader();
+  };
+  /** Reads the stream for at most `ms` (the keepalive ping is 15 s away, so a read can block): everything that came. */
+  const readFor = async (reader: ReadableStreamDefaultReader<Uint8Array>, ms: number, until: RegExp): Promise<string> => {
+    const end = Date.now() + ms;
+    let text = '';
+    while (!until.test(text) && Date.now() < end) {
+      const chunk = await Promise.race([reader.read(), new Promise<null>((resolve) => setTimeout(() => resolve(null), Math.max(1, end - Date.now())))]);
+      if (chunk === null || chunk.done) break;
+      text += new TextDecoder().decode(chunk.value);
+    }
+    return text;
+  };
+  const on = await readFor(await open(true), 5000, /"type":"recognised"/);
+  const line = on.split('\n').find((l) => l.startsWith('data:') && l.includes('"type":"recognised"'));
+  assert.ok(line, 'the recognised cue came down the stream');
+  const env = JSON.parse(line.slice(5)) as { for: string; cue: unknown };
+  assert.equal(env.for, 'web');
+  assert.deepEqual(env.cue, { type: 'recognised', title: 'Invoice email: payment terms', text: 'Recognised: Invoice email: payment terms (from an earlier session)', steps: 4, rules: 1, synthetic: true });
+  assert.ok(runnerCalls.includes('process_match'));
+  // The flag off (the production default): Clipa knows no earlier session, so she matches nothing and shows nothing (questions still work).
+  runnerCalls.length = 0;
+  const off = await readFor(await open(false), 1600, /"type":"recognised"/);
+  assert.doesNotMatch(off, /"type":"recognised"/);
+  assert.ok(!runnerCalls.includes('process_match'), 'no process match is asked without a known process');
 });

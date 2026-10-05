@@ -6,6 +6,9 @@ const children = [
   spawn(process.execPath, ['--watch', 'src/server.ts'], {
     cwd: fileURLToPath(new URL('apps/api/', root)),
     stdio: 'inherit',
+    // The dev rig knows two invented earlier sessions of the email twin (docs/pitch/twin-demo.md); AGENT_SEED_MAPS=0 turns that off.
+    // Production never sets it, and it only applies while no confirmed map exists.
+    env: { ...process.env, AGENT_SEED_MAPS: process.env.AGENT_SEED_MAPS ?? '1' },
   }),
   spawn(process.execPath, [fileURLToPath(new URL('node_modules/vite/bin/vite.js', root)), '--host', '127.0.0.1'], {
     cwd: fileURLToPath(new URL('apps/web/', root)),

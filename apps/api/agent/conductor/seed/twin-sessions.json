@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "origin": "synthetic",
+  "description": "One invented earlier session in the email digital twin (Northwind Mail), as a confirmed Work Map. Loaded only when AGENT_SEED_MAPS=1 and no confirmed map exists; in memory only, never written to the maps file. Synthetic data: every name, address and quote is made up. No screen moments: nothing here was recorded. The main demo's customer_07 rule is never seeded: it is learned live.",
+  "lastBuilt": null,
+  "confirmed": [
+    {
+      "sessionId": "seed-twin-invoice",
+      "atMs": 1791022800000,
+      "title": "Invoice email: payment terms",
+      "origin": "synthetic",
+      "map": {
+        "processes": [
+          {
+            "id": "p1",
+            "title": "Invoice email: payment terms",
+            "summary": "Send a customer their invoice by email with the payment terms their agreement allows."
+          }
+        ],
+        "steps": [
+          {
+            "id": "s1",
+            "processId": "p1",
+            "kind": "action",
+            "goal": "Open the invoice draft",
+            "action": "Opened the draft \"Invoice INV-2188\" to billing@harbor-print.example in Northwind Mail; the last line of the message said \"Payment terms: Net 14.\"",
+            "decision": null,
+            "evidenceIds": []
+          },
+          {
+            "id": "s2",
+            "processId": "p1",
+            "kind": "action",
+            "goal": "Check which customer the invoice is for",
+            "action": "Read the recipient and the subject, then looked the customer up in the list of signed agreements",
+            "decision": null,
+            "evidenceIds": []
+          },
+          {
+            "id": "s3",
+            "processId": "p1",
+            "kind": "judgment",
+            "goal": "Set the payment terms the customer is entitled to",
+            "action": "Changed \"Net 14\" to \"Net 30\" in the last line of the message",
+            "decision": {
+              "summary": "Net 30 instead of the standard Net 14 for a customer with a signed agreement",
+              "reason": "The customer has a signed agreement for Net 30",
+              "quote": "Harbor Print has a signed agreement, so it gets Net 30. The standard is Net 14.",
+              "quoteAtMs": 41800
+            },
+            "evidenceIds": []
+          },
+          {
+            "id": "s4",
+            "processId": "p1",
+            "kind": "action",
+            "goal": "Send the invoice",
+            "action": "Pressed Send with the invoice PDF attached and the agreed terms in the last line",
+            "decision": null,
+            "evidenceIds": []
+          }
+        ],
+        "guardrails": [
+          {
+            "id": "g1",
+            "processId": "p1",
+            "condition": "Payment terms longer than the standard Net 14 on an invoice email",
+            "requiredAction": "Net 30 only for a customer with a signed agreement; anything longer than Net 30 needs the finance lead",
+            "reason": "Only customers with a signed agreement are entitled to longer terms",
+            "quote": "If they have a signed agreement it is Net 30. Anything longer, I ask the finance lead first.",
+            "quoteAtMs": 58400,
+            "escalateTo": "the finance lead",
+            "exceptions": [
+              "A customer without a signed agreement keeps the standard Net 14"
+            ],
+            "evidenceIds": []
+          }
+        ],
+        "gaps": [],
+        "teachBack": "Here is what I understood. Invoice emails use the standard Net 14. A customer with a signed agreement gets Net 30, and anything longer needs the finance lead. Is that right?"
+      }
+    }
+  ]
+}

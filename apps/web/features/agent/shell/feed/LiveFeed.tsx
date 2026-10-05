@@ -32,13 +32,14 @@ export function LiveFeed({ empty, title = 'Live feed', visible = FEED_VISIBLE }:
   const events = useShellState((s) => s.events);
   const checkpoint = useShellState((s) => s.teach.checkpoint);
   const said = useConductor((s) => s.said);
+  const recognised = useConductor((s) => s.recognised);
   const mapChanges = useMapChanges();
   const [expanded, setExpanded] = useState(false);
   const running = phase === 'live' && !offRecord;
   const tick = useNow(1000, session !== null);
   const now = Math.max(tick, Date.now());
 
-  const entries = collectFeed({ session, observations, questions, said, events, checkpoint, mapChanges, conductorLeads: leads }, now);
+  const entries = collectFeed({ session, observations, questions, said, recognised, events, checkpoint, mapChanges, conductorLeads: leads }, now);
   const { shown, earlier, canFold } = foldFeed(entries, expanded, visible);
   const synthetic = entries.some((e) => e.synthetic === true);
   const state = offRecord ? 'Off the record' : running ? 'Live' : phase === 'starting' ? 'Starting' : phase === 'ended' ? 'Ended' : 'Not running';

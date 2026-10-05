@@ -2,11 +2,11 @@
 // shell store and the conductor store). Newest first; a few items show, the rest fold into "+N earlier". Pure: no React, no
 // clock of its own, tested with node --test.
 import type { DraftMap } from '../brain/types.ts';
-import type { ConductorMapSnapshot, SaidItem } from '../conductor/store.ts';
+import type { ConductorMapSnapshot, RecognisedItem, SaidItem } from '../conductor/store.ts';
 import { SESSION_LIMIT_MS } from '../session-clock.ts';
 import type { CheckpointCard, FeedItem, LogLine, ObservationRow, SessionInfo } from '../state/types.ts';
 
-export const FEED_KINDS = ['screen', 'ask', 'answer', 'rule', 'map', 'warn', 'say', 'check'] as const;
+export const FEED_KINDS = ['screen', 'ask', 'answer', 'rule', 'map', 'warn', 'say', 'check', 'recognised'] as const;
 export type FeedKind = (typeof FEED_KINDS)[number];
 
 /** The words beside each item's icon. */
@@ -19,6 +19,7 @@ export const FEED_LABEL: Record<FeedKind, string> = {
   warn: 'Warning',
   say: 'Clipa said',
   check: 'Checked',
+  recognised: 'Recognised',
 };
 
 /** How many items show before the rest fold into "+N earlier", and how many the expanded list keeps. */
@@ -53,6 +54,8 @@ export interface FeedSources {
   questions: readonly FeedItem[];
   /** What the conductor had Clipa ask, warn or say. */
   said: readonly SaidItem[];
+  /** The processes the conductor recognised on the shared screen (shown, never spoken). */
+  recognised?: readonly RecognisedItem[];
   /** The debug log: its USER lines are the person's own words (already scrubbed). */
   events: readonly LogLine[];
   checkpoint: CheckpointCard | null;
@@ -102,6 +105,10 @@ export function collectFeed(src: FeedSources, nowMs: number): FeedEntry[] {
     for (const s of src.said) {
       if (s.outcome === 'skipped') continue; // never reached the person
       out.push({ id: `cue:${s.cueId}`, kind: s.kind, text: s.text, atMs: wall(s.atMs) });
+    }
+    // A process learned earlier, seen again on the shared screen: one quiet line ("Recognised"), from a seeded session marked synthetic.
+    for (const r of src.recognised ?? []) {
+      out.push({ id: `rec:${r.cueId}`, kind: 'recognised', text: `${r.title} (from an earlier session)`, atMs: wall(r.atMs), ...(r.synthetic ? { synthetic: true } : {}) });
     }
     for (const line of src.events) {
       if (line.type !== 'USER' || line.text.trim() === '') continue;

@@ -155,6 +155,9 @@ export const OFF_LINE = "Okay, I'm off. Press Start when you need me.";
 /** Pass it on: the rule Clipa warned about is kept now (the check comes back clear). Said once; it names no rule. */
 export const RESOLVED = 'That fixes it. Ready for review.';
 
+/** The quiet line for a process Clipa recognised on the shared screen (shown in the feed, never spoken); the title is data. */
+export const recognisedLine = (title: string): string => `Recognised: ${title} (from an earlier session)`;
+
 const plainText = (text: string): string => text.toLowerCase().replace(/[‘’`´]/g, "'").replace(/ё/g, 'е');
 const words = (text: string): Array<{ w: string; start: number; end: number }> =>
   [...plainText(text).matchAll(/[\p{L}\p{N}]+(?:'[\p{L}\p{N}]+)*/gu)].map((m) => ({ w: m[0], start: m.index, end: m.index + m[0].length }));

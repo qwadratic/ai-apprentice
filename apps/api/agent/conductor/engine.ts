@@ -7,7 +7,7 @@ import { isRecord } from '../config.ts';
 import type { AnswerCheckOutput, GenericQuestionOutput, GuardrailCheckOutput, MapEditOutput, MapSynthesisOutput, ProcessMatchOutput, ReplyOutput } from '../llm-tasks.ts';
 import type { TaskResult } from '../llm.ts';
 import { demoMap } from './demo-map.ts';
-import { GUIDE, MAC_DONE_LINE, NUDGES, OFF_LINE, OPEN_WEB, PROPOSE, RESOLVED, SHOW_LOOKS_DONE, STAGE_ABOUT, STAGE_CONFIRM, STAGE_NAMES, STAGE_START, detectLanguage, donePhraseOnly, doneSaid, offSaid, stageAsked, stageCommand, yesSaid } from './lines.ts';
+import { GUIDE, MAC_DONE_LINE, NUDGES, OFF_LINE, OPEN_WEB, PROPOSE, RESOLVED, SHOW_LOOKS_DONE, STAGE_ABOUT, STAGE_CONFIRM, STAGE_NAMES, STAGE_START, detectLanguage, donePhraseOnly, doneSaid, offSaid, recognisedLine, stageAsked, stageCommand, yesSaid } from './lines.ts';
 import { applyEdits } from './map-edits.ts';
 import type { ConductorMap, MapComment } from './map-edits.ts';
 import { mapTitle, storableMap } from './map-store.ts';
@@ -141,7 +141,8 @@ function sameScreen(a: SeenObservation, b: SeenObservation): boolean {
     && a.pendingAction === b.pendingAction && (a.surface === b.surface || b.change === null);
 }
 
-export interface ConfirmedMap { sessionId: string; map: MapSynthesisOutput; confirmedAt: number }
+/** `seeded`: an invented earlier session loaded by MapRegistry.seed (AGENT_SEED_MAPS): kept in memory, never written to the maps file. */
+export interface ConfirmedMap { sessionId: string; map: MapSynthesisOutput; confirmedAt: number; seeded?: boolean }
 
 /** The comments a stored map carries (voice edits keep them on the map), or none. */
 function commentsOf(map: unknown): MapComment[] {
@@ -176,6 +177,16 @@ export class MapRegistry {
     this.remember({ sessionId, map, confirmedAt: at });
     this.persist();
   }
+  /**
+   * Invented earlier sessions as confirmed maps (AGENT_SEED_MAPS=1), so Clipa can recognise a process on screen without a live
+   * rehearsal. Only while no confirmed map exists: a real map is never mixed with them or overwritten, and they stay in memory
+   * (persist() leaves them out, so the maps file only ever holds real maps). Returns how many maps were seeded.
+   */
+  seed(entries: ReadonlyArray<{ sessionId: string; atMs: number; map: MapSynthesisOutput }>): number {
+    if (this.bySession.size > 0) return 0;
+    for (const e of [...entries].sort((a, b) => a.atMs - b.atMs)) this.remember({ sessionId: e.sessionId, map: structuredClone(e.map), confirmedAt: e.atMs, seeded: true });
+    return entries.length;
+  }
   /** A session built (or edited) its own map: it becomes the last built map, confirmed or not. */
   recordBuilt(sessionId: string, map: MapSynthesisOutput, at: number): void {
     this.built = { sessionId, atMs: at, title: mapTitle(map), map: storableMap(map) };
@@ -185,7 +196,7 @@ export class MapRegistry {
   lastBuilt(): StoredMap | null { return this.built; }
   private persist(): void {
     this.store?.save({
-      confirmed: [...this.bySession.values()].map((e) => ({ sessionId: e.sessionId, atMs: e.confirmedAt, title: mapTitle(e.map), map: storableMap(e.map) })),
+      confirmed: [...this.bySession.values()].filter((e) => e.seeded !== true).map((e) => ({ sessionId: e.sessionId, atMs: e.confirmedAt, title: mapTitle(e.map), map: storableMap(e.map) })),
       lastBuilt: this.built,
     });
   }
@@ -211,7 +222,7 @@ export class MapRegistry {
       processes.forEach((p, i) => {
         const mine = (pid: string | null | undefined): boolean => (typeof pid === 'string' && known.has(pid) ? pid === p.id : i === 0);
         out.push({
-          key: `m${m + 1}-${p.id}`, title: p.title, summary: p.summary,
+          key: `m${m + 1}-${p.id}`, title: p.title, summary: p.summary, ...(entry.seeded ? { synthetic: true } : {}),
           steps: map.steps.filter((x) => mine(x.processId)).map((x) => x.action),
           rules: map.guardrails.filter((g) => mine(g.processId)).map((g) => ({
             id: m === 0 ? g.id : `m${m + 1}-${g.id}`, condition: g.condition, requiredAction: g.requiredAction, reason: g.reason, quote: g.quote, evidenceIds: g.evidenceIds,
@@ -224,7 +235,8 @@ export class MapRegistry {
 }
 
 export interface LearnedRule { id: string; condition: string; requiredAction: string; reason: string | null; quote: string | null; evidenceIds: string[] }
-export interface LearnedProcess { key: string; title: string; summary: string; steps: string[]; rules: LearnedRule[] }
+/** `synthetic`: learned in a seeded, invented earlier session (see MapRegistry.seed). */
+export interface LearnedProcess { key: string; title: string; summary: string; steps: string[]; rules: LearnedRule[]; synthetic?: boolean }
 
 export interface ConductorDeps {
   now(): number;
@@ -1211,12 +1223,22 @@ export class Conductor {
     if (!match || match.key === this.recognized?.key) return;
     this.recognized = match;
     this.thought(`This looks like ${match.title}`);
+    this.announceRecognised(match);
     if (this.liveMode === 'teach') {
       this.emit({ type: 'context', text: `[map] The expert's confirmed rules for ${match.title}: ${match.rules.map((g) => `when ${g.condition}, ${g.requiredAction}`).join('; ') || 'none'}. Do not state them unless the app asks.`.slice(0, 2000) });
     }
-    // Recognition is silent: a thought, the rules for the voice agent (Teach) and the known process for the question (Learn).
-    // An announcement ("I know this one", "This is X, I will step in") only talks around the questions and warnings.
+    // Recognition is silent: a thought, a line in the web's feed, the rules for the voice agent (Teach) and the known process for
+    // the question (Learn). An announcement ("I know this one", "This is X, I will step in") only talks around the questions and warnings.
     this.quiet(`recognised: ${match.title}`);
+  }
+
+  /**
+   * The web lists what Clipa recognised ("Recognised: <process> (from an earlier session)"): a cue of its own, visual only and
+   * never spoken (the thought bubble above fades after a few seconds; this stays in the feed). Nothing off the record.
+   */
+  private announceRecognised(p: LearnedProcess): void {
+    if (this.offRecord || !this.webFace()) return;
+    this.emit({ type: 'recognised', title: p.title, text: recognisedLine(p.title), steps: p.steps.length, rules: p.rules.length, synthetic: p.synthetic === true }, { for: 'web' });
   }
 
   /** In Learn, a recognised process goes to the question task as context, so Clipa asks only about what differs. */

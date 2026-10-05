@@ -446,6 +446,9 @@
 
 /* ---- Text bits ------------------------------------------------------------ */
 .apprentice-shell .as-note { margin: 4px 0; color: var(--as-muted); font-size: 0.88rem; }
+.apprentice-shell .as-twin-link { color: var(--as-accent); font-weight: 600; text-underline-offset: 3px; }
+.apprentice-shell .as-twin-link:hover { text-decoration: underline; }
+.apprentice-shell .as-twin-link:focus-visible { outline: 3px solid var(--as-focus); outline-offset: 2px; border-radius: 4px; }
 .apprentice-shell .as-empty { margin: 4px 0 10px; color: var(--as-muted); font-size: 0.92rem; }
 .apprentice-shell .as-disclosure { margin: 10px 0 0; padding-top: 10px; border-top: 1px solid var(--as-border); color: var(--as-muted); font-size: 0.82rem; }
 .apprentice-shell .as-details { margin-top: 4px; font-size: 0.82rem; }
@@ -690,11 +693,13 @@
 .apprentice-shell .as-live__item[data-kind="rule"] .as-live__icon,
 .apprentice-shell .as-live__item[data-tone="ok"] .as-live__icon { color: var(--as-ok); border-color: rgba(111, 220, 176, 0.5); background: var(--as-ok-soft); }
 .apprentice-shell .as-live__item[data-kind="warn"] .as-live__icon { color: var(--as-warn); border-color: rgba(242, 187, 92, 0.6); background: var(--as-warn-soft); }
-.apprentice-shell .as-live__item[data-kind="ask"] .as-live__icon { background: var(--as-accent-soft); border-color: rgba(44, 196, 184, 0.5); }
+.apprentice-shell .as-live__item[data-kind="ask"] .as-live__icon,
+.apprentice-shell .as-live__item[data-kind="recognised"] .as-live__icon { background: var(--as-accent-soft); border-color: rgba(44, 196, 184, 0.5); }
 .apprentice-shell .as-live__body { min-width: 0; padding-top: 1px; }
 .apprentice-shell .as-live__meta { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 0.76rem; color: var(--as-muted); }
 .apprentice-shell .as-live__label { font-weight: 700; letter-spacing: 0.02em; color: var(--as-muted); }
 .apprentice-shell .as-live__item[data-kind="ask"] .as-live__label,
+.apprentice-shell .as-live__item[data-kind="recognised"] .as-live__label,
 .apprentice-shell .as-live__item[data-kind="say"] .as-live__label { color: var(--as-accent); }
 .apprentice-shell .as-live__item[data-kind="rule"] .as-live__label { color: var(--as-ok); }
 .apprentice-shell .as-live__item[data-kind="warn"] .as-live__label { color: var(--as-warn); }
@@ -712,6 +717,7 @@
 }
 .apprentice-shell .as-live__item[data-kind="screen"] .as-live__text { color: var(--as-muted); }
 .apprentice-shell .as-live__item[data-kind="ask"] .as-live__text,
+.apprentice-shell .as-live__item[data-kind="recognised"] .as-live__text,
 .apprentice-shell .as-live__item[data-kind="warn"] .as-live__text { font-weight: 600; }
 .apprentice-shell .as-live__more {
   align-self: flex-start;

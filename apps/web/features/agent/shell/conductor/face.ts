@@ -5,12 +5,13 @@
 //   - A cue past its `expiresAtMs`, or a spoken cue that arrives while the person types or talks, is dropped: `skipped`.
 //   - Off the record nothing is rendered except `state hidden`.
 //   - Cues replayed from before this page joined a hand-over (`historyUntil`) only restore the map and the teach-back.
+//   - recognised goes to the store (the live feed lists "Recognised: <process>") and is never spoken, so nothing is reported for it;
 //   - thought goes to the store (the thought bubble beside Clipa) and is never spoken; attention makes Clipa flash and go to
 //     its target; stage opens a stage the way a click on the rail does (with `start`, it starts it the way Start does);
 //     end ends the running session the way End does.
 import type { ClientTimers } from './client.ts';
 import type { ClientEvent, ClipaPose, ConductorMode, CueEnvelope, CueOutcome, Region, Target } from './protocol.ts';
-import { MAX_SAID } from './store.ts';
+import { MAX_RECOGNISED, MAX_SAID } from './store.ts';
 import type { ConductorLine, ConductorStore, SaidItem } from './store.ts';
 import { clipaHint } from './targets.ts';
 
@@ -209,6 +210,14 @@ export class ConductorFace {
           this.thoughtTimer = null;
           if (this.store.getState().thought === thought) this.store.set({ thought: null });
         }, THOUGHT_MS);
+        return;
+      }
+      case 'recognised': {
+        // Visual only: a line in the live feed. Never spoken, so no cue_done either.
+        const item = { cueId: env.cueId, title: cue.title, atMs: env.atMs, steps: cue.steps, rules: cue.rules, synthetic: cue.synthetic };
+        const list = [...this.store.getState().recognised, item];
+        this.store.set({ recognised: list.length > MAX_RECOGNISED ? list.slice(list.length - MAX_RECOGNISED) : list });
+        this.host.log('RECOGNISED', cue.title);
         return;
       }
       case 'stage':
