@@ -213,9 +213,11 @@ extension ClipaController {
     /// performed. Pure string functions (no `self`): `nonisolated` so a unit test can call them without the main
     /// actor.
     nonisolated static func askMessage(_ text: String, maxChars: Int) -> String {
-        var clean = withoutAudioTags(text)
-        if clean.uppercased().hasPrefix("[ASK]") { clean = String(clean.dropFirst(5)) }
-        clean = clean.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Check the raw text for a leading "[ASK]" before audio tags are stripped, or the tag is always
+        // gone by the time this runs and the check can never trigger.
+        var raw = text
+        if raw.uppercased().hasPrefix("[ASK]") { raw = String(raw.dropFirst(5)) }
+        let clean = withoutAudioTags(raw)
         return "[ASK] " + String(clean.prefix(max(1, maxChars)))
     }
 

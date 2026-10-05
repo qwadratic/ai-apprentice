@@ -58,4 +58,21 @@ final class ClipaControllerTextTests: XCTestCase {
     func testEmptyTextStillGetsTheAskPrefix() {
         XCTAssertEqual(ClipaController.askMessage("", maxChars: 10), "[ASK] ")
     }
+
+    func testALeadingAskTagIsDroppedInsteadOfDoubled() {
+        // A caller that already wrapped its text in "[ASK]" must not get "[ASK] [ASK] ...": the prefix check
+        // has to see the raw "[ASK]" before tag-stripping would otherwise remove it first (issue #109).
+        XCTAssertEqual(ClipaController.askMessage("[ASK] Why did you do that?", maxChars: 400), "[ASK] Why did you do that?")
+    }
+
+    func testALeadingAskTagIsDroppedCaseInsensitively() {
+        XCTAssertEqual(ClipaController.askMessage("[ask] Why did you do that?", maxChars: 400), "[ASK] Why did you do that?")
+    }
+
+    func testALeadingAskTagAndALaterAudioTagAreBothRemoved() {
+        XCTAssertEqual(
+            ClipaController.askMessage("[ASK] [sighs] Why did you do that?", maxChars: 400),
+            "[ASK] Why did you do that?"
+        )
+    }
 }
