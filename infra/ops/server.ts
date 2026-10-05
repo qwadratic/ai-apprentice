@@ -22,6 +22,9 @@ const HOST = process.env.OPS_HOST || '127.0.0.1';
 const PORT = Number(process.env.OPS_PORT || 8788);
 const SECRET = process.env.DEPLOY_WEBHOOK_SECRET || '';
 const REPO = process.env.DEPLOY_REPO || '/opt/apprentice/repo';
+// Branch a deployable sha must be an ancestor of. Default main until the VM is switched
+// (see infra/README.md "Deploy from the release branch").
+const DEPLOY_BRANCH = process.env.DEPLOY_BRANCH || 'main';
 const STATE = process.env.DEPLOY_STATE_DIR || '/var/lib/apprentice';
 const REQUEST_FILE = join(STATE, 'deploy-request.json');
 const STATUS_FILE = join(STATE, 'deploy-status.json');
@@ -126,12 +129,12 @@ function git(args: string[], timeoutMs: number): Promise<number> {
   });
 }
 
-// True if sha is on origin/main. A failed fetch is not fatal: the check then
-// runs against the origin/main the checkout already knows.
-async function onMain(sha: string): Promise<boolean> {
-  const fetched = await git(['fetch', '-q', 'origin', 'main'], 20_000);
-  if (fetched !== 0) log({ level: 'warn', msg: 'git fetch failed before the ancestry check', code: fetched });
-  return (await git(['merge-base', '--is-ancestor', sha, 'origin/main'], 10_000)) === 0;
+// True if sha is on origin/<DEPLOY_BRANCH>. A failed fetch is not fatal: the check then
+// runs against the origin/<DEPLOY_BRANCH> the checkout already knows.
+async function onDeployBranch(sha: string): Promise<boolean> {
+  const fetched = await git(['fetch', '-q', 'origin', DEPLOY_BRANCH], 20_000);
+  if (fetched !== 0) log({ level: 'warn', msg: 'git fetch failed before the ancestry check', code: fetched, branch: DEPLOY_BRANCH });
+  return (await git(['merge-base', '--is-ancestor', sha, `origin/${DEPLOY_BRANCH}`], 10_000)) === 0;
 }
 
 async function writeAtomic(path: string, data: string): Promise<void> {
@@ -243,9 +246,12 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     meta.sha = sha.slice(0, 12);
-    if (!(await onMain(sha))) {
+    if (!(await onDeployBranch(sha))) {
       code = 422;
-      resBytes = send(res, 422, { ok: false, error: 'not_on_main', sha });
+      // Backward compatible: the default branch still answers the original error code.
+      // A VM switched to another branch (DEPLOY_BRANCH) answers a generic one instead.
+      const error = DEPLOY_BRANCH === 'main' ? 'not_on_main' : 'not_on_deploy_branch';
+      resBytes = send(res, 422, { ok: false, error, sha, branch: DEPLOY_BRANCH });
       return;
     }
     const now = new Date().toISOString();
