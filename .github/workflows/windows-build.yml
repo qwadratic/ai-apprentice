@@ -1,0 +1,100 @@
+name: windows-build
+
+# A Windows preview of the same product the macOS build wraps: Electron around the deployed web
+# app (apps/web, published at qwadratic.github.io/clipa), not a Swift rewrite, so it builds on
+# windows-latest instead of macos-15. See windows/README.md for what it is and its honest limits.
+#
+# No windows/package-lock.json is committed: windows/package.json pins exact electron and
+# electron-builder versions (no range operators), and `npm install --no-audit` below resolves
+# everything else fresh on every run -- there was no machine with enough free disk to generate a
+# lockfile when this was written (windows/README.md explains the trade-off). A follow-up can
+# commit the lockfile a run of this workflow produces and switch Install to `npm ci`.
+#
+# Base branch is release, not main: this workflow only runs for pushes and pull requests against
+# release, plus manual runs from any ref.
+on:
+  push:
+    branches: [release]
+    paths:
+      - "windows/**"
+      - ".github/workflows/windows-build.yml"
+  pull_request:
+    branches: [release]
+    paths:
+      - "windows/**"
+      - ".github/workflows/windows-build.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: windows
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.0
+
+      - name: Toolchain versions
+        run: |
+          node --version
+          npm --version
+
+      - name: "Install (no lockfile yet: exact versions pinned in package.json)"
+        run: npm install --no-audit
+
+      - name: Syntax check (no TypeScript or ESLint here yet)
+        run: npm run lint
+
+      - name: Package a portable .exe
+        run: npm run dist
+
+      - name: List build output
+        run: ls -la dist
+
+      # windows-latest runners have a real interactive desktop session, so the packaged app can
+      # actually open a window here -- unlike a headless Linux CI box. This only proves the
+      # process starts and survives a few seconds; it does not drive the UI or touch the screen
+      # or microphone permissions. Native process checks are more reliable in PowerShell than in
+      # Git Bash's process emulation for a GUI subprocess, hence the shell override.
+      - name: "Smoke test (best effort: the packaged app starts and stays up)"
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path dist -Filter *.exe -Recurse | Select-Object -First 1
+          if (-not $exe) {
+            throw "No .exe found under dist/"
+          }
+          Write-Host "Launching $($exe.FullName)"
+          $proc = Start-Process -FilePath $exe.FullName -ArgumentList '--disable-gpu' -PassThru
+          Start-Sleep -Seconds 8
+          $running = Get-Process -Id $proc.Id -ErrorAction SilentlyContinue
+          if (-not $running) {
+            throw "The packaged app (pid $($proc.Id)) was not running 8s after launch."
+          }
+          Write-Host "pid $($proc.Id) is alive after 8s: smoke test passed."
+          Stop-Process -Id $proc.Id -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Clipa-windows
+          path: windows/dist/Clipa-windows.exe
+          if-no-files-found: error
+
+      # Pushes to release publish this as one fixed public release, so the download link never
+      # changes: https://github.com/qwadratic/clipa/releases/download/clipa-windows-latest/Clipa-windows.exe
+      - name: Publish the latest release-branch build as a release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete clipa-windows-latest --yes --cleanup-tag || true
+          gh release create clipa-windows-latest dist/Clipa-windows.exe \
+            --title "Clipa for Windows (latest release-branch build, preview)" --target "$GITHUB_SHA" \
+            --notes "Unsigned portable build of windows/ at $GITHUB_SHA, not code-signed. Download Clipa-windows.exe and run it: Windows SmartScreen blocks it on first run, click More info then Run anyway. A desktop shell around the deployed web app (https://qwadratic.github.io/clipa/), nothing more. See windows/README.md for what it is and its honest limits."

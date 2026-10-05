@@ -1,0 +1,16 @@
+{
+  "name": "clipa-windows",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Clipa desktop shell for Windows (preview): Electron window around the deployed web app, nothing else.",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "lint": "node --check src/main.js",
+    "dist": "electron-builder --win portable"
+  },
+  "devDependencies": {
+    "electron": "44.5.1",
+    "electron-builder": "26.15.3"
+  }
+}
