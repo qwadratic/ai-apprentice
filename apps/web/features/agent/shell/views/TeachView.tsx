@@ -81,7 +81,7 @@ export function TeachView() {
         </section>
       )}
 
-      <LiveFeed empty={running ? 'Watching the new case. Warnings and checks appear here.' : 'Nothing yet: start Pass it on and share your screen.'} />
+      <LiveFeed empty={running ? 'Watching the new case. Warnings and checks appear here.' : 'Nothing yet. Warnings and checks will appear here.'} />
 
       {mastery !== null && (
         <section className="as-mastery-card" aria-labelledby="as-mastery-title" data-clipa-target="summary">

@@ -105,7 +105,7 @@ function BrainReview() {
         )}
       </section>
 
-      <LiveFeed visible={3} empty={running ? 'Changes to the map appear here as you talk.' : 'Nothing yet: start Reflect and talk to Clipa.'} />
+      <LiveFeed visible={3} empty={running ? 'Changes to the map appear here as you talk.' : 'Nothing yet. Changes to the map will appear here.'} />
 
       <section aria-labelledby="as-rmap-title">
         <h3 className="as-h3" id="as-rmap-title">Work Map so far <span className="as-count">{map.steps.length} steps</span></h3>

@@ -79,7 +79,8 @@ export function JourneyRail() {
           <span className="as-rail__dot" aria-hidden="true" />
           Clipa <span className="as-rail__state">{CLIPA_STATE_WORDS[view.state]}</span>
         </span>
-        <span className="as-rail__line" data-testid="clipa-line">{caption}</span>
+        {/* The bubble above the page shows what Clipa says, once; this is its accessible copy, for screen readers only. */}
+        <span className="as-rail__line as-sr" data-testid="clipa-line">{caption}</span>
       </p>
     </nav>
   );

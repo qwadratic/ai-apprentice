@@ -1,0 +1,125 @@
+/* "How Clipa thinks": five connected boxes (stacked on a phone) and a small knowledge graph. Colours are the shell's --as-* tokens.
+   Nothing here widens the page: every box and the graph shrink to the column. */
+
+.apprentice-shell .mp {
+  margin: 16px 16px 24px;
+  padding: 14px 16px 16px;
+  min-width: 0;
+  border: 1px solid var(--as-border);
+  border-radius: var(--as-radius);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0) 120px), var(--as-surface);
+  box-shadow: var(--as-shadow);
+}
+.apprentice-shell .mp__head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 14px; }
+.apprentice-shell .mp__title { margin: 0; font-size: 1rem; }
+.apprentice-shell .mp__lead { margin: 0; min-width: 0; color: var(--as-muted); font-size: 0.88rem; }
+
+/* The five boxes: a column on a phone with a down arrow between boxes, a row with right arrows from 980 px. */
+.apprentice-shell .mp__flow {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 22px;
+}
+.apprentice-shell .mp__box {
+  position: relative;
+  min-width: 0;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--as-border);
+  border-radius: 12px;
+  background: var(--as-surface-2);
+}
+.apprentice-shell .mp__box:not(:last-child)::after {
+  content: '\2193';
+  position: absolute;
+  left: 50%;
+  bottom: -21px;
+  transform: translateX(-50%);
+  color: var(--as-accent);
+  font-size: 1rem;
+  line-height: 1;
+}
+/* The knowledge graph box is the one the others lead to. */
+.apprentice-shell .mp__box[data-box="knowledge"] { border-color: var(--as-accent); background: var(--as-accent-soft); }
+.apprentice-shell .mp__name { margin: 0 0 4px; display: flex; align-items: center; gap: 8px; font-size: 0.96rem; }
+.apprentice-shell .mp__no {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--as-accent);
+  color: var(--as-accent-text);
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+.apprentice-shell .mp__what { margin: 0 0 8px; color: var(--as-muted); font-size: 0.82rem; line-height: 1.35; }
+.apprentice-shell .mp__item {
+  margin: 0;
+  padding-top: 8px;
+  border-top: 1px dashed var(--as-border);
+  font-size: 0.84rem;
+  line-height: 1.38;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.apprentice-shell .mp__box[data-source="example"] .mp__item { color: var(--as-muted); }
+.apprentice-shell .mp__tag {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 0 7px;
+  border: 1px solid var(--as-border);
+  border-radius: 999px;
+  background: var(--as-surface);
+  color: var(--as-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  line-height: 1.5;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}
+.apprentice-shell .mp__tag--live { border-color: var(--as-accent); color: var(--as-accent); }
+.apprentice-shell .mp__tag--warn { margin: 0 0 0 6px; border-color: var(--as-warn); background: var(--as-warn-soft); color: var(--as-warn); }
+
+@media (min-width: 980px) {
+  .apprentice-shell .mp__flow { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .apprentice-shell .mp__box:not(:last-child)::after {
+    content: '\2192';
+    left: auto;
+    right: -20px;
+    bottom: auto;
+    top: 16px;
+    transform: none;
+  }
+}
+
+/* The graph: a narrow tree, centred under the boxes. Its text is drawn in SVG user units (the viewBox is 340 wide). */
+.apprentice-shell .mp-graph { margin: 16px auto 0; padding: 0; max-width: 420px; min-width: 0; }
+.apprentice-shell .mp-graph__svg { display: block; width: 100%; height: auto; overflow: visible; }
+.apprentice-shell .mp-node__box { fill: var(--as-surface-2); stroke: var(--as-border); stroke-width: 1.2; }
+.apprentice-shell .mp-node--process .mp-node__box { stroke: var(--as-muted); }
+.apprentice-shell .mp-node--rule .mp-node__box { fill: var(--as-accent-soft); stroke: var(--as-accent); stroke-width: 1.6; }
+.apprentice-shell .mp-node--exception .mp-node__box { fill: var(--as-warn-soft); stroke: var(--as-warn); }
+.apprentice-shell .mp-node--evidence .mp-node__box { stroke-dasharray: 4 3; }
+.apprentice-shell .mp-node__tag { fill: var(--as-muted); font-size: 8.5px; font-weight: 700; letter-spacing: 0.08em; }
+.apprentice-shell .mp-node--rule .mp-node__tag { fill: var(--as-accent); }
+.apprentice-shell .mp-node--exception .mp-node__tag { fill: var(--as-warn); }
+.apprentice-shell .mp-node__text { fill: var(--as-text); font-size: 11.5px; }
+.apprentice-shell .mp-node--evidence .mp-node__text { font-style: italic; }
+.apprentice-shell .mp-edge { fill: none; stroke: var(--as-muted); stroke-width: 1.4; }
+.apprentice-shell .mp-edge--owns { stroke: var(--as-accent); }
+.apprentice-shell .mp-edge--except { stroke: var(--as-warn); }
+.apprentice-shell .mp-edge--said { stroke-dasharray: 4 3; }
+.apprentice-shell .mp-arrow { fill: var(--as-muted); }
+.apprentice-shell .mp-graph__cap { margin: 10px 0 0; color: var(--as-muted); font-size: 0.82rem; text-align: center; }
+
+@media (max-width: 520px) {
+  .apprentice-shell .mp { padding: 12px 12px 14px; }
+}

@@ -1,3 +1,4 @@
+import './clipa-now.css';
 import { useConductor, useConductorLeads } from '../conductor/hooks.ts';
 import type { ClipaPose } from '../conductor/protocol.ts';
 import { useShellState } from '../hooks.ts';
@@ -39,9 +40,14 @@ function useClipaState(): { word: string; tone: 'calm' | 'speak' | 'warn' | 'off
   return { word: VOICE_WORD[voice], tone: voice === 'speaking' ? 'speak' : 'calm' };
 }
 
+/** The kinds of line the card is for: a real cue (a question, a warning, something she said, the teach-back). */
+const CUE_KINDS: ReadonlySet<string> = new Set(['ask', 'warn', 'say', 'teachback']);
+
 /**
  * What Clipa is saying now, large: the conductor's current line while it leads, else the question the in-browser brain asked
- * last. `idle` is the one line that says what to do next when she has nothing to say.
+ * last. `idle` is the line that says what to do next when she has nothing to say. The card shows only for a real cue: while it
+ * would only repeat the current guide (or `idle`), it stays in the page but hidden, because Clipa's bubble already says it once;
+ * off the record, the session card and the pill say so.
  */
 export function ClipaNow({ idle }: { idle: string }) {
   const leads = useConductorLeads();
@@ -58,8 +64,9 @@ export function ClipaNow({ idle }: { idle: string }) {
   const text = offRecord ? null : leads ? said : asked;
   const kind = offRecord ? 'off' : leads ? (line?.kind ?? 'idle') : asked !== null ? 'ask' : 'idle';
 
+  const cue = CUE_KINDS.has(kind);
   return (
-    <section className="as-now" aria-label="Clipa now" data-testid="clipa-now" data-tone={tone} data-kind={kind}>
+    <section className="as-now" aria-label="Clipa now" data-testid="clipa-now" data-tone={tone} data-kind={kind} hidden={!cue}>
       <div className="as-now__who">
         <span className="as-now__dot" aria-hidden="true" />
         <span className="as-now__name">Clipa</span>

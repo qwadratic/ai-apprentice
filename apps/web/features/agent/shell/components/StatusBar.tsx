@@ -1,20 +1,25 @@
-import { useNow, useShellState } from '../hooks.ts';
-import { statusChips } from '../state/derive.ts';
+import './status-pill.css';
+import { useShellState } from '../hooks.ts';
 
-/** Four chips: screen, voice, session, off-record. Each says its state in words; colour only adds to it. */
+/**
+ * The one status the page keeps in view: a compact "Recording" pill while a session records, and "Off the record" while the
+ * person is off the record (honesty stays visible). Nothing else: the screen, voice, session and record chips are in the Debug
+ * drawer (StatusChips), and the session card says what recording means.
+ */
 export function StatusBar() {
-  const state = useShellState((s) => s);
-  const now = useNow(1000, state.phase === 'live');
-  const chips = statusChips(state, now);
+  const offRecord = useShellState((s) => s.offRecord);
+  const recording = useShellState((s) => s.phase === 'live');
+  if (offRecord) {
+    return (
+      <p className="as-pill as-pill--off" role="status" data-testid="status-pill" data-state="off">
+        <span className="as-pill__dot" aria-hidden="true" />Off the record
+      </p>
+    );
+  }
+  if (!recording) return null;
   return (
-    <ul className="as-status" aria-label="Status">
-      {chips.map((chip) => (
-        <li key={chip.label} className={`as-chip as-chip--${chip.tone}`}>
-          <span className="as-chip__dot" aria-hidden="true" />
-          <span className="as-chip__label">{chip.label}</span>
-          <span className="as-chip__value">{chip.value}</span>
-        </li>
-      ))}
-    </ul>
+    <p className="as-pill as-pill--rec" role="status" data-testid="status-pill" data-state="recording">
+      <span className="as-pill__dot" aria-hidden="true" />Recording
+    </p>
   );
 }

@@ -25,7 +25,7 @@ export function LearnView() {
       {!leads && !brain.wired && (
         <NotWired>the question policy ({brain.name}): Clipa asks nothing and the map stays empty. Voice and screen are real.</NotWired>
       )}
-      <LiveFeed empty={running ? 'Watching. Screen changes, questions and your answers appear here.' : 'Nothing yet: start Show and share your screen.'} />
+      <LiveFeed empty={running ? 'Watching. Screen changes, questions and your answers appear here.' : 'Nothing yet. Screen changes, questions and your answers will appear here.'} />
       {!leads && map.steps.length > 0 && (
         <details className="as-fold">
           <summary className="as-fold__summary">Draft map <span className="as-count">{map.steps.length} steps</span></summary>

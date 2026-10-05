@@ -2,14 +2,15 @@ import { useShell, useShellState } from '../hooks.ts';
 import { MODE_LABELS } from '../state/types.ts';
 
 const START_HINT = {
-  learn: 'Do the task and talk as you work. Clipa asks a few questions at natural pauses.',
+  learn: 'Do the task and talk as you work. Clipa asks at natural pauses.',
   review: 'A spoken debrief: open questions, then a teach-back you confirm or correct.',
   teach: 'A new hire works on a new case. Clipa speaks up before an expert’s rule is broken.',
 } as const;
 
 /**
- * Start or End of the stage on screen (Start makes the session), and what recording means. One main button; the sample
- * observations (invented data) and the limits sit under Options. The session id and the raw state are in Debug.
+ * Start or End of the stage on screen (Start makes the session): one main button and one sentence. What recording means (and what
+ * Off the record does), the sample observations (invented data) and the limits sit under "Options and limits", collapsed. The
+ * session id and the raw state are in Debug.
  */
 export function SessionControls() {
   const { controller } = useShell();
@@ -62,12 +63,12 @@ export function SessionControls() {
         )}
       </div>
 
-      <p className="as-disclosure">
-        Start records the session&apos;s events, transcript and audio on our server and opens the microphone. <strong>Off the record</strong> stops
-        both channels; it does not recall what was already sent.
-      </p>
       <details className="as-details">
         <summary className="as-details__summary">Options and limits</summary>
+        <p className="as-note" data-testid="recording-note">
+          Start records the session&apos;s events, transcript and audio on our server and opens the microphone. <strong>Off the record</strong> stops
+          both channels; it does not recall what was already sent.
+        </p>
         <label className={`as-switch${mode === 'review' ? ' is-disabled' : ''}`}>
           <input
             type="checkbox"
