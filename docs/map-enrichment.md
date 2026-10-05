@@ -38,7 +38,7 @@ Where it comes from, honestly:
 
 - **This session:** the conductor's own memory, full fidelity (every turn, every observation with its id and `change`).
 - **Earlier sessions:** what is already on disk, the `{sessionId}.jsonl` logs the web app posts: `USER` and `AGENT` lines are the transcript; the `[screen] ...` context lines the voice agent was given are the screen (app, surface and summary joined in one line, so they are split back apart as well as they can be; **no observation ids and no `change`**). The persona comes from the `[stage] Now in Show|Reflect|Pass it on:` line (Show or Reflect: expert; only Pass it on: new hire); a session with none of them counts as the expert's only if it confirmed a map. A session without a voice connection leaves nothing to read.
-- **Confirmed maps:** the registry's newest confirmed maps of other sessions, also those whose log is gone.
+- **Confirmed maps:** the registry's newest confirmed maps of other, real sessions, also those whose log is gone. The invented sessions of the email twin (`AGENT_SEED_MAPS`) are never read: nobody said what they hold.
 
 Nothing new is written to disk, and nothing from a session that was off the record exists to read (the web app stops uploading and the conductor stops observing).
 

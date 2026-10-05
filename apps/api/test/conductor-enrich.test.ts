@@ -335,6 +335,18 @@ test('an earlier or demo map is not deepened: it is not this session\'s own', as
   assert.ok(of(r.cues, 'map').length >= 1);
 });
 
+test('the registry offers map_enrich the confirmed maps of real sessions only: not the current one, not the invented seeded ones, newest first', () => {
+  const maps = new MapRegistry();
+  assert.equal(maps.seed([{ sessionId: 'seed-1', atMs: 5, map: MAP as never }]), 1);
+  assert.deepEqual(maps.recent('sess-x', 5), [], 'a seeded, invented session is nobody\'s earlier words');
+  maps.confirm('real-1', MAP as never, 10);
+  maps.confirm('real-2', MAP as never, 20);
+  maps.confirm('real-3', MAP as never, 30);
+  assert.deepEqual(maps.recent('real-3', 5).map((e) => e.sessionId), ['real-2', 'real-1']);
+  assert.deepEqual(maps.recent('sess-x', 2).map((e) => e.sessionId), ['real-3', 'real-2']);
+  assert.deepEqual(maps.recent('sess-x', 0), []);
+});
+
 test('confirmPrior reads the expert\'s earlier words back, short and without doubled punctuation; affirmSaid is a short reply that agrees and changes nothing', () => {
   assert.equal(confirmPrior('Only the lead releases it.'), 'Last time you said: "Only the lead releases it". Still true?');
   assert.equal(confirmPrior('  spaced \n out  words '), 'Last time you said: "spaced out words". Still true?');

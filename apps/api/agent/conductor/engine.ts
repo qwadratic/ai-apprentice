@@ -203,9 +203,12 @@ export class MapRegistry {
       lastBuilt: this.built,
     });
   }
-  /** Confirmed maps of sessions other than `exclude`, newest first, at most `limit` (map_enrich reads them as the expert's earlier words). */
+  /**
+   * Confirmed maps of real sessions other than `exclude`, newest first, at most `limit` (map_enrich reads them as the expert's
+   * earlier words). The invented seeded sessions are never among them: nobody said what they hold.
+   */
   recent(exclude: string, limit: number): ConfirmedMap[] {
-    return [...this.bySession.values()].filter((e) => e.sessionId !== exclude).sort((a, b) => b.confirmedAt - a.confirmedAt).slice(0, Math.max(0, limit));
+    return [...this.bySession.values()].filter((e) => e.sessionId !== exclude && e.seeded !== true).sort((a, b) => b.confirmedAt - a.confirmedAt).slice(0, Math.max(0, limit));
   }
   /** The map of `from` when named and confirmed, else the most recently confirmed one. */
   find(from: string | null): ConfirmedMap | null {
