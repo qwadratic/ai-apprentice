@@ -1545,3 +1545,55 @@ test('twin: no recognised line for an unsure match, off the record, or a face th
   assert.equal(mac.calls.filter((c) => c.task === 'process_match').length, 1, 'she does recognise it on a Mac');
   assert.equal(of(mac.cues, 'recognised').length, 0, 'but the cue is for the web face only');
 });
+
+test('routes: with seedMaps the cue stream carries the recognised cue for a twin-like screen; without it nothing is matched or shown', async (t) => {
+  const runnerCalls: string[] = [];
+  const runner = async (input: string | URL, init?: RequestInit): Promise<Response> => {
+    const body = JSON.parse(String(init?.body ?? '{}')) as { system?: string };
+    if (!String(input).endsWith('/v1/complete')) return new Response('{}', { status: 404 });
+    runnerCalls.push(/recognise which known/.test(body.system ?? '') ? 'process_match' : 'other');
+    // Only the process match is answered; every other task fails, so nothing else can reach the stream.
+    return /recognise which known/.test(body.system ?? '')
+      ? new Response(JSON.stringify({ ok: true, json: { processId: 'm1-p1', confidence: 0.9 } }), { status: 200, headers: { 'content-type': 'application/json' } })
+      : new Response('{}', { status: 500 });
+  };
+  const twinEvents = [
+    { seq: 1, atMs: 0, event: { type: 'hello', client: 'web', version: '1', persona: 'expert' } },
+    { seq: 2, atMs: 10, event: { type: 'session', mode: 'learn', live: true } },
+    { seq: 3, atMs: 20, event: { type: 'observation', observation: { id: 'twin-1', kind: 'screen_activity', timestampMs: 20, evidenceIds: [], facts: { ...TWIN_SCREEN, change: null, pendingAction: null } } } },
+  ];
+  const open = async (seedMaps: boolean) => {
+    const h = await start(t, { seedMaps, runnerUrl: 'http://runner.test', runnerToken: 'runner-token', fetch: runner });
+    const s = await issue(h.base);
+    const url = `${h.base}/api/agent/conductor/${s.sessionId}`;
+    const ac = new AbortController();
+    t.after(() => ac.abort());
+    const stream = await fetch(`${url}/cues?after=-1&client=web`, { headers: { Origin: ORIGIN, ...bearer(s.token) }, signal: ac.signal });
+    const posted = await fetch(`${url}/events`, { method: 'POST', headers: { Origin: ORIGIN, 'Content-Type': 'application/json', ...bearer(s.token) }, body: JSON.stringify({ events: twinEvents }) });
+    assert.equal(posted.status, 200);
+    return stream.body!.getReader();
+  };
+  /** Reads the stream for at most `ms` (the keepalive ping is 15 s away, so a read can block): everything that came. */
+  const readFor = async (reader: ReadableStreamDefaultReader<Uint8Array>, ms: number, until: RegExp): Promise<string> => {
+    const end = Date.now() + ms;
+    let text = '';
+    while (!until.test(text) && Date.now() < end) {
+      const chunk = await Promise.race([reader.read(), new Promise<null>((resolve) => setTimeout(() => resolve(null), Math.max(1, end - Date.now())))]);
+      if (chunk === null || chunk.done) break;
+      text += new TextDecoder().decode(chunk.value);
+    }
+    return text;
+  };
+  const on = await readFor(await open(true), 5000, /"type":"recognised"/);
+  const line = on.split('\n').find((l) => l.startsWith('data:') && l.includes('"type":"recognised"'));
+  assert.ok(line, 'the recognised cue came down the stream');
+  const env = JSON.parse(line.slice(5)) as { for: string; cue: unknown };
+  assert.equal(env.for, 'web');
+  assert.deepEqual(env.cue, { type: 'recognised', title: 'Invoice email: payment terms', text: 'Recognised: Invoice email: payment terms (from an earlier session)', steps: 4, rules: 1, synthetic: true });
+  assert.ok(runnerCalls.includes('process_match'));
+  // The flag off (the production default): Clipa knows no earlier session, so she matches nothing and shows nothing (questions still work).
+  runnerCalls.length = 0;
+  const off = await readFor(await open(false), 1600, /"type":"recognised"/);
+  assert.doesNotMatch(off, /"type":"recognised"/);
+  assert.ok(!runnerCalls.includes('process_match'), 'no process match is asked without a known process');
+});
