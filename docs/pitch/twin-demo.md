@@ -1,17 +1,17 @@
 # Demo script: the email twin (Northwind Mail) and recognition from earlier sessions
 
-A second demo flow. The expert works in **Northwind Mail**, a realistic mail client that lives in **another browser tab** and is shared like any real app. Clipa reads it through the generic vision path (a frame every 1–2 s, described in words), not through the built-in demo workspace. Because two earlier sessions are already on file, she **recognises the app and the process** and asks only about what is different.
+A second demo flow. The expert works in **Northwind Mail**, a realistic mail client that lives in **another browser tab** and is shared like any real app. Clipa reads it through the generic vision path (a frame every 1–2 s, described in words), not through the built-in demo workspace. Because an earlier session of the invoice process is already on file, she **recognises the app and the process** and asks only about what is different.
 
 - **The story.** An invoice email to Lumen Bakery says "Payment terms: Net 14." The expert changes it to Net 30 because Lumen has a signed agreement. Clipa already knows the invoice process (open the draft, check the customer, set the payment terms, send) and its rule (a signed agreement gets Net 30, anything longer needs the finance lead). She says so quietly in the feed and asks only what the earlier session did not cover.
-- **Data.** Everything is synthetic: the twin's names, addresses and numbers, and the two earlier sessions.
-- **The earlier sessions are seeded, not recorded.** With `AGENT_SEED_MAPS=1` the server loads two invented confirmed maps, "Invoice email: payment terms" and "Delivery update email" (`apps/api/agent/conductor/seed/twin-sessions.json`), in memory only. The feed marks them **Synthetic data**. Say so on camera ("two sessions seeded for this demo"). With the flag on, the customer_07 text rule is no longer learned live; the main demo script (`demo-script.md`) runs with the flag off.
+- **Data.** Everything is synthetic: the twin's names, addresses and numbers, and the earlier session.
+- **The earlier session is seeded, not recorded.** With `AGENT_SEED_MAPS=1` the server loads one invented confirmed map, "Invoice email: payment terms" (`apps/api/agent/conductor/seed/twin-sessions.json`), in memory only. The feed marks it **Synthetic data**. Say so on camera ("one earlier session seeded for this demo"). The main demo's customer_07 rule is never seeded: it is always learned live, so case (c) is taught from scratch, as in `demo-script.md`.
 - **Honesty.** The twin is a plain web page in its own tab. Clipa watches it and speaks up before Send, but she cannot block a click in another tab. Send in the twin is simulated and sends nothing. Never call the recognition live learning: it recognises a process taught earlier.
 - **People.** Expert: Ivan. New hire (optional last part): the teammate, or Ivan in a second browser profile.
 
 ## Before the take (5 minutes)
 
 **The server needs the seeds, and no real maps**
-- Dev rig: `npm run dev` turns `AGENT_SEED_MAPS` on by itself (set `AGENT_SEED_MAPS=0` to turn it off). The API log shows `seeded invented earlier sessions … count 2`.
+- Dev rig: `npm run dev` turns `AGENT_SEED_MAPS` on by itself (set `AGENT_SEED_MAPS=0` to turn it off). The API log shows `seeded invented earlier sessions … count 1`.
 - The VM (rehearsal only): put `AGENT_SEED_MAPS=1` in `/etc/apprentice/env`, then `sudo rm -f /var/lib/apprentice/maps.json && sudo systemctl restart apprentice-api`. The seeds load only while **no confirmed map exists**, so a map left over from an earlier take hides them. **Remove the line again and restart before any judge-facing run**: production leaves it unset.
 - Production config is untouched: the variable is off by default and is documented in `infra/README.md`.
 
@@ -48,12 +48,9 @@ A second demo flow. The expert works in **Northwind Mail**, a realistic mail cli
 
 If you end Show (say *"That's it."*), Reflect builds the map from what you did and said: the Net 30 decision for Lumen carries your quote, next to the learned rule.
 
-## Part 2 (optional): the second process, "Delivery update email"
+## Part 2 (optional): a process with no earlier session
 
-| Step | You do or say | Clipa (expected) |
-| --- | --- | --- |
-| 7 | Open case **(c)** (empty message, image only). Hands off, silent for about 15 s. | Feed line **Recognised: Delivery update email (from an earlier session)**. Nothing spoken. |
-| 8 | Click `delivery-summary.png` to read the address and window, close it, and type both into the message. Keep the image attached. Stop. | A question about what is different, or quiet. Not a repeat of the text rule. |
+Open case **(c)** (empty message, image only) and work it as in the main demo: type the delivery details into the message and keep the image. Nothing is recognised here, because no earlier session covers it: Clipa asks why at the pause, and the rule is learned live. This is the contrast with Part 1.
 
 ## Part 3 (optional): Pass it on, a new hire on the twin
 
@@ -61,7 +58,7 @@ The new hire opens the app, presses **Pass it on** and shares the **Northwind Ma
 
 | Step | New hire does | Clipa (expected) |
 | --- | --- | --- |
-| 9 | Open case **(c)**: empty message, image only. Hover over **Send** (or press **Preview**) and stop. | One short warning **before Send**: the details belong in the text (rule and reason from the earlier session). The **Recognised** feed line shows first. |
+| 9 | Open case **(c)**: empty message, image only. Hover over **Send** (or press **Preview**) and stop. | One short warning **before Send**, only if Part 2 taught and confirmed that rule: the details belong in the text, with the expert's reason. |
 | 10 | Type the address and the window into the message. Stop. | "That fixes it. Ready for review." |
 | 11 | Open case **(b)** (Net 14), hover over **Send**, stop. | **Quiet.** The longer-terms rule does not apply to standard Net 14. |
 

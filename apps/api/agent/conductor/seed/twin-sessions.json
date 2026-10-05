@@ -1,7 +1,7 @@
 {
   "version": 1,
   "origin": "synthetic",
-  "description": "Two invented earlier sessions in the email digital twin (Northwind Mail), as confirmed Work Maps. Loaded only when AGENT_SEED_MAPS=1 and no confirmed map exists; in memory only, never written to the maps file. Synthetic data: every name, address and quote is made up. No screen moments: nothing here was recorded.",
+  "description": "One invented earlier session in the email digital twin (Northwind Mail), as a confirmed Work Map. Loaded only when AGENT_SEED_MAPS=1 and no confirmed map exists; in memory only, never written to the maps file. Synthetic data: every name, address and quote is made up. No screen moments: nothing here was recorded. The main demo's customer_07 rule is never seeded: it is learned live.",
   "lastBuilt": null,
   "confirmed": [
     {
@@ -78,82 +78,6 @@
         ],
         "gaps": [],
         "teachBack": "Here is what I understood. Invoice emails use the standard Net 14. A customer with a signed agreement gets Net 30, and anything longer needs the finance lead. Is that right?"
-      }
-    },
-    {
-      "sessionId": "seed-twin-delivery",
-      "atMs": 1791018300000,
-      "title": "Delivery update email",
-      "origin": "synthetic",
-      "map": {
-        "processes": [
-          {
-            "id": "p1",
-            "title": "Delivery update email",
-            "summary": "Send a customer the delivery address and time of their order, in the form they asked for."
-          }
-        ],
-        "steps": [
-          {
-            "id": "s1",
-            "processId": "p1",
-            "kind": "action",
-            "goal": "Open the delivery update draft",
-            "action": "Opened the draft \"Delivery update — ORD-2049\" to customer_07 in Northwind Mail with delivery-summary.png attached and an empty message",
-            "decision": null,
-            "evidenceIds": []
-          },
-          {
-            "id": "s2",
-            "processId": "p1",
-            "kind": "action",
-            "goal": "Check what the customer needs",
-            "action": "Looked at the attached image and the order: the delivery address and the delivery time",
-            "decision": null,
-            "evidenceIds": []
-          },
-          {
-            "id": "s3",
-            "processId": "p1",
-            "kind": "judgment",
-            "goal": "Put the delivery details in the message text",
-            "action": "Typed the delivery address and the delivery time into the message, and kept the image attached",
-            "decision": {
-              "summary": "Details as text for customer_07, not only in the image",
-              "reason": "customer_07 asked to get the delivery details as text",
-              "quote": "customer_07 asked to get the address and the time as text, so I write them in the email.",
-              "quoteAtMs": 52300
-            },
-            "evidenceIds": []
-          },
-          {
-            "id": "s4",
-            "processId": "p1",
-            "kind": "action",
-            "goal": "Send the update",
-            "action": "Pressed Send with the details in the text and the image still attached",
-            "decision": null,
-            "evidenceIds": []
-          }
-        ],
-        "guardrails": [
-          {
-            "id": "g1",
-            "processId": "p1",
-            "condition": "A delivery update email to customer_07 has no delivery address and time in its text",
-            "requiredAction": "Add the delivery address and time as text before sending",
-            "reason": "customer_07 asked to get them as text",
-            "quote": "customer_07 asked to get the address and the time as text.",
-            "quoteAtMs": 52300,
-            "escalateTo": null,
-            "exceptions": [
-              "An image is fine when the details are also in the text"
-            ],
-            "evidenceIds": []
-          }
-        ],
-        "gaps": [],
-        "teachBack": "Here is what I understood. A delivery update to customer_07 needs the delivery address and time written in the email, because customer_07 asked for text. An image is fine as an extra when the details are also in the text. Is that right?"
       }
     }
   ]

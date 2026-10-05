@@ -1,4 +1,4 @@
-// Seeded "earlier sessions" for the email digital twin demo (docs/pitch/twin-demo.md): two invented confirmed Work Maps that let
+// Seeded "earlier sessions" for the email digital twin demo (docs/pitch/twin-demo.md): one invented confirmed Work Map (the invoice process; the main demo's customer_07 rule is never seeded) that lets
 // Clipa recognise a process on screen without a rehearsal first. Off unless AGENT_SEED_MAPS=1 (production leaves it unset). They are
 // data, not prompts: the fixture is synthetic, labelled so, kept in memory only and loaded only while no confirmed map exists.
 import { readFileSync } from 'node:fs';

@@ -1437,17 +1437,18 @@ const TWIN_SCREEN = {
 const twinObs = (id: string, change: string | null = null, extra: Record<string, unknown> = {}): ClientEvent => obs(id, change, { ...TWIN_SCREEN, ...extra });
 const LEARN = { type: 'session', mode: 'learn', live: true, reason: null } as const;
 
-test('seed: the fixture holds two invented earlier sessions in the twin, confirmed and marked synthetic, with no screen moments', () => {
+test('seed: the fixture holds one invented earlier session in the twin (the invoice process), confirmed and marked synthetic, with no screen moments', () => {
   const raw = JSON.parse(readFileSync(TWIN_SEED_FILE, 'utf8')) as { origin: string; confirmed: Array<{ origin: string; title: string }> };
   assert.equal(raw.origin, 'synthetic');
-  assert.deepEqual(raw.confirmed.map((e) => [e.title, e.origin]), [['Invoice email: payment terms', 'synthetic'], ['Delivery update email', 'synthetic']]);
+  assert.deepEqual(raw.confirmed.map((e) => [e.title, e.origin]), [['Invoice email: payment terms', 'synthetic']]);
   const maps = seeded();
-  assert.equal(maps.length, 2, 'both entries read as maps');
-  const [invoice, delivery] = maps;
+  assert.equal(maps.length, 1, 'the entry reads as a map');
+  const [invoice] = maps;
   assert.deepEqual(invoice?.map.steps.map((x) => x.goal), ['Open the invoice draft', 'Check which customer the invoice is for', 'Set the payment terms the customer is entitled to', 'Send the invoice']);
   assert.match(invoice?.map.guardrails[0]?.quote ?? '', /finance lead/);
   assert.equal(invoice?.map.guardrails[0]?.escalateTo, 'the finance lead');
-  assert.deepEqual(delivery?.map.guardrails[0]?.exceptions, ['An image is fine when the details are also in the text']);
+  // The main demo's customer_07 rule is never seeded: it is learned live from the expert.
+  assert.ok(!JSON.stringify(maps).includes('customer_07'));
   for (const entry of maps) {
     assert.ok(entry.map.steps.every((x) => x.evidenceIds.length === 0) && entry.map.guardrails.every((g) => g.evidenceIds.length === 0), 'nothing was recorded, so no screen moment is claimed');
     assert.ok(entry.map.steps.some((x) => x.decision?.quote), 'the judgment step carries the expert\'s words');
@@ -1469,7 +1470,7 @@ test('seed: AGENT_SEED_MAPS=1 seeds only an empty registry, in memory only, and 
   // The flag off: Clipa knows nothing.
   assert.deepEqual(hub(false, '').maps.library(), []);
   // The flag on and nothing confirmed: the two earlier sessions, newest first, each marked synthetic.
-  assert.deepEqual(hub(true, '').maps.library().map((p) => [p.key, p.title, p.synthetic]), [['m1-p1', 'Invoice email: payment terms', true], ['m2-p1', 'Delivery update email', true]]);
+  assert.deepEqual(hub(true, '').maps.library().map((p) => [p.key, p.title, p.synthetic]), [['m1-p1', 'Invoice email: payment terms', true]]);
   // A real confirmed map in the file: nothing is seeded, and the real map is as it was.
   const dir = mkdtempSync(join(tmpdir(), 'seed-test-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
@@ -1483,7 +1484,7 @@ test('seed: AGENT_SEED_MAPS=1 seeds only an empty registry, in memory only, and 
   const mixed = hub(true, fresh);
   mixed.maps.confirm('real-2', MAP as never, Date.now());
   assert.deepEqual(parseMapFile(readFileSync(fresh, 'utf8')).confirmed.map((e) => e.sessionId), ['real-2'], 'the seeds never reach the disk');
-  assert.deepEqual(mixed.maps.library().map((p) => [p.title, p.synthetic]), [['Budget update', undefined], ['Invoice email: payment terms', true], ['Delivery update email', true]]);
+  assert.deepEqual(mixed.maps.library().map((p) => [p.title, p.synthetic]), [['Budget update', undefined], ['Invoice email: payment terms', true]]);
 });
 
 test('twin: a twin-like screen and a matching process_match show "Recognised: <process> (from an earlier session)", silently', async () => {
@@ -1494,7 +1495,7 @@ test('twin: a twin-like screen and a matching process_match show "Recognised: <p
   await r.advance(RULES.settleMs + 10);
   // The match is asked over everything Clipa learned earlier, about an app she was never told about.
   const match = r.calls.find((c) => c.task === 'process_match');
-  assert.deepEqual((match?.body.processes as Array<{ id: string; title: string }>).map((p) => [p.id, p.title]), [['m1-p1', 'Invoice email: payment terms'], ['m2-p1', 'Delivery update email']]);
+  assert.deepEqual((match?.body.processes as Array<{ id: string; title: string }>).map((p) => [p.id, p.title]), [['m1-p1', 'Invoice email: payment terms']]);
   assert.deepEqual([...new Set((match?.body.observations as Array<{ app: string }>).map((o) => o.app))], ['Northwind Mail']);
   // The cue says what was recognised, for the web only, once.
   assert.deepEqual(cueOf(r.cues, 'recognised'), [{
