@@ -1,0 +1,52 @@
+name: guardrail-live-check
+
+# Opt-in only: T1-T6 against the live guardrail_check LLM task through the real Claude runner
+# (apps/api/scripts/guardrail-live-check.ts). A real model call per case, so this never runs on push or on a
+# pull request, by hand (workflow_dispatch) only, and it skips cleanly when RUNNER_URL/RUNNER_TOKEN are not
+# configured as repository secrets.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag or sha to check (default is the selected branch)"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      RUNNER_URL: ${{ secrets.RUNNER_URL }}
+      RUNNER_TOKEN: ${{ secrets.RUNNER_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Look for the runner secrets
+        id: runner
+        run: |
+          if [ -n "$RUNNER_URL" ] && [ -n "$RUNNER_TOKEN" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::RUNNER_URL/RUNNER_TOKEN are not configured on this repository; skipping the live check."
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.runner.outputs.present == 'true'
+        with:
+          node-version: 22.22.0
+          cache: npm
+
+      - name: npm ci
+        if: steps.runner.outputs.present == 'true'
+        run: npm ci
+
+      - name: Live T1-T6 against guardrail_check
+        if: steps.runner.outputs.present == 'true'
+        run: node apps/api/scripts/guardrail-live-check.ts
