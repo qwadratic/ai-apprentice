@@ -63,7 +63,19 @@ struct ClipaConfig {
                   let parsed = URL(string: text), parsed.scheme == "https" || parsed.scheme == "http" else { return nil }
             return parsed
         }
-        if let server = url(env["CLIPA_SERVER"]) ?? url(file.server) { config.server = server }
+        // https only: every request to `server` carries frames, the transcript and the bearer token. `web` is just
+        // opened in a browser (no secrets travel with it), so it keeps accepting http too.
+        func httpsServerURL(_ value: String?) -> URL? {
+            guard let text = value?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty,
+                  let parsed = URL(string: text) else { return nil }
+            guard parsed.scheme == "https" else {
+                let reason = Data("Clipa: ignoring server \"\(text)\": only https is accepted (requests carry frames, the transcript and the bearer token)\n".utf8)
+                FileHandle.standardError.write(reason)
+                return nil
+            }
+            return parsed
+        }
+        if let server = httpsServerURL(env["CLIPA_SERVER"]) ?? httpsServerURL(file.server) { config.server = server }
         if let web = url(env["CLIPA_WEB"]) ?? url(file.web) { config.web = web }
         if let fps = Double(env["CLIPA_FPS"] ?? "") ?? file.fps, fps >= 0.5, fps <= 5 { config.fps = fps }
         if let width = file.max_width, width >= 320, width <= 2560 { config.maxWidth = width }

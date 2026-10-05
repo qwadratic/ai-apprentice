@@ -164,7 +164,10 @@ final class ConductorClient {
 /// A minimal text/event-stream reader: `event:` and `data:` lines, dispatched on the blank line that ends an event.
 /// Comment lines (the server's `: ping` keepalive) are skipped.
 enum SSEReader {
-    static func read(_ bytes: URLSession.AsyncBytes, handler: @MainActor (String, String) -> Void) async throws {
+    /// Generic over the byte sequence (not tied to `URLSession.AsyncBytes`) so a unit test can feed it a plain
+    /// in-memory async sequence instead of a live network stream.
+    static func read<Bytes: AsyncSequence>(_ bytes: Bytes, handler: @MainActor (String, String) -> Void) async throws
+    where Bytes.Element == UInt8 {
         var line: [UInt8] = []
         var event = ""
         var data = ""
