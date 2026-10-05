@@ -12,7 +12,7 @@ const ui = (name: 'share' | 'start' | 'mode_tab' | 'board_gap' | 'teachback' | '
 type Lines = Readonly<Record<string, GuideLine>>;
 
 const WEB_EXPERT: Lines = {
-  welcome: { step: 'welcome', phase: 'learn', text: 'Press Start in Show, then share your whole screen and work as usual.', target: ui('start', 'learn'), speak: false },
+  welcome: { step: 'welcome', phase: 'learn', text: 'Press Start in Show and work as usual. I ask why at a natural pause.', target: ui('start', 'learn'), speak: false },
   share_now: { step: 'share_now', phase: 'share', text: 'Now share your whole screen so I can see your work.', target: ui('share'), speak: false },
   share_failed: { step: 'share_failed', phase: 'share', text: 'Sharing did not start. Try again and pick the entire screen.', target: ui('share'), speak: false },
   start_learn: { step: 'start_learn', phase: 'learn', text: 'I can see your screen. Press Start in Show and just work.', target: ui('start', 'learn'), speak: false },
@@ -34,7 +34,8 @@ const WEB_NEW_HIRE: Lines = {
   start_teach: { step: 'start_teach', phase: 'teach', text: 'I can see your screen. Press Start in Pass it on and work on your case.', target: ui('start', 'teach'), speak: false },
   no_map: { step: 'no_map', phase: 'teach', text: 'There is no confirmed map yet: the expert confirms one in Reflect first.', target: null, speak: true },
   work: { step: 'work', phase: 'teach', text: 'Go ahead. Tell me what you would do next and why.', target: null, speak: false },
-  summary: { step: 'summary', phase: 'summary', text: 'Well done. Here is what you handled and what to practise.', target: ui('summary'), speak: true },
+  // No promise of a summary card: while the conductor leads, the brain's mastery card is empty or reads "not judged".
+  summary: { step: 'summary', phase: 'summary', text: 'Nice work on this case.', target: null, speak: true },
 };
 const MAC_EXPERT: Lines = {
   welcome: { step: 'welcome', phase: 'learn', text: 'I am here in the corner. Work as usual; I will only ask at natural pauses.', target: null, speak: false },
@@ -124,11 +125,15 @@ export function stageAsked(text: string): Mode | null {
 
 /** The stage names the person sees. */
 export const STAGE_NAMES: Readonly<Record<Mode, string>> = { learn: 'Show', review: 'Reflect', teach: 'Pass it on' };
-/** What the voice agent hears (never spoken) when a stage starts, so it always knows where the journey is. */
+/**
+ * What the voice agent hears (never spoken) when a stage starts, so it always knows where the journey is. The app decides what
+ * is asked and warned, and when: the agent only voices the [ASK] lines, and says nothing of its own around them.
+ */
+const ASK_LINES_ONLY = "The app sends every question and warning as [ASK] lines. Do not ask or acknowledge anything on your own beyond 'Got it.'; otherwise use skip_turn.";
 export const STAGE_ABOUT: Readonly<Record<Mode, string>> = {
-  learn: 'the expert works on screen; ask only at natural pauses.',
-  review: 'the expert checks the map.',
-  teach: 'a new hire works on a new case; step in before one of the expert\'s rules is broken.',
+  learn: `the expert works on screen. ${ASK_LINES_ONLY}`,
+  review: `the expert checks the map. ${ASK_LINES_ONLY}`,
+  teach: `a new hire works on a new case. ${ASK_LINES_ONLY}`,
 };
 /** The short line before Clipa starts a stage herself (the person asked for it, said they are done, or said yes). */
 export const STAGE_START: Readonly<Record<Mode, string>> = {
@@ -147,6 +152,8 @@ export const PROPOSE: Readonly<Record<'review' | 'teach', string>> = {
 export const MAC_DONE_LINE = "Got it. End Show, and I'll open Reflect in the browser.";
 /** Said before Clipa ends the session because the person asked her to stop. */
 export const OFF_LINE = "Okay, I'm off. Press Start when you need me.";
+/** Pass it on: the rule Clipa warned about is kept now (the check comes back clear). Said once; it names no rule. */
+export const RESOLVED = 'That fixes it. Ready for review.';
 
 const plainText = (text: string): string => text.toLowerCase().replace(/[‘’`´]/g, "'").replace(/ё/g, 'е');
 const words = (text: string): Array<{ w: string; start: number; end: number }> =>

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Conductor, MapRegistry, RULES } from '../agent/conductor/engine.ts';
-import { MAC_DONE_LINE, NUDGES, OFF_LINE, PROPOSE, SHOW_LOOKS_DONE, STAGE_CONFIRM, STAGE_START, detectLanguage, doneSaid, offSaid, stageAsked, stageCommand, yesSaid } from '../agent/conductor/lines.ts';
+import { GUIDE, MAC_DONE_LINE, NUDGES, OFF_LINE, OPEN_WEB, PROPOSE, RESOLVED, SHOW_LOOKS_DONE, STAGE_ABOUT, STAGE_CONFIRM, STAGE_START, detectLanguage, doneSaid, offSaid, stageAsked, stageCommand, yesSaid } from '../agent/conductor/lines.ts';
 import { demoMap } from '../agent/conductor/demo-map.ts';
 import { applyEdits } from '../agent/conductor/map-edits.ts';
 import type { ConductorMap } from '../agent/conductor/map-edits.ts';
@@ -293,17 +293,50 @@ test('Show ends: the map is built in the background, so Reflect opens with it re
   assert.equal(of(f.cues, 'map').length, 1);
 });
 
-test('Review asks at most two open points, then reads the teach-back', async () => {
-  const gaps = ['Who is the lead?', 'Is 300 a hard limit?', 'Who decides above it?'].map((question) => ({ question, targetId: null, evidenceIds: [], regionIds: [] }));
+test('Review asks at most three open points, then reads the teach-back', async () => {
+  assert.equal(RULES.reviewMaxGaps, 3, 'the brief asks for at least three follow-ups in the debrief');
+  const gaps = ['Who is the lead?', 'Is 300 a hard limit?', 'Who decides above it?', 'What if the lead is away?'].map((question) => ({ question, targetId: null, evidenceIds: [], regionIds: [] }));
   const r = rig({ map_synthesis: () => ok({ ...MAP, gaps }), map_edit: () => ok(NO_EDIT) });
   await r.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', 'Changed.'));
   await r.send({ type: 'session', mode: 'learn', live: false, reason: 'user' }, { type: 'session', mode: 'review', live: true, reason: null });
-  for (const answer of ['The team lead.', 'Yes, hard.']) {
+  for (const answer of ['The team lead.', 'Yes, hard.', 'The finance director.']) {
     await r.advance(RULES.pauseMs + RULES.gapAfterAnswerMs);
     await r.send({ type: 'transcript', role: 'expert', text: answer });
   }
   await r.advance(RULES.pauseMs + RULES.gapAfterAnswerMs);
-  assert.deepEqual(cueOf(r.cues, 'ask').map((a) => a.text), ['Who is the lead?', 'Is 300 a hard limit?']);
+  assert.deepEqual(cueOf(r.cues, 'ask').map((a) => a.text), ['Who is the lead?', 'Is 300 a hard limit?', 'Who decides above it?']);
+  assert.equal(of(r.cues, 'teachback').length, 1);
+});
+
+test('Review: an answer that resolves its open point does not make Clipa skip the next one', async () => {
+  const gaps = ['Who is the lead?', 'Is 300 a hard limit?', 'Who decides above it?'].map((question) => ({ question, targetId: null, evidenceIds: [], regionIds: [] }));
+  // Each answer resolves the point just asked, which is the first one left: the list gets shorter under Clipa.
+  const resolve = { intent: 'edit', operations: [{ op: 'resolve_gap', targetId: 'gap-1', field: null, value: null, value2: null, quote: null }], reply: '', teachBack: null };
+  const r = rig({ map_synthesis: () => ok({ ...MAP, gaps }), map_edit: () => ok(resolve) });
+  await r.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', 'Changed.'));
+  await r.send({ type: 'session', mode: 'learn', live: false, reason: 'user' }, { type: 'session', mode: 'review', live: true, reason: null });
+  for (const answer of ['The team lead.', 'Yes, hard.', 'The finance director.']) {
+    await r.advance(RULES.pauseMs + RULES.gapAfterAnswerMs);
+    await r.send({ type: 'transcript', role: 'expert', text: answer });
+  }
+  await r.advance(RULES.pauseMs + RULES.gapAfterAnswerMs);
+  assert.deepEqual(cueOf(r.cues, 'ask').map((a) => a.text), ['Who is the lead?', 'Is 300 a hard limit?', 'Who decides above it?'], 'all three, in order');
+  assert.equal(of(r.cues, 'teachback').length, 1, 'then the teach-back');
+  assert.equal((cueOf(r.cues, 'map').at(-1)?.map as ConductorMap).gaps.length, 0, 'every answer resolved its point');
+});
+
+test('Review: a point the person picked on the board counts as asked; Clipa asks the others, up to three, then the teach-back', async () => {
+  const gaps = ['Who is the lead?', 'Is 300 a hard limit?', 'Who decides above it?', 'What if the lead is away?'].map((question) => ({ question, targetId: null, evidenceIds: [], regionIds: [] }));
+  const r = rig({ map_synthesis: () => ok({ ...MAP, gaps }), map_edit: () => ok(NO_EDIT) });
+  await r.send(hello('web'), { type: 'session', mode: 'learn', live: true, reason: null }, obs('o1', 'Changed.'));
+  await r.send({ type: 'session', mode: 'learn', live: false, reason: 'user' }, { type: 'session', mode: 'review', live: true, reason: null });
+  await r.send({ type: 'ui', action: 'answer_gap', targetId: 'gap-3', text: null });
+  assert.deepEqual(cueOf(r.cues, 'ask').map((a) => a.text), ['Who decides above it?']);
+  for (const answer of ['The finance director.', 'The team lead.', 'Yes, hard.']) {
+    await r.send({ type: 'transcript', role: 'expert', text: answer });
+    await r.advance(RULES.pauseMs + RULES.gapAfterAnswerMs);
+  }
+  assert.deepEqual(cueOf(r.cues, 'ask').map((a) => a.text), ['Who decides above it?', 'Who is the lead?', 'Is 300 a hard limit?']);
   assert.equal(of(r.cues, 'teachback').length, 1);
 });
 
@@ -332,7 +365,7 @@ test('the library lists every learned process; a rule that names no process is k
   assert.deepEqual(old.library().map((p) => [p.title, p.rules.length]), [['Keep the budget', 1]]);
 });
 
-test('Pass it on: Clipa recognises the process on screen, says so at a pause, and checks its rules first', async () => {
+test('Pass it on: Clipa recognises the process on screen silently (a thought, no announcement), and checks its rules first', async () => {
   const maps = new MapRegistry();
   maps.confirm('expert-session', TWO as never, 1);
   const r = rig({
@@ -347,7 +380,7 @@ test('Pass it on: Clipa recognises the process on screen, says so at a pause, an
   assert.deepEqual(offered.map((p) => [p.id, p.title]), [['m1-p1', 'Budget update'], ['m1-p2', 'Supplier check']]);
   assert.equal(of(r.cues, 'say').length, 0, 'never while the person works');
   await r.advance(RULES.pauseMs);
-  assert.equal(cueOf(r.cues, 'say').at(-1)?.text, 'This is Supplier check. I will step in if one of the expert\'s rules applies.');
+  assert.equal(of(r.cues, 'say').length, 0, 'no "This is X, I will step in" announcement, not even at a pause');
   await r.advance(RULES.teachCheckGapMs);
   const checked = r.calls.filter((c) => c.task === 'guardrail_check').at(-1)?.body.guardrails as Array<{ id: string; condition: string }>;
   assert.deepEqual(checked.map((g) => g.id), ['g2', 'g1', 'g3'], 'the recognised process first');
@@ -373,7 +406,7 @@ test('process_match failing or unsure is silent; Learn with a known process asks
   await l.advance(RULES.settleMs + 10);
   assert.equal(l.calls.at(-1)?.task, 'process_match');
   await l.advance(RULES.pauseMs);
-  assert.equal(cueOf(l.cues, 'say').at(-1)?.text, 'I know this one: Budget update. I will only ask about what is different.');
+  assert.equal(of(l.cues, 'say').length, 0, 'no "I know this one" announcement');
   await l.advance(RULES.settleMs + 10);
   const question = l.calls.find((c) => c.task === 'generic_question');
   const transcript = question?.body.transcript as Array<{ role: string; text: string }>;
@@ -606,10 +639,11 @@ test('thoughts: the map being built, a recognised process and a guardrail check'
   await t.send(hello('web', 'new_hire', 'expert-session'), { type: 'session', mode: 'teach', live: true, reason: null }, obs('n1', 'A contract is open.'));
   await t.advance(RULES.settleMs + 10);
   await t.advance(RULES.thoughtGapMs);
-  assert.ok(cueOf(t.cues, 'thought').some((x) => x.text === 'This looks like Supplier check'));
-  await t.advance(RULES.teachCheckGapMs);
+  assert.ok(cueOf(t.cues, 'thought').some((x) => x.text === 'This looks like Supplier check'), 'recognition keeps its thought');
+  // Recognition says nothing, so the rules are checked at the first pause (no announcement takes it any more).
   await t.advance(RULES.thoughtGapMs);
   assert.ok(cueOf(t.cues, 'thought').some((x) => x.text.startsWith('Checking: a new supplier')));
+  assert.equal(of(t.cues, 'say').length, 0);
   const poses = cueOf(t.cues, 'state').map((s) => s.clipa);
   assert.ok(poses.includes('think') && poses.at(-1) === 'listen', 'think while a model task works, then listen');
 });
@@ -797,7 +831,7 @@ test('done in Show: a short line, then the web starts Reflect; the end of Show s
   assert.equal(cueOf(r.cues, 'guide').length, guides, 'no "open Reflect" line: Reflect is starting');
   assert.ok(r.calls.some((c) => c.task === 'map_synthesis'), 'the map is built in the background');
   await r.send({ type: 'session', mode: 'review', live: true, reason: null });
-  assert.ok(cueOf(r.cues, 'context').some((c) => c.text === '[stage] Now in Reflect: the expert checks the map.'), 'the voice agent knows the stage');
+  assert.ok(cueOf(r.cues, 'context').some((c) => c.text === `[stage] Now in Reflect: ${STAGE_ABOUT.review}`), 'the voice agent knows the stage');
   assert.ok(cueOf(r.cues, 'context').some((c) => c.text === '[stage] Show has ended.'));
 });
 
@@ -1166,4 +1200,221 @@ test('the question hears the person: another app keeps what was said while its s
   await r.send(frame('s1', 19_000, { app: 'Sheets', surface: 'budget sheet', change: 'Q1 to Q4 filled with 3,000' }));
   await r.advance(RULES.pauseMs + RULES.settleMs + 50);
   assert.deepEqual(askedWith(r, 's1'), ['Now the budget: the licence was prepaid for a year.'], 'the Mail turn stays with Mail');
+});
+
+// ---- the demo workspace: its order, email and ticket are one place ------------------------------------------------------
+const wsFrame = (id: string, kind: 'order_view' | 'email_draft' | 'ticket', atMs: number, facts: Record<string, unknown>): ClientEvent => {
+  const parsed = parseBatch({ events: [{ seq: 0, atMs: 0, event: { type: 'observation', observation: { id, kind, timestampMs: atMs, evidenceIds: [`ev-${id}`], facts } } }] });
+  if (!parsed.ok) throw new Error(parsed.field);
+  return parsed.value[0]!.event;
+};
+const orderFrame = (id: string, atMs = 20_000): ClientEvent =>
+  wsFrame(id, 'order_view', atMs, { customerRef: 'customer_07', orderId: 'ORD-2041', deliveryAddress: '12 Sample Street', deliveryWindow: '10:00-12:00' });
+/** An edit is a short body (under 120 characters): the frame's summary then changes before and after email summaries get richer. */
+const emailFrame = (id: string, body: string, atMs = 20_000): ClientEvent =>
+  wsFrame(id, 'email_draft', atMs, { recipientRef: 'customer_07', subject: 'Your delivery', bodyText: body, attachments: [], previewState: 'editing' });
+const lookingAt = (cues: CueEnvelope[]) => cueOf(cues, 'thought').filter((t) => t.text.startsWith('Looking at'));
+const EXPERT_WORDS = 'Customer 07 asked for the details as text.';
+
+test('workspace: order and email frames alternate; the email edit makes one question and nothing is cancelled or forgotten', async () => {
+  const r = rig({ generic_question: () => ok(QUESTION) });
+  await r.send(...SHOW(), turn(EXPERT_WORDS));
+  await r.advance(8_000);
+  // The first look at the order and the email, then the email edit; the frames keep alternating all the while.
+  await r.send(orderFrame('w1'), emailFrame('w2', 'Hello'), orderFrame('w3'), emailFrame('w4', 'Delivery at 12 Sample Street'), orderFrame('w5'));
+  await r.advance(RULES.settleMs + 10);
+  assert.equal(r.calls.filter((c) => c.task === 'generic_question').length, 1, 'prepared as soon as the screen settled');
+  await r.send(emailFrame('w6', 'Delivery at 12 Sample Street'), orderFrame('w7'), emailFrame('w8', 'Delivery at 12 Sample Street'));
+  await r.advance(RULES.pauseMs + 10);
+  const questions = r.calls.filter((c) => c.task === 'generic_question');
+  assert.equal(questions.length, 1, 'no second preparation: the alternation is not a change');
+  assert.equal(of(r.cues, 'ask').length, 1);
+  assert.equal(of(r.cues, 'cancel').length, 0, 'the prepared question was never made out of date');
+  assert.ok((questions[0]!.body.observations as Array<{ id: string }>).some((o) => o.id === 'w4'), 'it sees the edited email frame');
+  assert.ok((questions[0]!.body.transcript as Array<{ text: string }>).some((t) => t.text === EXPERT_WORDS), 'it still has what the expert said before the edit');
+  assert.equal(lookingAt(r.cues).length, 1, 'one thought about the workspace, not one per frame');
+});
+
+test('workspace: the alternating frames do not hold Show open; it looks done 30 s after the last real change', async () => {
+  const r = rig({});
+  await r.send(...SHOW(), orderFrame('d1'), emailFrame('d2', 'Hello'));
+  // The order and the email keep alternating on the shared screen while the person does nothing.
+  for (let i = 0; i < 17; i++) { await r.advance(2_000); await r.send(orderFrame(`d${3 + 2 * i}`), emailFrame(`d${4 + 2 * i}`, 'Hello')); }
+  assert.ok(said(r.cues).includes(SHOW_LOOKS_DONE), 'the frames are not changes');
+});
+
+test('workspace: Pass it on recognises the process once and the checks see the order and the email', async () => {
+  const maps = new MapRegistry();
+  maps.confirm('expert-session', MAP as never, 1);
+  const r = rig({
+    process_match: () => ok({ processId: 'm1-p1', confidence: 0.9 }),
+    guardrail_check: () => ok({ status: 'clear', guardrailId: null, message: null, regionIds: [] }),
+  }, maps, 'hire-1');
+  await r.send(hello('web', 'new_hire', 'expert-session'), { type: 'session', mode: 'teach', live: true, reason: null }, { type: 'share', state: 'capturing', reason: null });
+  await r.send(orderFrame('n1'), emailFrame('n2', 'Image only'));
+  await r.advance(RULES.settleMs + 10);
+  for (let i = 0; i < 3; i++) { await r.send(orderFrame(`n${3 + 2 * i}`), emailFrame(`n${4 + 2 * i}`, 'Image only')); await r.advance(1_000); }
+  await r.advance(RULES.pauseMs);
+  assert.equal(r.calls.filter((c) => c.task === 'process_match').length, 1, 'the alternation is not another place to recognise');
+  assert.equal(of(r.cues, 'say').length, 0, 'recognition is silent');
+  const check = r.calls.find((c) => c.task === 'guardrail_check');
+  assert.ok(check, 'the rules were checked at the pause');
+  assert.deepEqual([...new Set((check.body.observations as Array<{ surface: string }>).map((o) => o.surface))].sort(), ['email draft', 'order view']);
+  assert.equal(lookingAt(r.cues).length, 1);
+});
+
+// ---- the lines: the voice agent only voices what the app sends; every line stays generic --------------------------------
+test('lines: every stage tells the voice agent that the app sends the questions; the welcome and summary lines make no promise', async () => {
+  for (const mode of ['learn', 'review', 'teach'] as const) {
+    assert.match(STAGE_ABOUT[mode], /every question and warning as \[ASK\] lines/, mode);
+    assert.match(STAGE_ABOUT[mode], /beyond 'Got it\.'/, mode);
+    assert.match(STAGE_ABOUT[mode], /skip_turn/, mode);
+  }
+  // The voice agent hears it at every stage start, as a [stage] context.
+  for (const [mode, name] of [['learn', 'Show'], ['review', 'Reflect'], ['teach', 'Pass it on']] as const) {
+    const r = rig({ map_synthesis: () => ok({ ...MAP, gaps: [] }) }, new MapRegistry(), `sess-${mode}`);
+    await r.send(hello('web'), { type: 'session', mode, live: true, reason: null });
+    assert.ok(cueOf(r.cues, 'context').some((c) => c.text === `[stage] Now in ${name}: ${STAGE_ABOUT[mode]}`), mode);
+  }
+  const r = rig({});
+  await r.send(hello('web'));
+  const welcome = cueOf(r.cues, 'guide')[0];
+  assert.equal(welcome?.text, 'Press Start in Show and work as usual. I ask why at a natural pause.');
+  const maps = new MapRegistry();
+  maps.confirm('expert-session', MAP as never, 1);
+  const hire = rig({}, maps, 'hire-1');
+  await hire.send(hello('web', 'new_hire', 'expert-session'), { type: 'session', mode: 'teach', live: true, reason: null }, turn('Готово'));
+  const summary = cueOf(hire.cues, 'guide').at(-1);
+  assert.ok(summary?.step === 'summary' && summary.target === null && summary.speak === true, 'a short thanks, and no summary card to point at');
+  assert.equal(summary?.text, 'Nice work on this case.');
+});
+
+test('lines: the lines Clipa says name no scenario (they are generic, the scenario lives in the data)', () => {
+  const scenario = /customer|order|e-?mail|address|deliver|image|picture|attach|invoice|ORD-|\b07\b|as text/i;
+  const lines = [
+    ...Object.values(GUIDE).flatMap((persona) => Object.values(persona).flatMap((set) => Object.values(set).map((l) => l.text))),
+    ...Object.values(OPEN_WEB), ...NUDGES, ...Object.values(STAGE_CONFIRM), ...Object.values(STAGE_START), ...Object.values(STAGE_ABOUT), ...Object.values(PROPOSE),
+    SHOW_LOOKS_DONE, MAC_DONE_LINE, OFF_LINE, RESOLVED,
+  ];
+  assert.ok(lines.length > 40);
+  for (const line of lines) assert.doesNotMatch(line, scenario, line);
+});
+
+// ---- Pass it on: one warning per rule, then a ready line ----------------------------------------------------------------
+interface Verdict { status: 'warn' | 'clear' | 'unknown'; guardrailId: string | null; message: string | null; regionIds: string[] }
+const WARN: Verdict = { status: 'warn', guardrailId: 'g1', message: 'Add the details as text.', regionIds: [] };
+const CLEAR: Verdict = { status: 'clear', guardrailId: null, message: null, regionIds: [] };
+
+/** A new hire on a confirmed map; the rule checks answer with `verdict.now`. The first frames are in and the first check is due. */
+async function warnRig(): Promise<{ r: Rig; verdict: { now: Verdict } }> {
+  const maps = new MapRegistry();
+  maps.confirm('expert-session', MAP as never, 1);
+  const verdict = { now: WARN };
+  const r = rig({ process_match: () => ok({ processId: 'm1-p1', confidence: 0.9 }), guardrail_check: () => ok(verdict.now) }, maps, 'hire-1');
+  await r.send(hello('web', 'new_hire', 'expert-session'), { type: 'session', mode: 'teach', live: true, reason: null }, { type: 'share', state: 'capturing', reason: null });
+  await r.send(orderFrame('n1'), emailFrame('n2', 'Image only'));
+  await r.advance(RULES.settleMs + 10); // recognised
+  return { r, verdict };
+}
+const checks = (r: Rig) => r.calls.filter((c) => c.task === 'guardrail_check').length;
+/** The person edits the email and pauses: the next check runs. */
+async function editAndPause(r: Rig, id: string, body: string): Promise<void> {
+  await r.send(emailFrame(id, body));
+  await r.advance(RULES.teachCheckGapMs + RULES.pauseMs);
+}
+
+test('Pass it on: one warning per rule while it is open; once the check is clear Clipa says it is ready, once', async () => {
+  await withRules({ nudges: false }, async () => {
+    const { r, verdict } = await warnRig();
+    await r.advance(RULES.pauseMs); // the first check, at the first pause
+    assert.equal(of(r.cues, 'warn').length, 1);
+    await r.send({ type: 'cue_done', cueId: of(r.cues, 'warn')[0]!.cueId, outcome: 'spoken' });
+    // Another email frame and another pause: the rule is checked again and still broken, but it is not warned about twice.
+    await editAndPause(r, 'n3', 'Image only, sent again');
+    assert.equal(checks(r), 2, 'checked again');
+    assert.equal(of(r.cues, 'warn').length, 1, 'one warning per rule');
+    assert.equal(of(r.cues, 'cancel').length, 0);
+    // The details are in: the check comes back clear, and Clipa says it is ready, glad about it.
+    verdict.now = CLEAR;
+    await editAndPause(r, 'n4', 'Delivery at 12 Sample Street');
+    assert.equal(checks(r), 3);
+    assert.deepEqual(said(r.cues), [RESOLVED]);
+    assert.equal(RESOLVED, 'That fixes it. Ready for review.');
+    assert.equal(cueOf(r.cues, 'state').at(-1)?.clipa, 'celebrate');
+    // Once: later clear checks say nothing more.
+    await editAndPause(r, 'n5', 'Delivery at 12 Sample Street, 10:00');
+    assert.equal(checks(r), 4);
+    assert.deepEqual(said(r.cues), [RESOLVED]);
+    // A rule broken again after the fix is warned about again.
+    verdict.now = WARN;
+    await editAndPause(r, 'n6', 'Image only, again');
+    assert.equal(of(r.cues, 'warn').length, 2);
+  });
+});
+
+test('Pass it on: a warning that was never said (cancelled by typing, skipped by the face) is due again; an interrupted one is not', async () => {
+  await withRules({ nudges: false }, async () => {
+    const { r } = await warnRig();
+    await r.advance(RULES.pauseMs);
+    const warns = () => of(r.cues, 'warn');
+    assert.equal(warns().length, 1);
+    // The person goes back to typing before it was said: it is out of date, and the rule is warned about at the next pause.
+    await r.send({ type: 'activity', state: 'typing' });
+    assert.deepEqual(cueOf(r.cues, 'cancel').map((c) => c.cueId), [warns()[0]!.cueId]);
+    await r.send({ type: 'activity', state: 'pause' });
+    await editAndPause(r, 'n3', 'Image only, edited');
+    assert.equal(warns().length, 2, 'warned again');
+    // The face skipped it (the person was busy): it was not said either.
+    await r.send({ type: 'cue_done', cueId: warns()[1]!.cueId, outcome: 'skipped' });
+    await editAndPause(r, 'n4', 'Image only, edited again');
+    assert.equal(warns().length, 3, 'warned again');
+    // Its moment passed before the face reported anything: the same.
+    await r.advance(RULES.warnTtlMs + 100);
+    assert.equal(cueOf(r.cues, 'cancel').length, 2, 'the third warning ran out');
+    await editAndPause(r, 'n5', 'Image only, edited once more');
+    assert.equal(warns().length, 4, 'warned again');
+    // The person heard it and spoke over its end: not said in full, but said. No repeat.
+    await r.send({ type: 'cue_done', cueId: warns()[3]!.cueId, outcome: 'interrupted' });
+    await editAndPause(r, 'n6', 'Image only, edited a last time');
+    assert.equal(warns().length, 4, 'an interrupted warning was heard');
+  });
+});
+
+test('Pass it on: a warning the person typed over while the voice agent was saying it was heard: the fix still gets its ready line', async () => {
+  await withRules({ nudges: false }, async () => {
+    const { r, verdict } = await warnRig();
+    await r.advance(RULES.pauseMs);
+    const warn = of(r.cues, 'warn')[0]!;
+    await r.send({ type: 'talking', by: 'agent', active: true }); // the voice agent starts saying it
+    await r.send({ type: 'activity', state: 'typing' }); // the person starts on the fix over its end
+    assert.deepEqual(cueOf(r.cues, 'cancel').map((c) => c.cueId), [warn.cueId], 'its end is cut, as before');
+    await r.send({ type: 'talking', by: 'agent', active: false }, { type: 'cue_done', cueId: warn.cueId, outcome: 'interrupted' }, { type: 'activity', state: 'pause' });
+    await editAndPause(r, 'n3', 'Image only, still');
+    assert.equal(of(r.cues, 'warn').length, 1, 'heard once: not warned again while it is open');
+    verdict.now = CLEAR;
+    await editAndPause(r, 'n4', 'Delivery at 12 Sample Street');
+    assert.deepEqual(said(r.cues), [RESOLVED]);
+  });
+});
+
+test('Pass it on: a warning does not outlive the off-the-record switch or a new stage: no ready line for it', async () => {
+  const resets: ClientEvent[][] = [
+    [{ type: 'off_record', on: true }, { type: 'off_record', on: false }],
+    [{ type: 'session', mode: 'teach', live: false, reason: 'user' }, { type: 'session', mode: 'teach', live: true, reason: null }],
+  ];
+  for (const reset of resets) {
+    await withRules({ nudges: false }, async () => {
+      const { r, verdict } = await warnRig();
+      await r.advance(RULES.pauseMs);
+      assert.equal(of(r.cues, 'warn').length, 1);
+      await r.send({ type: 'cue_done', cueId: of(r.cues, 'warn')[0]!.cueId, outcome: 'spoken' });
+      await r.send(...reset);
+      verdict.now = CLEAR;
+      await r.send(orderFrame('n7'), emailFrame('n8', 'Delivery at 12 Sample Street'));
+      await r.advance(RULES.settleMs + 10);
+      await r.advance(RULES.teachCheckGapMs + RULES.pauseMs);
+      assert.equal(checks(r), 2, `checked again after ${JSON.stringify(reset[0])}`);
+      assert.deepEqual(said(r.cues), [], 'nothing was open any more');
+    });
+  }
 });

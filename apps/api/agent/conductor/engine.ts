@@ -7,7 +7,7 @@ import { isRecord } from '../config.ts';
 import type { GenericQuestionOutput, GuardrailCheckOutput, MapEditOutput, MapSynthesisOutput, ProcessMatchOutput, ReplyOutput } from '../llm-tasks.ts';
 import type { TaskResult } from '../llm.ts';
 import { demoMap } from './demo-map.ts';
-import { GUIDE, MAC_DONE_LINE, NUDGES, OFF_LINE, OPEN_WEB, PROPOSE, SHOW_LOOKS_DONE, STAGE_ABOUT, STAGE_CONFIRM, STAGE_NAMES, STAGE_START, detectLanguage, donePhraseOnly, doneSaid, offSaid, stageAsked, stageCommand, yesSaid } from './lines.ts';
+import { GUIDE, MAC_DONE_LINE, NUDGES, OFF_LINE, OPEN_WEB, PROPOSE, RESOLVED, SHOW_LOOKS_DONE, STAGE_ABOUT, STAGE_CONFIRM, STAGE_NAMES, STAGE_START, detectLanguage, donePhraseOnly, doneSaid, offSaid, stageAsked, stageCommand, yesSaid } from './lines.ts';
 import { applyEdits } from './map-edits.ts';
 import type { ConductorMap, MapComment } from './map-edits.ts';
 import { mapTitle, storableMap } from './map-store.ts';
@@ -30,9 +30,9 @@ export const RULES = {
   teachCheckGapMs: 8_000,
   urgentSettleMs: 400,
   urgentCheckGapMs: 3_000,
-  /** Review: wait this long after an answer before the next gap; ask at most reviewMaxGaps of them (a 2-3 minute demo). */
+  /** Review: wait this long after an answer before the next gap; ask at most reviewMaxGaps of them (a 2-3 minute demo; the brief wants three). */
   gapAfterAnswerMs: 1500,
-  reviewMaxGaps: 2,
+  reviewMaxGaps: 3,
   /** A recognised process needs this confidence before Clipa follows its strategy. */
   processConfidence: 0.6,
   // Switches for the live demo: false turns the feature off and nothing else changes.
@@ -104,6 +104,21 @@ function appKey(app: string | null): string {
 /** The same app on two generic frames: equal names, one inside the other ("gmail" in "googlechromegmail"), or one unknown. */
 function sameApp(a: string, b: string): boolean {
   return a === b || a === '' || b === '' || a.includes(b) || b.includes(a);
+}
+
+/** The demo workspace shows its order, its email and its ticket side by side: they are one place, not three screens. */
+const WORKSPACE_KINDS: ReadonlySet<string> = new Set(['order_view', 'email_draft', 'ticket']);
+
+/**
+ * Where a frame is: the key a move is told by. A generic frame names its surface in free words that change between frames
+ * of one screen, and its app name can gain or lose a prefix ("Google Chrome - Gmail"): for those only another app is a move.
+ * The workspace's frames alternate between its surfaces while the person works: the whole workspace is one place, so an order
+ * frame after an email frame is neither a move nor a change. Any other kind keeps its app and surface.
+ */
+function placeOf(o: SeenObservation): string {
+  if (o.kind === 'screen_activity') return appKey(o.app);
+  if (WORKSPACE_KINDS.has(o.kind)) return 'workspace';
+  return `${o.app ?? ''}|${o.surface}`;
 }
 
 /**
@@ -269,20 +284,27 @@ export class Conductor {
   private readonly askTimes: number[] = [];
   private lastAskAt = -Infinity;
   private lastTeachCheckAt = -Infinity;
-  private readonly warned = new Set<string>();
+  /**
+   * The rule Clipa warned about and that is still open (Pass it on): one warning per rule, so it is not said again while the
+   * person fixes it. It ends when a check comes back clear (Clipa says it is ready), when the warning never got said (cancelled
+   * or skipped), and when the stage or the record changes.
+   */
+  private openWarn: string | null = null;
+  /** The voice agent started saying the warning that is out: it was heard, even if the person's typing cut it short. */
+  private warnHeard = false;
   /** The learned process Clipa recognised on screen in this stage, and the app it was recognised in. */
   private recognized: LearnedProcess | null = null;
   private recognizedFor: string | null = null;
   private lastRecognitionAt = -Infinity;
-  /** A line to say at the next pause (so it never cuts into the person's work). */
+  /** A line to say at the next pause (so it never cuts into the person's work). Nothing sets one for now: recognition is silent. */
   private pendingSay: string | null = null;
   /** The map being built in the background as soon as Show ends, so Reflect opens with it ready. */
   private mapPrefetch: Promise<void> | null = null;
   private freshMap = false;
 
   /** `origin`: the map is this session's own, a copy of an earlier session's, or the demo map (Reflect's fallbacks). */
-  private review: { phase: ReviewPhase; map: ConductorMap | null; version: number; gapIndex: number; awaiting: 'gap' | 'teachback' | null; answeredAt: number; unclearAsked: boolean; editFailed: boolean; origin: MapOrigin } =
-    { phase: 'idle', map: null, version: 0, gapIndex: 0, awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false, origin: 'session' };
+  private review: { phase: ReviewPhase; map: ConductorMap | null; version: number; asked: Set<string>; awaiting: 'gap' | 'teachback' | null; answeredAt: number; unclearAsked: boolean; editFailed: boolean; origin: MapOrigin } =
+    { phase: 'idle', map: null, version: 0, asked: new Set(), awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false, origin: 'session' };
   private readonly voiceQueue: string[] = [];
 
   private readonly cues: CueEnvelope[] = [];
@@ -440,7 +462,12 @@ export class Conductor {
   }
 
   private cancelActive(): void {
-    if (this.active && !this.active.done) this.emit({ type: 'cancel', cueId: this.active.cueId });
+    if (this.active && !this.active.done) {
+      // A warning that was never said is not an open warning: the rule is warned about again at the next pause. One the voice
+      // agent had started saying was heard: the person typed over its end, and the fix still gets its ready line.
+      if (this.active.type === 'warn' && !this.warnHeard) this.openWarn = null;
+      this.emit({ type: 'cancel', cueId: this.active.cueId });
+    }
     this.active = null;
   }
 
@@ -514,6 +541,9 @@ export class Conductor {
           this.active.done = true;
           if (this.active.type === 'ask' || this.active.type === 'warn') this.presence('dot');
         }
+        // The face skipped the warning (the person was busy, or its moment had passed): it was never said, so it is due again.
+        // Only the newest warning counts; a late report about an older one changes nothing.
+        if (e.outcome === 'skipped' && this.openWarn !== null && [...this.cues].reverse().find((c) => c.cue.type === 'warn')?.cueId === e.cueId) this.openWarn = null;
         return;
       default:
         break;
@@ -557,6 +587,7 @@ export class Conductor {
         if (e.by === 'person') this.personTalking = e.active; else this.agentTalking = e.active;
         this.lastBusyAt = now;
         if (e.by === 'agent') {
+          if (e.active && this.active?.type === 'warn' && !this.active.done) this.warnHeard = true;
           // The voice agent may also speak on its own: a nudge waits as long after it as after one of Clipa's lines.
           this.lastSpokeAt = now;
           this.pose(e.active ? 'speak' : 'listen');
@@ -587,14 +618,14 @@ export class Conductor {
     if (this.offRecord) return;
     // The same observation can arrive twice (from the screen module and from a client that forwards it): keep the first.
     if (this.observations.some((x) => x.id === o.id)) return;
-    const last = [...this.observations].reverse().find((item) => item.kind !== 'input_activity');
+    // What this frame is compared with: the previous frame of its own kind (the workspace's frames alternate between kinds).
+    const last = [...this.observations].reverse().find((item) => item.kind === o.kind);
     this.observations.push(o);
     if (this.observations.length > RULES.keepObservations) this.observations.splice(0, this.observations.length - RULES.keepObservations);
     if (o.kind === 'input_activity') return;
     this.stageObservations++;
-    // A generic frame names its surface in free words that change between frames of one screen, and its app name can gain
-    // or lose a prefix ("Google Chrome - Gmail"): for those only another app is a move. The workspace's surfaces are exact.
-    const where = o.kind === 'screen_activity' ? appKey(o.app) : `${o.app ?? ''}|${o.surface}`;
+    const where = placeOf(o);
+    const firstFrame = this.contextWhere === null;
     const moved = this.contextWhere !== null && (o.kind === 'screen_activity' ? !sameApp(this.contextWhere, where) : this.contextWhere !== where);
     if (moved) {
       this.invalidateLiveContext(true);
@@ -637,7 +668,10 @@ export class Conductor {
     if (changed || o.pendingAction !== null) this.pendingTeachCheck = true;
     if (o.pendingAction !== null) this.urgentTeachCheck = true;
     this.shareScreen(o, newScreen, now);
-    if (newScreen && (this.liveMode === 'learn' || this.liveMode === 'teach')) this.thought(`Looking at ${o.app ? `${o.app}: ` : ''}${o.surface}`);
+    // The workspace's own edits are not worth a bubble each: it is shown once, when Clipa first sees it or comes back to it.
+    if (newScreen && (this.liveMode === 'learn' || this.liveMode === 'teach') && (!WORKSPACE_KINDS.has(o.kind) || firstFrame || moved)) {
+      this.thought(`Looking at ${o.app ? `${o.app}: ` : ''}${o.surface}`);
+    }
   }
 
   /**
@@ -670,6 +704,8 @@ export class Conductor {
     this.questionContext = null;
     if ((this.liveMode === 'learn' || this.liveMode === 'teach') && (this.active?.type === 'ask' || this.active?.type === 'warn')) this.cancelActive();
     if (clearProcess) {
+      // Another place, a new stage or the record switched: the warning belongs to a moment that is gone.
+      this.openWarn = null;
       if (this.recognized && this.liveMode === 'teach' && !this.offRecord) {
         this.emit({ type: 'context', text: '[map] The visible context changed. No current expert process is recognized. Do not apply earlier process rules; wait for a new recognized process.' });
       }
@@ -796,7 +832,6 @@ export class Conductor {
     if (this.review.awaiting === 'teachback') { void this.classifyReply(text); return; }
     if (this.review.awaiting === 'gap') {
       this.review.awaiting = null;
-      this.review.gapIndex++;
       this.review.answeredAt = this.deps.now();
     }
     // Everything the expert says in Review can change the map: Clipa makes the edit, the expert only talks.
@@ -946,10 +981,10 @@ export class Conductor {
     const confirmable = this.review.phase === 'teachback' || (this.review.phase === 'gaps' && this.review.origin !== 'session');
     if (action === 'confirm' && map && confirmable) { this.confirmMap(); return; }
     if (action === 'correct' && map && text) { this.voiceQueue.push(text); void this.drainVoice(); return; }
-    if (action === 'finish' && this.liveMode === 'review' && this.review.phase === 'gaps') { this.review.gapIndex = map?.gaps.length ?? 0; this.finishGaps(); return; }
+    if (action === 'finish' && this.liveMode === 'review' && this.review.phase === 'gaps') { this.finishGaps(); return; }
     if (action === 'answer_gap' && map) {
       const index = map.gaps.findIndex((g, i) => `gap-${i + 1}` === targetId || g.targetId === targetId);
-      if (index >= 0) { this.review.gapIndex = index; this.askGap(); }
+      if (index >= 0) this.askGap(index);
       return;
     }
     if (action === 'ask_about' && map && targetId) {
@@ -1034,8 +1069,10 @@ export class Conductor {
     const r = this.review;
     if (r.phase !== 'gaps' || r.awaiting !== null || this.voiceQueue.length) return;
     if (!this.paused(now) || now - r.answeredAt < RULES.gapAfterAnswerMs) return;
-    if (!r.map || r.gapIndex >= Math.min(r.map.gaps.length, RULES.reviewMaxGaps)) { this.finishGaps(); return; }
-    this.askGap();
+    // The next open point not asked yet: an answer that resolves a gap shortens the list, so a position in it would skip one.
+    const next = r.map ? r.map.gaps.findIndex((g) => !r.asked.has(g.question)) : -1;
+    if (next < 0 || r.asked.size >= RULES.reviewMaxGaps) { this.finishGaps(); return; }
+    this.askGap(next);
   }
 
   /** The rules Teach checks: the recognised process's first, then the rest of what Clipa learned (at most 10). */
@@ -1065,8 +1102,7 @@ export class Conductor {
     if (this.baselinedSession && this.baseline.current().status !== 'candidate') return false;
     const latest = [...this.observations].reverse().find((o) => o.kind !== 'input_activity' && this.contextObservationIds.has(o.id));
     if (!latest || now - this.lastChangeAt < RULES.settleMs) return false;
-    const where = `${latest.app ?? ''}|${latest.surface}`;
-    if (where === this.recognizedFor || now - this.lastRecognitionAt < 4000) return false;
+    if (placeOf(latest) === this.recognizedFor || now - this.lastRecognitionAt < 4000) return false;
     return this.deps.maps.library(this.mapFrom).length > 0;
   }
 
@@ -1078,7 +1114,7 @@ export class Conductor {
     const observations = this.genericObservations(6, true);
     const latest = [...this.observations].reverse().find((o) => o.kind !== 'input_activity' && this.contextObservationIds.has(o.id));
     if (!latest || library.length === 0 || observations.length === 0) return;
-    this.recognizedFor = `${latest.app ?? ''}|${latest.surface}`;
+    this.recognizedFor = placeOf(latest);
     this.lastRecognitionAt = this.deps.now();
     this.pose('think');
     const out = await this.run<ProcessMatchOutput>('process_match', {
@@ -1094,9 +1130,8 @@ export class Conductor {
     if (this.liveMode === 'teach') {
       this.emit({ type: 'context', text: `[map] The expert's confirmed rules for ${match.title}: ${match.rules.map((g) => `when ${g.condition}, ${g.requiredAction}`).join('; ') || 'none'}. Do not state them unless the app asks.`.slice(0, 2000) });
     }
-    this.pendingSay = this.liveMode === 'learn'
-      ? `I know this one: ${match.title}. I will only ask about what is different.`
-      : `This is ${match.title}. I will step in if one of the expert's rules applies.`;
+    // Recognition is silent: a thought, the rules for the voice agent (Teach) and the known process for the question (Learn).
+    // An announcement ("I know this one", "This is X, I will step in") only talks around the questions and warnings.
     this.quiet(`recognised: ${match.title}`);
   }
 
@@ -1225,7 +1260,7 @@ export class Conductor {
       const map = await this.run<MapSynthesisOutput>('map_synthesis', { observations, transcript: this.transcript(60, 600), correction: null, previousTeachBack: null });
       if (map && !this.offRecord && !this.ownConfirmed()) {
         const built: ConductorMap = { ...map, baselineProvenance: provenance, comments: [] };
-        this.review = { phase: 'idle', map: built, version: this.review.version, gapIndex: 0, awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false, origin: 'session' };
+        this.review = { phase: 'idle', map: built, version: this.review.version, asked: new Set(), awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false, origin: 'session' };
         this.freshMap = true;
         this.deps.maps.recordBuilt(this.sessionId, built, this.deps.now());
       }
@@ -1257,7 +1292,7 @@ export class Conductor {
     const fallback = this.review.map !== null && this.review.origin !== 'session';
     if (this.review.map && !(fallback && observations.length > 0)) { this.publishMap(this.review.map, this.review.phase === 'confirmed', false); this.guide('talk_to_edit', 'web'); return; }
     if (observations.length === 0) { this.openFallbackMap(); return; }
-    this.review = { phase: 'building', map: null, version: this.review.version, gapIndex: 0, awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false, origin: 'session' };
+    this.review = { phase: 'building', map: null, version: this.review.version, asked: new Set(), awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false, origin: 'session' };
     this.pose('think');
     this.guide('building', 'web');
     this.thought('Putting your map together…');
@@ -1284,7 +1319,7 @@ export class Conductor {
     const origin: MapOrigin = stored === null ? 'demo' : stored.sessionId === this.sessionId ? 'session' : 'earlier';
     const source = stored === null ? demoMap() : structuredClone(stored.map);
     this.freshMap = false;
-    this.review = { phase: 'gaps', map: null, version: this.review.version, gapIndex: 0, awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false, origin };
+    this.review = { phase: 'gaps', map: null, version: this.review.version, asked: new Set(), awaiting: null, answeredAt: 0, unclearAsked: false, editFailed: false, origin };
     this.publishMap({ ...source, processes: source.processes ?? [], comments: commentsOf(source), baselineProvenance: this.provenanceSnapshot() }, false);
     this.pose('listen');
     if (origin === 'demo') this.emit({ type: 'context', text: '[map] The map on the board is a synthetic demo map, not from this session: payment terms on an invoice email and a prepaid cost spread by quarter. Say so if asked; any change the person asks for is applied by the app.' });
@@ -1308,17 +1343,19 @@ export class Conductor {
     this.emit({ type: 'map', version: this.review.version, map, confirmed, origin: this.review.origin });
   }
 
-  private askGap(): void {
+  /** Asks the open point at `index` of the map's gaps (the next one not asked yet, or the one the person picked on the board). */
+  private askGap(index: number): void {
     const map = this.review.map;
-    const gap = map?.gaps[this.review.gapIndex];
+    const gap = map?.gaps[index];
     if (!map || !gap) return;
+    this.review.asked.add(gap.question);
     this.review.awaiting = 'gap';
     const regions = this.regionsFor(gap.evidenceIds, gap.regionIds);
     if (regions[0]) {
       this.emit({ type: 'point', target: { kind: 'region', ...regions[0] } });
       this.attention({ kind: 'region', ...regions[0] });
     } else this.emit({ type: 'point', target: { kind: 'ui', name: 'board_gap' } });
-    this.emit({ type: 'ask', questionId: `gap-${this.review.gapIndex + 1}`, text: gap.question, topic: 'gap', regions, evidenceIds: this.evidenceFor(gap.evidenceIds) });
+    this.emit({ type: 'ask', questionId: `gap-${index + 1}`, text: gap.question, topic: 'gap', regions, evidenceIds: this.evidenceFor(gap.evidenceIds) });
   }
 
   /** After the gaps: rebuild the map when an answer could not be applied by voice, then read the teach-back. */
@@ -1444,13 +1481,21 @@ export class Conductor {
     const current = revision === this.contextRevision;
     if (!(current && out?.status === 'warn' && out.guardrailId && out.message)) this.pose('listen');
     if (!current || !out) return;
+    // The rule Clipa warned about is kept now: she says so once, in a generic line, and is glad about it.
+    if (out.status === 'clear' && this.openWarn !== null && (out.guardrailId === null || out.guardrailId === this.openWarn)) {
+      this.openWarn = null;
+      this.pose('celebrate');
+      this.emit({ type: 'say', text: RESOLVED });
+      return;
+    }
     if (out.status === 'unknown' && out.message) { this.quiet(out.message); return; }
     if (out.status !== 'warn' || !out.guardrailId || !out.message) return;
+    // One warning per rule: while it is open (said, and not fixed yet) the same rule is not warned about again.
+    if (this.openWarn === out.guardrailId) { this.pose('listen'); return; }
+    this.openWarn = out.guardrailId;
+    this.warnHeard = false;
     const latest = observations[observations.length - 1];
     const latestId = typeof latest?.id === 'string' ? latest.id : '';
-    const key = `${out.guardrailId}:${latestId}`;
-    if (this.warned.has(key)) { this.pose('listen'); return; }
-    this.warned.add(key);
     const rule = rules.find((g) => g.id === out.guardrailId);
     const regions = this.regionsFor([latestId], out.regionIds, true);
     this.pose('warn');
