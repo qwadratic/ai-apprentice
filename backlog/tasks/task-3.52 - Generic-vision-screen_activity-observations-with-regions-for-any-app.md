@@ -1,11 +1,11 @@
 ---
 id: TASK-3.52
 title: 'Generic vision: screen_activity observations with regions for any app'
-status: In Progress
+status: Done
 assignee:
   - '@qwadratic'
 created_date: '2026-10-04 06:01'
-updated_date: '2026-10-04 08:17'
+updated_date: '2026-10-05 10:06'
 labels:
   - stream-b
 dependencies: []
@@ -29,9 +29,9 @@ Ivan's demo runs on any app (an email, a table), on the web and on macOS. The vi
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria checked, final summary says what changed and how it was verified
-- [ ] #2 Fast checks of the touched package pass; CI is green on the branch head
-- [ ] #3 No secrets, keys or real personal data in the diff
+- [x] #1 Acceptance criteria checked, final summary says what changed and how it was verified
+- [x] #2 Fast checks of the touched package pass; CI is green on the branch head
+- [x] #3 No secrets, keys or real personal data in the diff
 <!-- DOD:END -->
 
 ## Implementation Notes
@@ -47,3 +47,9 @@ Kirill explicitly assigned TASK-3.52 to a new Codex orchestrator in the status c
 
 4 Oct 08:16 UTC: the VM runner runs on the Codex CLI engine (PR #63, RUNNER_ENGINE=codex, default model; luna and sol-5.6 reject images). Live smoke at 08:12: vision ~11 s per frame, the question ~13 s after the pause. PR #62 sends each new screen to the voice agent as a [screen] contextual update (commit labelled TASK-3.57 by mistake; that task is Off the record). Faster vision (smaller frames + a storyboard of recent frames) is being built on task-3.52-vision-storyboard.
 <!-- SECTION:NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Shipped through #57 and #60 (commit 3aed1e2, merge 1ed9285): screen_activity in the contracts with shared limits, a separate generic vision schema and prompt (the workspace prompt stays pinned by sha256), a guard against screen_activity on known surfaces, the VISION_GENERIC=off switch, later storyboard and pointer rules. Verified by the vision-generic and vision-storyboard tests and by the release checks (workspace-checks Node 22 and 24, stream-b-checks) being green on release. #56 closed as superseded on 2026-10-05 after a review showed every conflict with release resolves to the release version.
+<!-- SECTION:FINAL_SUMMARY:END -->
