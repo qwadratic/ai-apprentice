@@ -95,7 +95,9 @@ test('signedUrlRequiresSession defaults to true; only env SIGNED_URL_REQUIRE_SES
 
 test('signed-url: role picks the interviewer or the tutor agent; unknown roles and a missing tutor are refused', async (t) => {
   const stub = elevenStub();
-  const { base } = await start(t, { fetch: stub.fetch, elevenLabsAgentIdTutor: 'agent_tutor_test' });
+  // Role selection, not auth: this test covers which agent each role resolves to, so it opts out of the session
+  // requirement and never sends a token.
+  const { base } = await start(t, { fetch: stub.fetch, elevenLabsAgentIdTutor: 'agent_tutor_test', signedUrlRequiresSession: false });
   const get = (query: string) => fetch(`${base}/api/agent/elevenlabs/signed-url${query}`, { headers: { Origin: ORIGIN } });
   assert.equal((await get('')).status, 200);
   assert.equal((await get('?role=interviewer')).status, 200);
