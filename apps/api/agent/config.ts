@@ -28,6 +28,11 @@ export interface AgentOptions {
   publicWebUrl?: string;
   /** Work Maps on disk (confirmed maps and the last built one), so a restart keeps them. Default: env AGENT_MAPS_FILE, else /var/lib/apprentice/maps.json; '' keeps them in memory only. */
   mapsFile?: string;
+  /**
+   * Seed the invented "earlier sessions" of the email digital twin (agent/conductor/seed/twin-sessions.json) as confirmed maps, in
+   * memory only, when no confirmed map exists. Default: env AGENT_SEED_MAPS=1; off otherwise (production never sets it).
+   */
+  seedMaps?: boolean;
   /** Voice-over cache (GET /api/agent/voiceover/:id). Default: {env MEDIA_DIR, else /var/lib/apprentice}/voiceover. */
   voiceoverDir?: string;
   /** The whitelist of voice-over lines. Default: agent/voiceover/lines.json next to this file. */
@@ -97,6 +102,8 @@ export interface AgentConfig {
   publicWebUrl: string;
   /** The Work Map file; '' when maps stay in memory only. */
   mapsFile: string;
+  /** Seed the invented earlier sessions of the email twin as confirmed maps when none exist (AGENT_SEED_MAPS=1). */
+  seedMaps: boolean;
   voiceoverDir: string;
   voiceoverLinesFile: string;
   /** Overrides only; roles without one use the voice-over defaults. */
@@ -183,6 +190,7 @@ export function resolveConfig(options: AgentOptions = {}, env: NodeJS.ProcessEnv
     fastModel: options.fastModel ?? env.AGENT_FAST_MODEL ?? 'claude-haiku-4-5-20251001',
     publicWebUrl: options.publicWebUrl ?? (env.PUBLIC_WEB_URL || 'https://qwadratic.github.io/clipa/'),
     mapsFile: (options.mapsFile ?? env.AGENT_MAPS_FILE ?? '/var/lib/apprentice/maps.json').trim(),
+    seedMaps: options.seedMaps ?? env.AGENT_SEED_MAPS === '1',
     voiceoverDir: options.voiceoverDir ?? join(env.MEDIA_DIR || '/var/lib/apprentice', 'voiceover'),
     voiceoverLinesFile: options.voiceoverLinesFile ?? fileURLToPath(new URL('./voiceover/lines.json', import.meta.url)),
     voiceoverVoices: options.voiceoverVoices ?? parseVoices(env.ELEVENLABS_VOICEOVER_VOICES, log),

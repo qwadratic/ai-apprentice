@@ -80,7 +80,13 @@ export type Cue =
    */
   | { type: 'stage'; mode: Mode; start?: boolean }
   /** Additive (v1.4), web only: the face ends the running session the way End does (the person said stop, or Pass it on is done). */
-  | { type: 'end'; reason: 'off' | 'done' };
+  | { type: 'end'; reason: 'off' | 'done' }
+  /**
+   * Additive (v1.5), web only: Clipa recognised a process she learned in an earlier session on the shared screen. Visual only, never
+   * spoken: the web lists it in its live feed. `text` is the same line for any face; `synthetic`: that earlier session is a seeded,
+   * invented one (AGENT_SEED_MAPS), so a face can say so.
+   */
+  | { type: 'recognised'; title: string; text: string; steps: number; rules: number; synthetic: boolean };
 
 export interface CueEnvelope { seq: number; cueId: string; atMs: number; mode: Mode | null; persona: Persona; for: Audience; cue: Cue; expiresAtMs: number | null }
 

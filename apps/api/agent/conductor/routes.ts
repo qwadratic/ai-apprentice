@@ -11,6 +11,7 @@ import type { AgentRuntime } from '../routes.ts';
 import { SESSION_ID } from '../sessions.ts';
 import { Conductor, MapRegistry } from './engine.ts';
 import { createMapStore } from './map-store.ts';
+import { seedEarlierSessions } from './seed.ts';
 import { parseBatch, parseObservation } from './protocol.ts';
 import type { ClientKind } from './protocol.ts';
 
@@ -26,6 +27,8 @@ const JOIN_CODE_TTL_MS = 5 * 60_000;
 const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
 export interface ConductorHub {
+  /** The Work Maps of this server: the confirmed ones and, with AGENT_SEED_MAPS=1, the invented earlier sessions (for tests and diagnostics). */
+  readonly maps: MapRegistry;
   /** The conductor that serves this session id: its own, or the one it is linked to. */
   forSession(sessionId: string): Conductor;
   /** For the screen module: feeds an observation of this session to its conductor, if one exists. */
@@ -41,6 +44,8 @@ export function createConductorHub(rt: AgentRuntime): ConductorHub {
   const { config } = rt;
   // Work Maps survive a deploy or a restart: they are read back from AGENT_MAPS_FILE (or kept in memory when it is unusable).
   const maps = new MapRegistry(createMapStore({ file: config.mapsFile, log: config.log }));
+  // Off in production. With AGENT_SEED_MAPS=1 (the dev rig) the email twin's invented earlier sessions are loaded when no real map exists.
+  if (config.seedMaps) seedEarlierSessions(maps, config.log);
   const conductors = new Map<string, Conductor>();
   const links = new Map<string, string>();
   const codes = new Map<string, { target: string; expiresAt: number }>();
@@ -52,6 +57,7 @@ export function createConductorHub(rt: AgentRuntime): ConductorHub {
     return run;
   };
   const hub: ConductorHub = {
+    maps,
     forSession(sessionId) {
       const id = links.get(sessionId) ?? sessionId;
       let c = conductors.get(id);
