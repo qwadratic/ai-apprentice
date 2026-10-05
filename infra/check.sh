@@ -119,7 +119,8 @@ c="$(head -c 5000 /dev/zero | tr '\0' 'a' | curl -s -o /dev/null -w '%{http_code
 [ "$c" = 413 ] && ok "ops deploy body over 4 KiB -> 413" || ko "ops deploy body over 4 KiB -> $c"
 # Signed request for the deployed sha: needs the secret (DEPLOY_WEBHOOK_SECRET, or
 # sudo on the VM) and node. Expect 202 and then "already deployed", or 422 when
-# the deployed sha is not on origin/main (a branch deployed by hand).
+# the deployed sha is not on the VM's configured deploy branch (DEPLOY_BRANCH, default
+# origin/main; a branch deployed by hand).
 WS="${DEPLOY_WEBHOOK_SECRET:-}"
 if [ -z "$WS" ] && [[ "$BASE" == http://127.0.0.1* ]]; then WS="$(sudo grep ^DEPLOY_WEBHOOK_SECRET= /etc/apprentice/env 2>/dev/null | cut -d= -f2)"; fi
 DSHA="$(curl -s "$BASE/ops/deploy/status" | jq -r '.deployed_sha // empty' 2>/dev/null)"
@@ -136,7 +137,7 @@ if [ -n "$WS" ] && [ -n "$DSHA" ] && command -v node >/dev/null; then
     done
     [ "$state" = ok ] && ok "signed redeploy of ${DSHA:0:12} -> 202, then ok ($(curl -s "$BASE/ops/deploy/status" | jq -r .last.message))" || ko "signed redeploy ended as '$state'"
   elif [ "$c" = 422 ]; then
-    ok "signed request accepted by HMAC; ${DSHA:0:12} is not on origin/main -> 422"
+    ok "signed request accepted by HMAC; ${DSHA:0:12} is not on the VM's deploy branch -> 422"
   else ko "signed request -> $r"; fi
   c="$(curl -s -o /dev/null -w '%{http_code}' -X POST "$BASE/ops/deploy" "${OCTET[@]}" -H "X-Deploy-Signature: sha256=$sig" --data-raw "$body")"
   [ "$c" = 409 ] && ok "replayed signature -> 409" || ko "replayed signature -> $c"

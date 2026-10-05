@@ -1,8 +1,19 @@
 name: stream-b-checks
 
-# Off for the submission day (4 Oct): runs only by hand (workflow_dispatch) or when a workflow calls it.
-# Before: on pushes to branches and on PRs touching stream B paths, and from release.yml on main.
+# Callable (workflow_call, used by release.yml on pushes to release), manual (workflow_dispatch),
+# and on pull_request into release for the stream B paths below. No push trigger here: a push to
+# release runs release.yml, which calls this workflow already, so a separate push trigger would
+# just duplicate that run.
 on:
+  pull_request:
+    branches: [release]
+    paths:
+      - "packages/agent/**"
+      - "fixtures/agent/**"
+      - "apps/api/agent/**"
+      - "apps/web/features/agent/**"
+      - "apps/web/features/agent/launchpad/**"
+      - ".github/workflows/stream-b-checks.yml"
   workflow_dispatch:
     inputs:
       ref:

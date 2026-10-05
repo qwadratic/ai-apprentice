@@ -14,7 +14,8 @@
 #   DEPLOY_SOURCE=pages (default)  the sha in $DEPLOY_JSON_URL, published by release.yml.
 #   DEPLOY_SOURCE=ref              origin/$DEPLOY_REF (default main), for manual use.
 # A requested or published sha must be 40 hex characters and an ancestor of
-# origin/main; otherwise nothing happens (no fallback to main).
+# origin/$DEPLOY_BRANCH (default main; see infra/README.md "Deploy from the release branch");
+# otherwise nothing happens (no fallback to another branch).
 #
 # Builds and restarts only what changed between the last deployed commit
 # (/var/lib/apprentice/deployed-sha) and the new one, health-checks (/health
@@ -33,6 +34,9 @@ set -euo pipefail
 DEPLOY_SOURCE="${DEPLOY_SOURCE:-pages}"
 DEPLOY_REF="${DEPLOY_REF:-main}"
 DEPLOY_JSON_URL="${DEPLOY_JSON_URL:-https://qwadratic.github.io/clipa/deploy.json}"
+# Branch a requested or published sha must be an ancestor of (not used for DEPLOY_SOURCE=ref,
+# which deploys origin/$DEPLOY_REF directly). Default main until the VM is switched.
+DEPLOY_BRANCH="${DEPLOY_BRANCH:-main}"
 # Keep only what deploy needs; never hand secrets to install or build scripts.
 for v in ELEVENLABS_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY RUNNER_TOKEN API_TOKEN DEPLOY_WEBHOOK_SECRET; do unset "$v"; done
 export COREPACK_ENABLE_DOWNLOAD_PROMPT=0 CI=1
@@ -230,10 +234,10 @@ select_sha() {
     [ "$DEPLOY_SOURCE" = request ] && STARTED_AT="$(now)" && write_status failed "request has no valid sha" "$(now)"
     return 1
   fi
-  git fetch -q origin main || log "git fetch failed; checking against the known origin/main"
-  if ! git merge-base --is-ancestor "$new" origin/main 2>/dev/null; then
-    log "sha ${new:0:12} is not on origin/main; nothing to do"
-    [ "$DEPLOY_SOURCE" = request ] && STARTED_AT="$(now)" && write_status failed "sha is not on origin/main" "$(now)"
+  git fetch -q origin "$DEPLOY_BRANCH" || log "git fetch failed; checking against the known origin/$DEPLOY_BRANCH"
+  if ! git merge-base --is-ancestor "$new" "origin/$DEPLOY_BRANCH" 2>/dev/null; then
+    log "sha ${new:0:12} is not on origin/$DEPLOY_BRANCH; nothing to do"
+    [ "$DEPLOY_SOURCE" = request ] && STARTED_AT="$(now)" && write_status failed "sha is not on origin/$DEPLOY_BRANCH" "$(now)"
     return 1
   fi
   return 0

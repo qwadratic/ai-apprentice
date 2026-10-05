@@ -57,8 +57,30 @@ Port 8000 is served by `apps/api` (Express 5, started by `start-api.sh` as `cd a
 2. Fill the secrets on the VM: `sudoedit /etc/apprentice/env` — `ELEVENLABS_API_KEY`, `ELEVENLABS_AGENT_ID_INTERVIEWER`, exactly **one** of `CLAUDE_CODE_OAUTH_TOKEN` / `ANTHROPIC_API_KEY`, and `ALLOWED_ORIGINS` (it must contain the exact origin of the web app, for example `https://qwadratic.github.io`; apps/api answers 403 to any other browser origin). Then `sudo systemctl restart apprentice-runner apprentice-api`.
 3. **Before any judge-facing URL is shared:** switch to API-key auth (Agent SDK terms): set `ANTHROPIC_API_KEY`, delete the `CLAUDE_CODE_OAUTH_TOKEN` value, restart, and confirm `mode` is `apikey`:
    `curl -s localhost:8787/health | jq .mode`.
-4. Deploys are pushed by GitHub Actions (`release.yml` signs a request to `POST /ops/deploy`, see below); the secret `DEPLOY_WEBHOOK_SECRET` is in `/etc/apprentice/env` and in the repository's Actions secrets. To rotate it: generate a new one into the env file (`sudoedit`), `sudo systemctl restart apprentice-ops`, and set the same value with `gh secret set DEPLOY_WEBHOOK_SECRET -R qwadratic/ai-apprentice` (it reads stdin). The minute timer (`DEPLOY_SOURCE=pages`) is an optional fallback: `sudo systemctl enable --now apprentice-deploy.timer`. To freeze before the pitch, set `DEPLOY_FREEZE=1` in the repository so `release.yml` neither publishes nor calls the webhook.
-5. After a deploy logs `not applied, run sudo infra/install.sh`: on the VM, `cd ~/work/ai-apprentice && git fetch && git checkout --detach <sha from the log> && sudo infra/install.sh`.
+4. Deploys are pushed by GitHub Actions (`release.yml` signs a request to `POST /ops/deploy`, see below); the secret `DEPLOY_WEBHOOK_SECRET` is in `/etc/apprentice/env` and in the repository's Actions secrets. To rotate it: generate a new one into the env file (`sudoedit`), `sudo systemctl restart apprentice-ops`, and set the same value with `gh secret set DEPLOY_WEBHOOK_SECRET -R qwadratic/clipa` (it reads stdin). The minute timer (`DEPLOY_SOURCE=pages`) is an optional fallback: `sudo systemctl enable --now apprentice-deploy.timer`. To freeze before the pitch, set `DEPLOY_FREEZE=1` in the repository so `release.yml` neither publishes nor calls the webhook.
+5. After a deploy logs `not applied, run sudo infra/install.sh`: on the VM, `cd ~/work/clipa && git fetch && git checkout --detach <sha from the log> && sudo infra/install.sh`.
+
+## Deploy from the release branch
+
+`release.yml` pushes from `release` (issue #91), but the VM still only accepts shas that are
+ancestors of `origin/main`: the webhook (`infra/ops`) and `infra/deploy/deploy.sh` both gate on
+`DEPLOY_BRANCH`, which defaults to `main` so nothing changes until this switch is made. To move
+the VM over to `release`:
+
+```
+sudoedit /etc/apprentice/env                    # add: DEPLOY_BRANCH=release
+sudo systemctl restart apprentice-ops           # the long-running webhook must reload the env file;
+                                                 # deploy.sh (oneshot) reads it fresh on every run, no restart needed
+curl -s localhost:8000/ops/vm-health | jq .      # expect ok:true, same git_sha/deployed_sha as before
+curl -s localhost:8000/ops/deploy/status | jq .  # expect the usual {deployed_sha, last}; confirms apprentice-ops is back up
+```
+
+Both curls only prove `apprentice-ops` restarted cleanly; the new branch check itself shows up on
+the next `POST /ops/deploy`: a sha that is on `release` but not on `main` now deploys (202, then
+`ok`) instead of failing, and one that is on neither answers 422 `not_on_deploy_branch` (the
+other `not_on_main` mentions in this file, and `infra/check.sh`'s signed-webhook test, describe
+the `main`-default case). Revert by setting `DEPLOY_BRANCH=main` (or removing the line) and
+restarting `apprentice-ops` again.
 
 ## Operations
 
@@ -69,12 +91,12 @@ sudo journalctl -u apprentice-deploy -n 50
 # the same script by hand; --force rebuilds and restarts everything
 sudo -u apprentice /opt/apprentice/bin/apprentice-deploy [--force]
 # install or update the root-owned parts from a clone (idempotent)
-sudo ~/work/ai-apprentice/infra/install.sh
+sudo ~/work/clipa/infra/install.sh
 # logs (metadata only: request id, route, status, duration, sizes, model)
 sudo journalctl -u apprentice-api -u apprentice-runner -f
 systemctl list-timers apprentice-deploy.timer
 # acceptance checks on the VM (through port 8000)
-~/work/ai-apprentice/infra/check.sh
+~/work/clipa/infra/check.sh
 ```
 
 ### Running the checks from a Mac (through the public proxy)
@@ -82,16 +104,16 @@ systemctl list-timers apprentice-deploy.timer
 ```bash
 brew install jq                      # once; curl ships with macOS
 T=$(ssh apprentice.exe.xyz "sudo grep ^API_TOKEN= /etc/apprentice/env | cut -d= -f2") \
-  BASE=https://apprentice.exe.xyz bash <(ssh apprentice.exe.xyz cat work/ai-apprentice/infra/check.sh)
+  BASE=https://apprentice.exe.xyz bash <(ssh apprentice.exe.xyz cat work/clipa/infra/check.sh)
 ```
 
 The token goes only into the environment of that one command and into a 0600 header file for curl, so it is never printed and never visible in `ps`; the check session it creates is deleted at the end (its token expires on its own after 12 h). A few seconds, no model calls. It checks: `/health` (ok, agent and ops modules); CORS preflight for an allowed and a foreign origin; `/ops/deploy/status` and `/ops/vm-health` through port 8000; `POST /api/agent/sessions` from the allowed origin (201 with a token, 403 from a foreign one); events with that token (200), without it (401), with another session's token (403), over the size limits (413); the signed-URL route; the retired lab routes (404); the admin routes with `API_TOKEN`; and the deploy webhook (JSON content type 415, unsigned or wrongly signed 401, over 4 KiB 413 and, when `DEPLOY_WEBHOOK_SECRET` is set, a signed redeploy of the deployed sha and its replay 409).
 
 ### How a commit reaches the VM
 
-1. `release.yml` checks `main`; if green and not frozen it publishes the site (and `deploy.json`) to Pages and then calls the deploy webhook with the same sha, polling `GET /ops/deploy/status` until `ok`, `failed` or `rolled_back`, so the result shows in the Actions UI.
+1. `release.yml` checks `release`; if green and not frozen it publishes the site (and `deploy.json`) to Pages and then calls the deploy webhook with the same sha, polling `GET /ops/deploy/status` until `ok`, `failed` or `rolled_back`, so the result shows in the Actions UI.
 2. **Webhook** (`infra/ops`, `apprentice-ops.service`, 127.0.0.1:8788; the ops module of apps/api forwards `/ops/*` to it with the raw body):
-   - `POST /ops/deploy` with body `{"sha": "<40 hex>", "ts": <unix seconds>}` and header `X-Deploy-Signature: sha256=<hex HMAC-SHA256(DEPLOY_WEBHOOK_SECRET, raw body)>`. Checks, in order: secret configured (503), body ≤ 1 KiB (413), signature, compared timing-safe (401 `bad_signature`; only failed signatures count against the rate limit of 6/min per IP and 30/h overall, 429, so unsigned noise cannot block real deploys), body shape (400), `ts` not older than 300 s nor more than 60 s ahead (401 `timestamp_out_of_window`), the same signature not seen before (409 `replayed`), sha an ancestor of `origin/main` after a fetch (422 `not_on_main`). Then it writes `/var/lib/apprentice/deploy-request.json` and `deploy-status.json` (`queued`) and answers **202** `{accepted: true, sha}`. Bodies and signatures are never logged.
+   - `POST /ops/deploy` with body `{"sha": "<40 hex>", "ts": <unix seconds>}` and header `X-Deploy-Signature: sha256=<hex HMAC-SHA256(DEPLOY_WEBHOOK_SECRET, raw body)>`. Checks, in order: secret configured (503), body ≤ 1 KiB (413), signature, compared timing-safe (401 `bad_signature`; only failed signatures count against the rate limit of 6/min per IP and 30/h overall, 429, so unsigned noise cannot block real deploys), body shape (400), `ts` not older than 300 s nor more than 60 s ahead (401 `timestamp_out_of_window`), the same signature not seen before (409 `replayed`), sha an ancestor of `origin/$DEPLOY_BRANCH` after a fetch (422 `not_on_main` while `DEPLOY_BRANCH` is `main`, else `not_on_deploy_branch`; see "Deploy from the release branch"). Then it writes `/var/lib/apprentice/deploy-request.json` and `deploy-status.json` (`queued`) and answers **202** `{accepted: true, sha}`. Bodies and signatures are never logged.
    - `GET /ops/deploy/status` (public, no secrets) → `{deployed_sha, last: {sha, state: queued|running|ok|failed|rolled_back, source, started_at, finished_at, message}}`.
    - Signing in a workflow (the body string must be sent byte for byte as signed):
      ```bash
@@ -99,7 +121,7 @@ The token goes only into the environment of that one command and into a 0600 hea
      sig=$(BODY="$body" node -e 'process.stdout.write(require("crypto").createHmac("sha256", process.env.DEPLOY_WEBHOOK_SECRET).update(process.env.BODY).digest("hex"))')
      curl -fsS -X POST https://apprentice.exe.xyz/ops/deploy -H 'Content-Type: application/octet-stream' -H "X-Deploy-Signature: sha256=$sig" --data-raw "$body"
      ```
-3. `apprentice-deploy-request.path` sees the request file change and starts `apprentice-deploy-request.service` (`apprentice-deploy --request`, as `apprentice`, no sudo needed by the webhook). It waits for a running deploy (lock), checks the sha again (40 hex, on `origin/main`), and after finishing looks once more in case a newer request arrived meanwhile.
+3. `apprentice-deploy-request.path` sees the request file change and starts `apprentice-deploy-request.service` (`apprentice-deploy --request`, as `apprentice`, no sudo needed by the webhook). It waits for a running deploy (lock), checks the sha again (40 hex, on `origin/$DEPLOY_BRANCH`), and after finishing looks once more in case a newer request arrived meanwhile.
 4. The deploy:
    - logs changed install-managed paths (`infra/systemd`, `infra/install.sh`, `infra/deploy`) with `run sudo infra/install.sh` and never applies them;
    - checks the sha out detached and runs `git clean -fdx`, keeping every `node_modules`, the runner's `dist` and `apps/api/dist`; those are rebuilt (dist removed first) when their sources change;
@@ -118,7 +140,7 @@ Other sources, for manual use: `sudo systemctl start apprentice-deploy.service` 
 **Security notes on deploy:**
 - `pnpm install` / `npm ci` run the dependencies' install lifecycle scripts as `apprentice`, the same user the services run as. deploy.sh unsets the secrets in its own environment, but a malicious dependency could still read the service processes' environment or `/var/lib/apprentice` data. Review new dependencies before they land on `main`.
 - Every release that touches the API's paths restarts `apprentice-api`, and live sessions drop; backlog- or docs-only releases restart nothing. **Freeze releases (`DEPLOY_FREEZE=1`) during the pitch.**
-- The webhook can only deploy commits already on `main`, and only with a valid signature; a leaked secret lets someone redeploy an older `main` commit, nothing else. Rotate it as in Manual steps 4.
+- The webhook can only deploy commits already on its configured deploy branch (`DEPLOY_BRANCH`, default `main`), and only with a valid signature; a leaked secret lets someone redeploy an older commit on that branch, nothing else. Rotate it as in Manual steps 4.
 
 ## Environment (`/etc/apprentice/env`)
 
@@ -144,6 +166,7 @@ Other sources, for manual use: `sudo systemctl start apprentice-deploy.service` 
 | `DEPLOY_SOURCE` | deploy | `pages` (default): the sha in `deploy.json`; `ref`: `origin/$DEPLOY_REF` |
 | `DEPLOY_REF` | deploy | default `main`; used with `DEPLOY_SOURCE=ref` |
 | `DEPLOY_JSON_URL` | deploy | default `https://qwadratic.github.io/clipa/deploy.json` |
+| `DEPLOY_BRANCH` | ops, deploy | branch a deployable sha must be an ancestor of; default `main`. Set to `release` to match `release.yml`'s push trigger; see "Deploy from the release branch" |
 | `SESSIONS_DIR` | agent module | default `/var/lib/apprentice/sessions` (not in the env file; set in the unit if needed) |
 | `AGENT_MAPS_FILE` | agent module | Work Maps kept across restarts (the confirmed maps and the last built one, JSON, mode 0600, at most 4 MB), default `/var/lib/apprentice/maps.json`; empty keeps them in memory only, and so does a path that cannot be written (logged once) |
 | `SIGNED_URL_REQUIRE_SESSION`, `AGENT_*`, `SIGNED_URL_*`, `EVENTS_BYTES_PER_HOUR`, `SESSIONS_WARN_BYTES`, `SESSIONS_ROTATE_BYTES` | agent module | session-token requirement for the signed URL, rate limits and disk thresholds, all optional; see `apps/api/agent/config.ts` |
